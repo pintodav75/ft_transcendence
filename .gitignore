@@ -1,0 +1,39 @@
+# Dépendances
+node_modules/
+
+# Données persistantes Docker
+data/
+
+# Build outputs
+dist/
+build/
+
+# Variables d'environnement
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Éditeur / OS
+.vscode/*
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Contexte perso Claude
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# TypeScript
+*.tsbuildinfo
+
+# certs
+certs/
+
+# Tests
+coverage/

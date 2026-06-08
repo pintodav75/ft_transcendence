@@ -1,0 +1,199 @@
+# ft_transcendence
+
+Projet final du Common Core 42, en équipe de 4. Sujet libre — on construit une web app qui valide ≥ 14 points via les modules.
+
+## 🎯 Concept
+
+**Plateforme compétitive multi-jeux type GameBattle**
+- Profils utilisateurs, équipes
+- Ladders par jeu avec ELO
+- Matchmaking automatique (file d'attente, matching par skill)
+- Soumission de résultats, système de disputes
+- Chat, amis, notifications temps réel
+- Pattern config-driven pour supporter plusieurs jeux
+
+## 🧩 Modules choisis (14 points)
+
+| Module | Type | Points |
+|---|---|---|
+| Frameworks front + back | Major | 2 |
+| Standard user management | Major | 2 |
+| Real-time WebSocket | Major | 2 |
+| User interaction (chat + profil + amis) | Major | 2 |
+| ORM (Drizzle) | Minor | 1 |
+| OAuth 2.0 | Minor | 1 |
+| 2FA TOTP | Minor | 1 |
+| Game stats & match history | Minor | 1 |
+| File upload | Minor | 1 |
+| Notification system | Minor | 1 |
+| **TOTAL** | | **14** |
+
+## 🛠️ Stack technique
+
+**Frontend** : Vite 8 + React 19 + TypeScript + TanStack Router + TanStack Query + Zustand + Tailwind v4 + shadcn/ui + React Hook Form + Zod + socket.io-client
+
+**Backend** : Fastify v5 sur Node 24 LTS (TypeScript)
+- `@fastify/jwt` + `@fastify/oauth2` + `@fastify/cookie` + `@fastify/multipart`
+- `speakeasy` (2FA TOTP, à venir)
+- Drizzle ORM + postgres-js
+- Zod (validation)
+- bcryptjs (hash password)
+- minio (client S3-compatible)
+
+**DB / Cache / Storage**
+- PostgreSQL 17
+- Redis (sessions, cache, pub/sub WebSocket)
+- MinIO (S3-compatible, fichiers)
+
+**Infra**
+- Docker Compose (un seul `up -d` lance tout)
+- **Pas de Nginx** — Fastify sert tout (API + frontend statique en prod + HTTPS)
+- HTTPS via certificats auto-signés en dev
+
+## 📦 Prérequis
+
+- Docker + Docker Compose v2
+- Node 24 LTS (recommandé via `nvm`) — pour installer les dépendances locales en dev
+- OpenSSL (pour générer le certificat auto-signé)
+
+## 🚀 Setup
+
+### 1. Cloner le repo
+
+```bash
+git clone <url-du-repo> transcendence
+cd transcendence
+```
+
+### 2. Copier le fichier d'environnement et remplir les valeurs
+
+```bash
+cp .env.example .env
+```
+
+Édite `.env` pour remplacer tous les `changeme` par des vraies valeurs. **Notamment** :
+- `POSTGRES_*` : credentials Postgres au choix
+- `REDIS_PASSWORD` : password Redis au choix
+- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` : credentials MinIO root (min. 8 caractères)
+- `JWT_SECRET` : un secret aléatoire long — génère-en un avec :
+  ```bash
+  openssl rand -hex 64
+  ```
+
+### 3. Générer le certificat HTTPS auto-signé pour le backend
+
+```bash
+mkdir -p backend/certs
+openssl req -x509 -newkey rsa:4096 -keyout backend/certs/key.pem \
+  -out backend/certs/cert.pem -days 365 -nodes -subj "/CN=localhost"
+```
+
+### 4. Lancer toute l'infra
+
+```bash
+docker compose up -d
+```
+
+Premier démarrage : Docker va build les images backend/frontend (~1-2 min). Les suivants seront instantanés.
+
+### 5. Vérifier que ça tourne
+
+```bash
+docker compose ps                  # tous les services en "Up"
+curl -k https://localhost:3000/ping  # doit renvoyer "pong-from-docker"
+```
+
+## 🌐 UIs locales
+
+| Service | URL | Description |
+|---|---|---|
+| Frontend | http://localhost:5173 | Vite dev server |
+| Backend API | https://localhost:3000 | Fastify (HTTPS auto-signé) |
+| Adminer | http://localhost:8080 | UI Postgres |
+| redis-commander | http://localhost:8081 | UI Redis |
+| MinIO console | http://localhost:9001 | UI MinIO (login = `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`) |
+| MinIO API | http://localhost:9000 | Endpoint S3 pour les avatars |
+
+## 🔗 Commandes utiles
+
+```bash
+# Démarrer
+docker compose up -d
+
+# Vérifier l'état
+docker compose ps
+docker compose logs -f <service>
+
+# Entrer dans un conteneur
+docker compose exec backend sh
+
+# Arrêter (sans perdre les données)
+docker compose down
+
+# Arrêter + supprimer les volumes (DANGER : perd les données)
+docker compose down -v
+
+# Rebuild après modif du Dockerfile (le `-V` rafraîchit les volumes anonymes)
+docker compose up -d --build -V <service>
+
+# Migrations Drizzle (à lancer depuis le backend conteneurisé)
+docker compose exec backend npx drizzle-kit generate
+docker compose exec backend npx drizzle-kit migrate
+```
+
+## 📁 Structure du projet
+
+```
+transcendence/
+├── docker-compose.yml
+├── .env                    # secrets, NON versionné
+├── .env.example            # template versionné
+├── .gitignore
+├── README.md
+│
+├── backend/                # Fastify + TS + Drizzle
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── drizzle/            # migrations SQL générées
+│   ├── certs/              # cert auto-signé, NON versionné
+│   └── src/
+│       ├── server.ts       # entry point Fastify HTTPS
+│       ├── routes/         # auth.ts, users.ts
+│       ├── auth/           # password, tokens
+│       ├── db/             # schema Drizzle + client
+│       ├── storage/        # client MinIO + helpers
+│       └── types/          # augmentations TS (env.d.ts, fastify-jwt.d.ts)
+│
+├── frontend/               # Vite + React 19 + TS + Tailwind v4
+│   ├── Dockerfile
+│   ├── vite.config.ts
+│   └── src/
+│
+└── data/                   # volumes bind-mount Postgres/MinIO, NON versionné
+```
+
+## ✅ État d'avancement
+
+| Étape | Statut |
+|---|---|
+| 1. Fondations Docker (Postgres, Redis, MinIO, frontend, backend HTTPS) | ✅ |
+| 2. Auth backend (register, login, refresh, me, logout via JWT) | ✅ |
+| 3. Profil utilisateur + upload avatar MinIO | ✅ |
+| 4. OAuth (Google) + 2FA TOTP | 🚧 en cours |
+| 5. Amis + chat de base (intro WebSocket) | ⏳ |
+| 5.5. Conception du schéma de données du domaine jeu | ⏳ |
+| 6. Modèle de jeu et matchs (state machine) | ⏳ |
+| 7. Matchmaking worker | ⏳ |
+| 8. Ladders + stats + match history | ⏳ |
+| 9. Notifications système | ⏳ |
+| 10. Polish 42 (Privacy Policy, ToS, zéro warning console) | ⏳ |
+
+## 🔐 Sécurité
+
+- Mots de passe hashés avec bcryptjs (cost 12)
+- JWT access token (15 min) + refresh token (7 jours) dans cookie `httpOnly` + `Secure` + `SameSite=Strict`
+- Backend en HTTPS (exigence sujet)
+- `.env` jamais commit (déjà dans `.gitignore`)
+- Validation systématique des inputs côté front **et** back (Zod)
+- Prévention de l'énumération de comptes (messages d'erreur génériques)

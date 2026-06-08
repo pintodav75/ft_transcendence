@@ -1,0 +1,45 @@
+import fastify from 'fastify';
+import { readFileSync } from 'node:fs';
+import cookie from '@fastify/cookie';
+import jwt from '@fastify/jwt';
+import { authRoutes } from './routes/auth.js';
+import { userRoutes } from './routes/users.js';
+import { ensureBucket } from './storage/minio.js';
+import multipart from '@fastify/multipart';
+
+const server = fastify({
+  https: {
+    key: readFileSync('certs/key.pem'),
+    cert: readFileSync('certs/cert.pem'),
+  },
+});
+
+await server.register(cookie);
+await server.register(jwt, {
+  secret: process.env.JWT_SECRET!,
+});
+
+server.decorate('authenticate', async function (request, reply) {
+  try {
+    await request.jwtVerify();
+  } catch (err) {
+    reply.code(401).send({ error: 'Unauthorized' });
+  }
+});
+
+await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } });
+await server.register(authRoutes, { prefix: '/auth' });
+await server.register(userRoutes, { prefix: '/users' });
+
+server.get('/ping', async (request, reply) => {
+  return 'pong-from-docker\n';
+});
+
+try {
+  await ensureBucket();
+  const address = await server.listen({ port: 3000, host: '0.0.0.0' });
+  console.log(`Server listening at ${address}`);
+} catch (err) {
+  console.error(err);
+  process.exit(1);
+}
