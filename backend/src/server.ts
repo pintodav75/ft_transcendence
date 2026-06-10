@@ -6,6 +6,7 @@ import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { ensureBucket } from './storage/minio.js';
 import multipart from '@fastify/multipart';
+import oauth2 from '@fastify/oauth2';
 
 const server = fastify({
   https: {
@@ -17,6 +18,16 @@ const server = fastify({
 await server.register(cookie);
 await server.register(jwt, {
   secret: process.env.JWT_SECRET!,
+});
+await server.register(oauth2, {
+  name: 'googleOAuth2',
+  credentials: {
+    client: { id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET },
+    auth: (oauth2 as any).GOOGLE_CONFIGURATION,
+  },
+  startRedirectPath: '/auth/oauth/google/start',
+  callbackUri: process.env.GOOGLE_REDIRECT_URI,
+  scope: ['profile', 'email'],
 });
 
 server.decorate('authenticate', async function (request, reply) {

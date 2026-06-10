@@ -15,6 +15,13 @@
       "when": 1780609966561,
       "tag": "0001_acoustic_crystal",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780937333434,
+      "tag": "0002_dry_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }
