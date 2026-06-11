@@ -25,7 +25,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       const userId = request.user.sub;
       const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
       if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-      const { passwordHash: _, ...userSafe } = user;
+      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
       return { user: userSafe };
     } catch (error) {
       reply.code(500).send({ error: 'internal error' });
@@ -43,7 +43,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         .where(eq(usersTable.id, userId))
         .returning();
       if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-      const { passwordHash: _, ...userSafe } = user;
+      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
       return { user: userSafe };
     } catch (err) {
       if (err instanceof z.ZodError) reply.code(400).send({ errors: err.issues });
@@ -58,7 +58,14 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         const pseudo = request.params.pseudo;
         const [user] = await db.select().from(usersTable).where(eq(usersTable.pseudo, pseudo));
         if (!user) return reply.code(404).send({ error: 'Profile not found' });
-        const { passwordHash: _, email: _email, updatedAt: _updatedAt, ...userSafe } = user;
+        const {
+          passwordHash: _,
+          email: _email,
+          updatedAt: _updatedAt,
+          totpSecret: _ts,
+          totpEnabled: _te,
+          ...userSafe
+        } = user;
         return { user: userSafe };
       } catch (error) {
         reply.code(500).send({ error: 'internal error' });
@@ -85,7 +92,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         .where(eq(usersTable.id, request.user.sub))
         .returning();
       if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-      const { passwordHash: _, ...userSafe } = user;
+      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
       return { user: userSafe };
     } catch (error) {
       if (

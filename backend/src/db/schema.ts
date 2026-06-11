@@ -1,4 +1,4 @@
-import { pgTable, varchar, uuid, timestamp, text, unique } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, uuid, timestamp, text, unique, boolean } from 'drizzle-orm/pg-core';
 
 export const usersTable = pgTable(
   'users',
@@ -12,6 +12,8 @@ export const usersTable = pgTable(
     avatarUrl: text('avatar_url'),
     oauthProvider: text('oauth_provider'),
     oauthId: text('oauth_id'),
+    totpSecret: text('totp_secret'),
+    totpEnabled: boolean('totp_enabled').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()

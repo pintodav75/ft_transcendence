@@ -33,6 +33,8 @@ await server.register(oauth2, {
 server.decorate('authenticate', async function (request, reply) {
   try {
     await request.jwtVerify();
+    if ('pending' in request.user)
+      return reply.code(401).send({ error: 'Token cannot be used here' });
   } catch (err) {
     reply.code(401).send({ error: 'Unauthorized' });
   }
