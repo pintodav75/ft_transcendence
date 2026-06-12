@@ -2,11 +2,13 @@ import fastify from 'fastify';
 import { readFileSync } from 'node:fs';
 import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
-import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { ensureBucket } from './storage/minio.js';
 import multipart from '@fastify/multipart';
 import oauth2 from '@fastify/oauth2';
+import { authBasicRoutes } from './routes/auth/index.js';
+import { googleRoutes } from './routes/auth/google.js';
+import { twoFactorRoutes } from './routes/auth/2fa.js';
 
 const server = fastify({
   https: {
@@ -41,7 +43,9 @@ server.decorate('authenticate', async function (request, reply) {
 });
 
 await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } });
-await server.register(authRoutes, { prefix: '/auth' });
+await server.register(authBasicRoutes, { prefix: '/auth' });
+await server.register(googleRoutes, { prefix: '/auth/oauth/google' });
+await server.register(twoFactorRoutes, { prefix: '/auth/2fa' });
 await server.register(userRoutes, { prefix: '/users' });
 
 server.get('/ping', async (request, reply) => {
