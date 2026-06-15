@@ -9,6 +9,7 @@ import oauth2 from '@fastify/oauth2';
 import { authBasicRoutes } from './routes/auth/index.js';
 import { googleRoutes } from './routes/auth/google.js';
 import { twoFactorRoutes } from './routes/auth/2fa.js';
+import { friendsRoutes } from './routes/friends.js';
 
 const server = fastify({
   https: {
@@ -47,6 +48,7 @@ await server.register(authBasicRoutes, { prefix: '/auth' });
 await server.register(googleRoutes, { prefix: '/auth/oauth/google' });
 await server.register(twoFactorRoutes, { prefix: '/auth/2fa' });
 await server.register(userRoutes, { prefix: '/users' });
+await server.register(friendsRoutes, { prefix: '/friends' });
 
 server.get('/ping', async (request, reply) => {
   return 'pong-from-docker\n';

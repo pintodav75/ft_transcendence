@@ -1,4 +1,15 @@
-import { pgTable, varchar, uuid, timestamp, text, unique, boolean } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  varchar,
+  uuid,
+  timestamp,
+  text,
+  unique,
+  boolean,
+  pgEnum,
+} from 'drizzle-orm/pg-core';
+
+export const friendshipStatusEnum = pgEnum('friendship_status', ['pending', 'accepted']);
 
 export const usersTable = pgTable(
   'users',
@@ -21,4 +32,24 @@ export const usersTable = pgTable(
       .$onUpdate(() => new Date()),
   },
   (table) => [unique('users_oauth_identity_unique').on(table.oauthProvider, table.oauthId)],
+);
+
+export const friendshipsTable = pgTable(
+  'friendships',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    requesterId: uuid('requester_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    addresseeId: uuid('addressee_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    status: friendshipStatusEnum('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [unique('friendships_pair_unique').on(table.requesterId, table.addresseeId)],
 );
