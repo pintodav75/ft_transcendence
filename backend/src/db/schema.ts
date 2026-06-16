@@ -53,3 +53,14 @@ export const friendshipsTable = pgTable(
   },
   (table) => [unique('friendships_pair_unique').on(table.requesterId, table.addresseeId)],
 );
+export const messagesTable = pgTable('messages', {
+  id: uuid().primaryKey().defaultRandom(),
+  senderId: uuid('sender_id')
+    .notNull()
+    .references(() => usersTable.id, { onDelete: 'cascade' }),
+  receiverId: uuid('receiver_id')
+    .notNull()
+    .references(() => usersTable.id, { onDelete: 'cascade' }),
+  content: text().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

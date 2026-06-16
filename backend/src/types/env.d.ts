@@ -15,6 +15,10 @@ declare global {
       GOOGLE_CLIENT_ID: string;
       GOOGLE_CLIENT_SECRET: string;
       GOOGLE_REDIRECT_URI: string;
+
+      REDIS_HOSTNAME: string;
+      REDIS_PORT: string;
+      REDIS_PASSWORD: string;
     }
   }
 }

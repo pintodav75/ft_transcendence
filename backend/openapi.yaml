@@ -1,0 +1,1080 @@
+openapi: 3.0.3
+info:
+  title: ft_transcendence API
+  description: >
+    API REST du backend ft_transcendence (Fastify v5 + TypeScript).
+    Auth JWT (access token Bearer 15 min) + refresh token en cookie httpOnly
+    (SameSite=Strict, Path=/auth). Chat temps réel hors-OpenAPI via WebSocket
+    `/ws/chat` (documenté en fin de fichier pour mémoire).
+  version: 0.5.0
+  contact:
+    name: ft_transcendence team
+
+servers:
+  - url: https://localhost:3000
+    description: Dev local (HTTPS, certificat auto-signé)
+
+tags:
+  - name: Auth
+    description: Inscription, connexion, session, refresh
+  - name: OAuth
+    description: Connexion Google (OAuth 2.0)
+  - name: 2FA
+    description: Double authentification TOTP
+  - name: Users
+    description: Profil utilisateur et avatar
+  - name: Friends
+    description: Demandes d'amis et liste d'amis
+  - name: Messages
+    description: Historique des messages directs
+  - name: System
+    description: Endpoints utilitaires
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Access token signé (payload `{ sub }`). Les tempTokens 2FA
+        (`{ sub, pending: 'totp' }`) sont refusés sur les routes protégées.
+
+  schemas:
+    # ---------- Erreurs ----------
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Unauthorized
+      required: [error]
+
+    ValidationError:
+      type: object
+      description: Erreur de validation Zod (issues brutes).
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                example: too_small
+              path:
+                type: array
+                items:
+                  type: string
+              message:
+                type: string
+                example: au moins 8 caractères
+      required: [errors]
+
+    Ok:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+      required: [ok]
+
+    # ---------- User ----------
+    User:
+      type: object
+      description: Profil complet du user authentifié (sans passwordHash ni totpSecret).
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        oauthProvider:
+          type: string
+          nullable: true
+          example: google
+        oauthId:
+          type: string
+          nullable: true
+        totpEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, pseudo, email, totpEnabled, createdAt, updatedAt]
+
+    PublicUser:
+      type: object
+      description: >
+        Profil public (GET /users/{pseudo}) — email, updatedAt, totpEnabled
+        et secrets retirés.
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        oauthProvider:
+          type: string
+          nullable: true
+        oauthId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, pseudo, createdAt]
+
+    FriendSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+
+    # ---------- Friendship ----------
+    Friendship:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        requesterId:
+          type: string
+          format: uuid
+        addresseeId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, accepted]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ---------- Message ----------
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        senderId:
+          type: string
+          format: uuid
+        receiverId:
+          type: string
+          format: uuid
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    # ---------- Auth payloads ----------
+    AuthSuccess:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+      required: [accessToken, user]
+
+    Requires2FA:
+      type: object
+      properties:
+        requires2FA:
+          type: boolean
+          example: true
+        tempToken:
+          type: string
+          description: Token temporaire (TTL 5 min) à présenter à POST /auth/2fa/verify.
+      required: [requires2FA, tempToken]
+
+  responses:
+    Unauthorized:
+      description: Token absent, invalide ou expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Erreur interne
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+paths:
+  # =====================================================================
+  # AUTH
+  # =====================================================================
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Créer un compte
+      description: >
+        Crée un user, hash le password (bcrypt cost 12), pose le cookie refresh
+        et renvoie un access token. Password fort exigé.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pseudo:
+                  type: string
+                  minLength: 3
+                  maxLength: 30
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                  description: >
+                    ≥ 8 caractères, au moins une majuscule, une minuscule,
+                    un chiffre et un caractère spécial.
+              required: [pseudo, email, password]
+      responses:
+        '201':
+          description: Compte créé
+          headers:
+            Set-Cookie:
+              description: refresh (httpOnly, Secure, SameSite=Strict, Path=/auth, 7j)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccess'
+        '400':
+          description: Validation échouée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '409':
+          description: Pseudo ou email déjà pris
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Se connecter
+      description: >
+        Vérifie email + password. Si 2FA activée, renvoie `{ requires2FA, tempToken }`
+        SANS cookie ni accessToken. Sinon flux normal. Comptes OAuth-only
+        (sans password) renvoient 401.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+              required: [email, password]
+      responses:
+        '200':
+          description: Connexion réussie OU 2FA requise
+          headers:
+            Set-Cookie:
+              description: refresh (seulement si 2FA non activée)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AuthSuccess'
+                  - $ref: '#/components/schemas/Requires2FA'
+        '400':
+          description: Validation échouée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Profil du user connecté
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Renouveler l'access token
+      description: Lit le cookie refresh et émet un nouvel access token.
+      responses:
+        '200':
+          description: Nouvel access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                required: [accessToken]
+        '401':
+          description: Refresh token absent ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Se déconnecter
+      description: Efface le cookie refresh.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+
+  # =====================================================================
+  # OAUTH GOOGLE
+  # =====================================================================
+  /auth/oauth/google/start:
+    get:
+      tags: [OAuth]
+      summary: Démarrer le flow Google
+      description: >
+        Redirige (302) vers l'écran de consentement Google. Route fournie
+        par @fastify/oauth2 (startRedirectPath). Scopes : profile, email.
+      responses:
+        '302':
+          description: Redirection vers Google
+
+  /auth/oauth/google/callback:
+    get:
+      tags: [OAuth]
+      summary: Callback Google
+      description: >
+        Échange le code, récupère le profil Google, applique le linking
+        3-cas (A: déjà lié / B: lié par email / C: nouveau compte), pose le
+        cookie refresh et renvoie un access token.
+      parameters:
+        - in: query
+          name: code
+          schema:
+            type: string
+          description: Code d'autorisation fourni par Google
+        - in: query
+          name: state
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Connexion OAuth réussie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccess'
+        '500':
+          description: Échec du login OAuth
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # =====================================================================
+  # 2FA TOTP
+  # =====================================================================
+  /auth/2fa/setup:
+    post:
+      tags: [2FA]
+      summary: Initialiser la 2FA
+      description: Génère un secret base32 + QR code (data URL). Stocke le secret.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Secret + QR code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                    description: Secret base32 (à saisir manuellement si besoin)
+                  qrCodeDataUrl:
+                    type: string
+                    description: Image PNG en data URL pour l'app TOTP
+                required: [secret, qrCodeDataUrl]
+        '400':
+          description: 2FA déjà activée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/2fa/enable:
+    post:
+      tags: [2FA]
+      summary: Activer la 2FA
+      description: Vérifie le 1er code TOTP et passe totp_enabled à true.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+                  example: '123456'
+              required: [code]
+      responses:
+        '200':
+          description: 2FA activée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Code invalide, 2FA non configurée ou déjà activée
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/2fa/disable:
+    post:
+      tags: [2FA]
+      summary: Désactiver la 2FA
+      description: Exige un code TOTP valide, puis reset secret + flag.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+              required: [code]
+      responses:
+        '200':
+          description: 2FA désactivée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Code invalide ou 2FA non activée
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/2fa/verify:
+    post:
+      tags: [2FA]
+      summary: Vérifier le code 2FA au login
+      description: >
+        Consomme le tempToken renvoyé par /auth/login, vérifie le code TOTP,
+        puis émet un vrai access token + cookie refresh. Pas d'auth Bearer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tempToken:
+                  type: string
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+              required: [tempToken, code]
+      responses:
+        '200':
+          description: Connexion finalisée
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccess'
+        '400':
+          description: Code invalide, 2FA non activée ou validation échouée
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: tempToken invalide/expiré ou mauvais type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # =====================================================================
+  # USERS
+  # =====================================================================
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Mon profil
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Users]
+      summary: Modifier mon profil
+      description: Mise à jour partielle de displayName et/ou bio (au moins un champ).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+                bio:
+                  type: string
+                  maxLength: 280
+      responses:
+        '200':
+          description: Profil mis à jour
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          description: Aucun champ fourni ou validation échouée
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/me/avatar:
+    post:
+      tags: [Users]
+      summary: Uploader un avatar
+      description: >
+        Upload multipart (limite 2 MB). MIME autorisés : image/jpeg, image/png,
+        image/webp. Stocke dans MinIO et met à jour avatar_url.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        '200':
+          description: Avatar mis à jour
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          description: Pas multipart, aucun fichier ou type non supporté
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: Fichier trop volumineux (> 2 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/{pseudo}:
+    get:
+      tags: [Users]
+      summary: Profil public d'un user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: pseudo
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/PublicUser'
+        '404':
+          description: Profil introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # FRIENDS
+  # =====================================================================
+  /friends:
+    post:
+      tags: [Friends]
+      summary: Envoyer une demande d'ami
+      description: >
+        Logique 4-cas : pas de relation → pending (201) ; demande inverse
+        existante → auto-accept (200) ; même sens pending → 400 ;
+        déjà amis → 400.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addresseeId:
+                  type: string
+                  format: uuid
+              required: [addresseeId]
+      responses:
+        '201':
+          description: Demande créée (pending)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  friendship:
+                    $ref: '#/components/schemas/Friendship'
+        '200':
+          description: Demande inverse auto-acceptée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  friendship:
+                    $ref: '#/components/schemas/Friendship'
+        '400':
+          description: Soi-même, déjà demandé ou déjà amis
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '404':
+          description: User cible introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Friends]
+      summary: Liste de mes amis
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  friends:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/FriendSummary'
+                        - type: object
+                          properties:
+                            since:
+                              type: string
+                              format: date-time
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /friends/requests:
+    get:
+      tags: [Friends]
+      summary: Demandes d'amis reçues (pending)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requests:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        sentAt:
+                          type: string
+                          format: date-time
+                        from:
+                          $ref: '#/components/schemas/FriendSummary'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /friends/{id}/accept:
+    post:
+      tags: [Friends]
+      summary: Accepter une demande
+      description: Seul l'addressee peut accepter.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Demande acceptée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  friendship:
+                    $ref: '#/components/schemas/Friendship'
+        '400':
+          description: Déjà amis (status non pending)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Non autorisé (pas l'addressee)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Amitié introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /friends/{id}/reject:
+    post:
+      tags: [Friends]
+      summary: Refuser une demande
+      description: Seul l'addressee peut refuser. La ligne est supprimée.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Demande refusée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Status non pending
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Non autorisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Amitié introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /friends/{id}:
+    delete:
+      tags: [Friends]
+      summary: Supprimer un ami
+      description: >
+        Unfriend d'une amitié acceptée. Les deux parties (requester ou
+        addressee) peuvent supprimer.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Amitié supprimée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Pas d'amitié active à supprimer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Non autorisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Amitié introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # MESSAGES
+  # =====================================================================
+  /messages/{friendId}:
+    get:
+      tags: [Messages]
+      summary: Historique de conversation
+      description: >
+        Renvoie les 100 derniers messages échangés avec un ami (ordre
+        chronologique). Réservé aux amitiés acceptées.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: friendId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+        '403':
+          description: Pas amis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: User introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # SYSTEM
+  # =====================================================================
+  /ping:
+    get:
+      tags: [System]
+      summary: Healthcheck
+      responses:
+        '200':
+          description: pong
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "pong-from-docker"
+
+# =======================================================================
+# WebSocket (hors OpenAPI — documenté pour mémoire)
+# =======================================================================
+# GET (upgrade) /ws/chat?token=<accessToken>
+#   - Auth : token JWT en query string (sub). Fermeture 1008 si invalide.
+#   - À la connexion : SADD online_users <userId> (Redis).
+#   - Message entrant (JSON) : { "to": "<uuid>", "content": "1..1000 chars" }
+#       * vérifie l'amitié acceptée, sinon ignore silencieusement
+#       * persiste en DB puis push au destinataire si connecté
+#   - Message sortant au destinataire : { "type": "message", "message": <Message> }
+#   - Accusé à l'expéditeur     : { "type": "message_sent", "message": <Message> }
