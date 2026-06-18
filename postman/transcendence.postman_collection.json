@@ -1,0 +1,484 @@
+{
+	"info": {
+		"_postman_id": "ft-transcendence-collection",
+		"name": "ft_transcendence",
+		"description": "Collection complète pour tester l'API REST + WebSocket de ft_transcendence.\n\nNécessite d'importer aussi l'environnement `transcendence-local.postman_environment.json`.\n\n⚠️ Désactiver la vérification SSL : Settings → General → SSL Certificate Verification = OFF (cert HTTPS auto-signé en local).",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Register",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.accessToken) {",
+									"    pm.environment.set('accessToken', res.accessToken);",
+									"    console.log('accessToken stocké');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"pseudo\": \"{{pseudo}}\",\n    \"email\": \"{{email}}\",\n    \"password\": \"{{password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "register"]
+						}
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.accessToken) {",
+									"    pm.environment.set('accessToken', res.accessToken);",
+									"    console.log('accessToken stocké');",
+									"}",
+									"if (res.tempToken) {",
+									"    pm.environment.set('tempToken', res.tempToken);",
+									"    console.log('tempToken stocké (2FA requise)');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{email}}\",\n    \"password\": \"{{password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "login"]
+						}
+					}
+				},
+				{
+					"name": "Me",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "me"]
+						}
+					}
+				},
+				{
+					"name": "Refresh",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.accessToken) {",
+									"    pm.environment.set('accessToken', res.accessToken);",
+									"    console.log('accessToken renouvelé');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/auth/refresh",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "refresh"]
+						},
+						"description": "Lit le cookie 'refresh' httpOnly automatiquement. Postman gère les cookies par défaut."
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/auth/logout",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "logout"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "2FA",
+			"item": [
+				{
+					"name": "Setup",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/2fa/setup",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "2fa", "setup"]
+						},
+						"description": "Génère secret + QR code data URL. À scanner avec une app Authenticator."
+					}
+				},
+				{
+					"name": "Enable",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/2fa/enable",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "2fa", "enable"]
+						},
+						"description": "Active la 2FA après scan du QR. Remplacer 123456 par le code TOTP courant."
+					}
+				},
+				{
+					"name": "Disable",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/2fa/disable",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "2fa", "disable"]
+						}
+					}
+				},
+				{
+					"name": "Verify",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.accessToken) {",
+									"    pm.environment.set('accessToken', res.accessToken);",
+									"    console.log('accessToken stocké après 2FA');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"tempToken\": \"{{tempToken}}\",\n    \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/2fa/verify",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "2fa", "verify"]
+						},
+						"description": "Finalise le login 2FA. Utilise le tempToken reçu du /login + le code TOTP courant."
+					}
+				}
+			]
+		},
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "Get Me",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/users/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["users", "me"]
+						}
+					}
+				},
+				{
+					"name": "Update Me",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"displayName\": \"Brah\",\n    \"bio\": \"Hello, I am brahim from 42.\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/users/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["users", "me"]
+						},
+						"description": "Modifie le profil. Tous les champs sont optionnels (Zod .partial())."
+					}
+				},
+				{
+					"name": "Get By Pseudo",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/users/{{pseudo}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["users", "{{pseudo}}"]
+						},
+						"description": "Profil public d'un user. Strip email/updatedAt/totpSecret/totpEnabled."
+					}
+				},
+				{
+					"name": "Upload Avatar",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "avatar",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/users/me/avatar",
+							"host": ["{{baseUrl}}"],
+							"path": ["users", "me", "avatar"]
+						},
+						"description": "Multipart upload. Limite 2 MB. Types : image/jpeg, image/png, image/webp."
+					}
+				}
+			]
+		},
+		{
+			"name": "Friends",
+			"item": [
+				{
+					"name": "Send Friend Request",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.friendship && res.friendship.id) {",
+									"    pm.environment.set('friendshipId', res.friendship.id);",
+									"    console.log('friendshipId stocké:', res.friendship.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"addresseeId\": \"{{friendId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/friends",
+							"host": ["{{baseUrl}}"],
+							"path": ["friends"]
+						},
+						"description": "Logique 4-cas : rien → INSERT pending ; même sens pending → 400 ; sens inverse pending → auto-accept ; accepted → 400."
+					}
+				},
+				{
+					"name": "List Friends",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/friends",
+							"host": ["{{baseUrl}}"],
+							"path": ["friends"]
+						},
+						"description": "Mes amis (accepted). Pour chacun : id, pseudo, displayName, avatarUrl, since."
+					}
+				},
+				{
+					"name": "List Pending Requests",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/friends/requests",
+							"host": ["{{baseUrl}}"],
+							"path": ["friends", "requests"]
+						},
+						"description": "Demandes reçues. Format : { requests: [{id, sentAt, from: {...user}}] }."
+					}
+				},
+				{
+					"name": "Accept Request",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/friends/{{friendshipId}}/accept",
+							"host": ["{{baseUrl}}"],
+							"path": ["friends", "{{friendshipId}}", "accept"]
+						},
+						"description": "Seul l'addressee peut accepter. Status passe à 'accepted'."
+					}
+				},
+				{
+					"name": "Reject Request",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/friends/{{friendshipId}}/reject",
+							"host": ["{{baseUrl}}"],
+							"path": ["friends", "{{friendshipId}}", "reject"]
+						},
+						"description": "Supprime la ligne friendships (pas de status 'rejected'). Seul l'addressee peut refuser."
+					}
+				},
+				{
+					"name": "Unfriend",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/friends/{{friendshipId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["friends", "{{friendshipId}}"]
+						},
+						"description": "Supprime une amitié (status='accepted'). Les deux parties peuvent unfriend."
+					}
+				}
+			]
+		},
+		{
+			"name": "Messages",
+			"item": [
+				{
+					"name": "Chat History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"auth": {
+							"type": "bearer",
+							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/messages/{{friendId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["messages", "{{friendId}}"]
+						},
+						"description": "100 derniers messages avec un ami (ordre chronologique). Garde 'amis uniquement' : 403 si non-ami."
+					}
+				}
+			]
+		}
+	],
+	"variable": [
+		{ "key": "baseUrl", "value": "https://localhost:3000", "type": "string" },
+		{ "key": "wsBaseUrl", "value": "wss://localhost:3000", "type": "string" }
+	]
+}
