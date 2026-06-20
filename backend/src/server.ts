@@ -11,9 +11,12 @@ import { googleRoutes } from './routes/auth/google.js';
 import { twoFactorRoutes } from './routes/auth/2fa.js';
 import { friendsRoutes } from './routes/friends.js';
 import { messagesRoutes } from './routes/messages.js';
+import { blocksRoutes } from './routes/blocks.js';
 import websocket from '@fastify/websocket';
 import { chatRoutes } from './routes/chat.js';
 import { redisClient } from './storage/redis.js';
+import fastifyCors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 
 const server = fastify({
   https: {
@@ -47,6 +50,16 @@ server.decorate('authenticate', async function (request, reply) {
   }
 });
 
+await server.register(fastifyCors, {
+  origin: ['http://localhost:5173'],
+  credentials: true,
+});
+
+await server.register(rateLimit, {
+  max: 100,
+  timeWindow: '1 minute',
+});
+
 await server.register(websocket);
 await server.register(chatRoutes, { prefix: '/ws' });
 await server.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } });
@@ -56,6 +69,7 @@ await server.register(twoFactorRoutes, { prefix: '/auth/2fa' });
 await server.register(userRoutes, { prefix: '/users' });
 await server.register(friendsRoutes, { prefix: '/friends' });
 await server.register(messagesRoutes, { prefix: '/messages' });
+await server.register(blocksRoutes, { prefix: '/blocks' });
 
 server.get('/ping', async (request, reply) => {
   return 'pong-from-docker\n';

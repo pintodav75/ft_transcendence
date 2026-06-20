@@ -24,7 +24,10 @@ const loginSchema = z.object({
 });
 
 export const authBasicRoutes: FastifyPluginAsync = async (server) => {
-  server.post('/register', async (request, reply) => {
+  server.post(
+    '/register',
+    { config: { rateLimit: { max: 3, timeWindow: '1 minute' } } },
+    async (request, reply) => {
     try {
       const data = registerSchema.parse(request.body);
       const passwordHash = await hashPassword(data.password);
@@ -62,9 +65,13 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
         reply.code(409).send({ error: 'Pseudo or email already taken' });
       else reply.code(500).send({ error: 'Internal error' });
     }
-  });
+  },
+  );
 
-  server.post('/login', async (request, reply) => {
+  server.post(
+    '/login',
+    { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } },
+    async (request, reply) => {
     try {
       const data = loginSchema.parse(request.body);
       const [user] = await db.select().from(usersTable).where(eq(usersTable.email, data.email));
@@ -91,7 +98,8 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
       if (err instanceof z.ZodError) reply.code(400).send({ errors: err.issues });
       else reply.code(500).send({ error: 'Internal error' });
     }
-  });
+  },
+  );
   server.get('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
       const userId = request.user.sub;

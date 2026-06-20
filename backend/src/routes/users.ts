@@ -4,7 +4,10 @@ import { usersTable } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import z from 'zod';
 import { minioClient, BUCKET_NAME, buildPublicUrl } from '../storage/minio.js';
+import { isBlocked } from '../utils/blocks.js';
 import { randomUUID } from 'node:crypto';
+import { verifyPassword } from '../auth/password.js';
+import speakeasy from 'speakeasy';
 
 const patchProfileSchema = z
   .object({
@@ -18,6 +21,14 @@ const MIME_TO_EXT = {
   'image/png': 'png',
   'image/webp': 'webp',
 } as const;
+
+const deleteSchema = z.object({
+  password: z.string().optional(),
+  totpCode: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
+});
 
 export const userRoutes: FastifyPluginAsync = async (server) => {
   server.get('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
@@ -58,6 +69,9 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         const pseudo = request.params.pseudo;
         const [user] = await db.select().from(usersTable).where(eq(usersTable.pseudo, pseudo));
         if (!user) return reply.code(404).send({ error: 'Profile not found' });
+        if (await isBlocked(request.user.sub, user.id)) {
+          return reply.code(404).send({ error: 'Profile not found' });
+        }
         const {
           passwordHash: _,
           email: _email,
@@ -72,7 +86,13 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
-  server.post('/me/avatar', { onRequest: [server.authenticate] }, async (request, reply) => {
+  server.post(
+    '/me/avatar',
+    {
+      onRequest: [server.authenticate],
+      config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
+    },
+    async (request, reply) => {
     if (!request.isMultipart())
       return reply.code(400).send({ error: 'expected multipart/form-data' });
     try {
@@ -103,6 +123,48 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       )
         reply.code(413).send({ error: 'File too large' });
       else reply.code(500).send({ error: 'Internal error' });
+    }
+  },
+  );
+  server.delete('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
+    try {
+      const data = deleteSchema.parse(request.body);
+      const userId = request.user.sub;
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+      if (!user) return reply.code(404).send({ error: 'user not found' });
+      if (user.passwordHash) {
+        if (!data.password) return reply.code(400).send({ error: 'password required' });
+        if (!(await verifyPassword(data.password, user.passwordHash)))
+          return reply.code(401).send({ error: 'invalid credentials' });
+      }
+      if (user.totpEnabled) {
+        if (!data.totpCode) return reply.code(400).send({ error: 'totp code required' });
+        if (!user.totpSecret) return reply.code(500).send({ error: 'Internal error' });
+        const verified = speakeasy.totp.verify({
+          secret: user.totpSecret,
+          encoding: 'base32',
+          token: data.totpCode,
+          window: 1,
+        });
+        if (!verified) return reply.code(401).send({ error: 'invalid code' });
+      }
+
+      if (user.avatarUrl) {
+        const filename = user.avatarUrl.split('/').pop();
+        if (filename) {
+          try {
+            await minioClient.removeObject(BUCKET_NAME, filename);
+          } catch (err) {
+            request.log.warn({ err }, 'Failed to remove avatar from MinIO');
+          }
+        }
+      }
+      await db.delete(usersTable).where(eq(usersTable.id, userId));
+      reply.clearCookie('refresh', { path: '/auth' });
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      if (err instanceof z.ZodError) return reply.code(400).send({ errors: err.issues });
+      return reply.code(500).send({ error: 'Internal error' });
     }
   });
 };

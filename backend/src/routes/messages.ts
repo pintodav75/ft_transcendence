@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/index.js';
 import { usersTable, friendshipsTable, messagesTable } from '../db/schema.js';
 import { eq, and, or, desc } from 'drizzle-orm';
+import { isBlocked } from '../utils/blocks.js';
 
 export const messagesRoutes: FastifyPluginAsync = async (server) => {
   server.get<{ Params: { friendId: string } }>(
@@ -13,6 +14,9 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
         const friendId = request.params.friendId;
         const [friend] = await db.select().from(usersTable).where(eq(usersTable.id, friendId));
         if (!friend) return reply.code(404).send({ error: 'friend not found' });
+        if (await isBlocked(userId, friendId)) {
+          return reply.code(404).send({ error: 'friend not found' });
+        }
         const [friendship] = await db
           .select()
           .from(friendshipsTable)

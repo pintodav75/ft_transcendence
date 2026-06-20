@@ -5,6 +5,7 @@ import { eq, and, or } from 'drizzle-orm';
 import { friendshipsTable, messagesTable } from '../db/schema.js';
 import { db } from '../db/index.js';
 import { redisClient } from '../storage/redis.js';
+import { isBlocked } from '../utils/blocks.js';
 
 const userSockets = new Map<string, Set<WebSocket>>();
 
@@ -124,9 +125,14 @@ export const chatRoutes: FastifyPluginAsync = async (server) => {
             );
 
           if (!friendship) {
-            console.log('Not friends, message ignored');
+            socket.send(JSON.stringify({ type: 'error', code: 'not_friends' }));
             return;
           }
+          if (await isBlocked(userId, data.to)) {
+            socket.send(JSON.stringify({ type: 'error', code: 'blocked' }));
+            return;
+          }
+
           const [saved] = await db
             .insert(messagesTable)
             .values({
@@ -139,7 +145,7 @@ export const chatRoutes: FastifyPluginAsync = async (server) => {
           sendToUser(data.to, JSON.stringify({ type: 'message', message: saved }));
           sendToUser(userId, JSON.stringify({ type: 'message_sent', message: saved }));
         } catch (err) {
-          console.log('Message invalide, ignoré');
+          socket.send(JSON.stringify({ type: 'error', code: 'invalid_message_format' }));
         }
       });
     },

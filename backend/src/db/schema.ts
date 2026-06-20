@@ -64,3 +64,18 @@ export const messagesTable = pgTable('messages', {
   content: text().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const blocksTable = pgTable(
+  'blocks',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    blockerId: uuid('blocker_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    blockedId: uuid('blocked_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique('blocks_pair_unique').on(table.blockerId, table.blockedId)],
+);

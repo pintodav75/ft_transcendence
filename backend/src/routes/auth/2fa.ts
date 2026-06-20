@@ -84,7 +84,10 @@ export const twoFactorRoutes: FastifyPluginAsync = async (server) => {
       else return reply.code(500).send({ error: 'internal error' });
     }
   });
-  server.post('/verify', async (request, reply) => {
+  server.post(
+    '/verify',
+    { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } },
+    async (request, reply) => {
     try {
       const data = verify2faSchema.parse(request.body);
       const payload = server.jwt.verify<{ sub: string; pending: string }>(data.tempToken);
@@ -116,5 +119,6 @@ export const twoFactorRoutes: FastifyPluginAsync = async (server) => {
       if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
       else return reply.code(401).send({ error: 'Invalid or expired tempToken' });
     }
-  });
+  },
+  );
 };

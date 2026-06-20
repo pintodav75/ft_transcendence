@@ -43,6 +43,13 @@
       "when": 1781561299658,
       "tag": "0005_bent_charles_xavier",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781862887378,
+      "tag": "0006_pink_speed",
+      "breakpoints": true
     }
   ]
 }

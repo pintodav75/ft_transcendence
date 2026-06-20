@@ -3,7 +3,7 @@ import z from 'zod';
 import { db } from '../db/index.js';
 import { usersTable, friendshipsTable } from '../db/schema.js';
 import { eq, and, or } from 'drizzle-orm';
-
+import { isBlocked } from '../utils/blocks.js';
 const friendsSchema = z.object({
   addresseeId: z.uuid(),
 });
@@ -20,6 +20,9 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
         .from(usersTable)
         .where(eq(usersTable.id, addresseeId));
       if (!addresseeUser) return reply.code(404).send({ error: 'user not found' });
+      if (await isBlocked(requesterId, addresseeId)) {
+        return reply.code(404).send({ error: 'user not found' });
+      }
       const [existing] = await db
         .select()
         .from(friendshipsTable)
