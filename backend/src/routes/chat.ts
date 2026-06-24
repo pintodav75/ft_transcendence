@@ -7,6 +7,8 @@ import { db } from '../db/index.js';
 import { redisClient } from '../storage/redis.js';
 import { isBlocked } from '../utils/blocks.js';
 
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
 const userSockets = new Map<string, Set<WebSocket>>();
 
 function addSocket(userId: string, socket: WebSocket) {
@@ -79,6 +81,19 @@ export const chatRoutes: FastifyPluginAsync = async (server) => {
       addSocket(userId, socket);
       const isFirstSocket = userSockets.get(userId)?.size === 1;
 
+      let isAlive = true;
+      socket.on('pong', () => {
+        isAlive = true;
+      });
+      const heartbeat = setInterval(() => {
+        if (!isAlive) {
+          socket.terminate();
+          return;
+        }
+        isAlive = false;
+        socket.ping();
+      }, HEARTBEAT_INTERVAL_MS);
+
       await redisClient.sAdd('online_users', userId);
 
       const friendIds = await getFriendIds(userId);
@@ -91,6 +106,7 @@ export const chatRoutes: FastifyPluginAsync = async (server) => {
       console.log(`User ${userId} connected (socket #${userSockets.get(userId)?.size})`);
 
       socket.on('close', async () => {
+        clearInterval(heartbeat);
         removeSocket(userId, socket);
         const isLastSocket = !userSockets.has(userId);
         if (isLastSocket) {
