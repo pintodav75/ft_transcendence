@@ -10,6 +10,8 @@ import {
   index,
   smallint,
   check,
+  integer,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -286,4 +288,38 @@ export const disputeEvidenceTable = pgTable(
     submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('dispute_evidence_dispute_side_idx').on(table.disputeId, table.matchSideId)],
+);
+
+export const rankingsTable = pgTable(
+  'rankings',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    ladderId: uuid('ladder_id')
+      .notNull()
+      .references(() => laddersTable.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').references(() => usersTable.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id').references(() => teamsTable.id, { onDelete: 'cascade' }),
+    elo: integer('elo').notNull().default(1000),
+    wins: integer('wins').notNull().default(0),
+    losses: integer('losses').notNull().default(0),
+    lastMatchAt: timestamp('last_match_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    check(
+      'rankings_user_team_xor_check',
+      sql`(${table.userId} IS NULL) <> (${table.teamId} IS NULL)`,
+    ),
+    uniqueIndex('rankings_ladder_user_unique')
+      .on(table.ladderId, table.userId)
+      .where(sql`${table.userId} IS NOT NULL`),
+    uniqueIndex('rankings_ladder_team_unique')
+      .on(table.ladderId, table.teamId)
+      .where(sql`${table.teamId} IS NOT NULL`),
+    index('rankings_ladder_elo_idx').on(table.ladderId, table.elo.desc()),
+  ],
 );
