@@ -6,7 +6,7 @@ info:
     Auth JWT (access token Bearer 15 min) + refresh token en cookie httpOnly
     (SameSite=Strict, Path=/auth). Chat temps réel hors-OpenAPI via WebSocket
     `/ws/chat` (documenté en fin de fichier pour mémoire).
-  version: 0.5.0
+  version: 0.6.0
   contact:
     name: ft_transcendence team
 
@@ -27,6 +27,12 @@ tags:
     description: Demandes d'amis et liste d'amis
   - name: Messages
     description: Historique des messages directs
+  - name: Blocks
+    description: Blocage symétrique d'utilisateurs (rompt l'amitié, masque le profil)
+  - name: Games
+    description: Catalogue des jeux supportés (lecture seule, seed initial)
+  - name: Ladders
+    description: Compétitions = jeu × format (lecture seule, seed initial)
   - name: System
     description: Endpoints utilitaires
 
@@ -226,6 +232,78 @@ components:
           type: string
           description: Token temporaire (TTL 5 min) à présenter à POST /auth/2fa/verify.
       required: [requires2FA, tempToken]
+
+    # ---------- Blocks ----------
+    BlockEntry:
+      type: object
+      description: Un user bloqué (retourné par GET /blocks).
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        since:
+          type: string
+          format: date-time
+          description: createdAt de la ligne `blocks`.
+      required: [id, pseudo, since]
+
+    # ---------- Catalog (games + ladders) ----------
+    Game:
+      type: object
+      description: Un jeu supporté par la plateforme.
+      properties:
+        id:
+          type: string
+          description: Slug du jeu (PK).
+          example: cs2
+        name:
+          type: string
+          example: Counter-Strike 2
+        requiredProvider:
+          type: string
+          enum: [riot, steam, epic, chess_com]
+          description: Provider d'identifiant in-game requis pour s'inscrire à un match de ce jeu.
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, requiredProvider, isActive, createdAt]
+
+    Ladder:
+      type: object
+      description: Une compétition (jeu × format) avec son ELO indépendant.
+      properties:
+        id:
+          type: string
+          format: uuid
+        gameId:
+          type: string
+          example: cs2
+        format:
+          type: string
+          enum: ['1v1', '2v2', '3v3', '5v5']
+        name:
+          type: string
+          example: Counter-Strike 2 5v5
+        lockoutMinutes:
+          type: integer
+          description: >
+            Durée pendant laquelle la team/user est verrouillée après le début
+            d'un match. Aussi le délai minimum avant soumission de score.
+          example: 60
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, gameId, format, name, lockoutMinutes, createdAt]
 
   responses:
     Unauthorized:
@@ -680,6 +758,59 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Users]
+      summary: Supprimer mon compte
+      description: >
+        Suppression définitive. Exige `password` si l'user en a un (sinon ignoré
+        pour les comptes OAuth-only) et `totpCode` si la 2FA est activée. Supprime
+        en cascade friendships, messages, blocks. L'avatar MinIO est aussi
+        retiré (non-bloquant). Le cookie refresh est nettoyé.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: Requis si user a un password_hash.
+                totpCode:
+                  type: string
+                  pattern: '^\d{6}$'
+                  description: Requis si totp_enabled.
+      responses:
+        '200':
+          description: Compte supprimé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Validation échouée (champ requis manquant)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Password ou code TOTP invalide, ou token absent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: User introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /users/me/avatar:
     post:
@@ -1044,6 +1175,227 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: User introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # BLOCKS
+  # =====================================================================
+  /blocks:
+    get:
+      tags: [Blocks]
+      summary: Liste des users que j'ai bloqués
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des blocages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BlockEntry'
+                required: [blocks]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /blocks/{userId}:
+    post:
+      tags: [Blocks]
+      summary: Bloquer un user
+      description: >
+        Bloque l'user et rompt toute amitié existante entre les deux
+        (DELETE friendship dans les deux sens). Pas idempotent : un 2e
+        appel renvoie 400 'already blocked'.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Blocage effectué
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Auto-blocage tenté ou déjà bloqué (SQLSTATE 23505)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: User cible introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Blocks]
+      summary: Débloquer un user
+      description: >
+        Retire la ligne `blocks` de moi vers cet user. Idempotent
+        (200 même si pas bloqué).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Déblocage effectué (ou aucun blocage existant)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # GAMES
+  # =====================================================================
+  /games:
+    get:
+      tags: [Games]
+      summary: Liste les jeux supportés
+      description: Renvoie tous les jeux avec `is_active = true`, triés par nom.
+      responses:
+        '200':
+          description: Liste des jeux actifs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  games:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Game'
+                required: [games]
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /games/{id}:
+    get:
+      tags: [Games]
+      summary: Détails d'un jeu
+      description: Lookup par slug (`lol`, `cs2`, `val`, `rl`, `chess`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: cs2
+      responses:
+        '200':
+          description: Le jeu demandé
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  game:
+                    $ref: '#/components/schemas/Game'
+                required: [game]
+        '404':
+          description: Jeu inconnu ou inactif
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # LADDERS
+  # =====================================================================
+  /ladders:
+    get:
+      tags: [Ladders]
+      summary: Liste les ladders
+      description: >
+        Renvoie tous les ladders triés par nom. Filtre optionnel par
+        `gameId` (slug du jeu). Un `gameId` inconnu renvoie une liste vide
+        (pas d'erreur).
+      parameters:
+        - name: gameId
+          in: query
+          required: false
+          schema:
+            type: string
+            example: cs2
+          description: Filtre les ladders pour un jeu donné.
+      responses:
+        '200':
+          description: Liste des ladders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ladders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ladder'
+                required: [ladders]
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /ladders/{id}:
+    get:
+      tags: [Ladders]
+      summary: Détails d'un ladder (avec son jeu joint)
+      description: >
+        Lookup par uuid du ladder. Renvoie le ladder + le jeu parent
+        (JOIN pour éviter au frontend un 2e appel sur `GET /games/{id}`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Le ladder demandé et son jeu parent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ladder:
+                    $ref: '#/components/schemas/Ladder'
+                  game:
+                    $ref: '#/components/schemas/Game'
+                required: [ladder, game]
+        '404':
+          description: Ladder inconnu
           content:
             application/json:
               schema:

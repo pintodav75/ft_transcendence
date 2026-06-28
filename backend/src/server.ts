@@ -12,11 +12,13 @@ import { twoFactorRoutes } from './routes/auth/2fa.js';
 import { friendsRoutes } from './routes/friends.js';
 import { messagesRoutes } from './routes/messages.js';
 import { blocksRoutes } from './routes/blocks.js';
+import { gamesRoutes } from './routes/games.js';
 import websocket from '@fastify/websocket';
 import { chatRoutes } from './routes/chat.js';
 import { redisClient } from './storage/redis.js';
 import fastifyCors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import { laddersRoutes } from './routes/ladders.js';
 
 const server = fastify({
   https: {
@@ -70,6 +72,8 @@ await server.register(userRoutes, { prefix: '/users' });
 await server.register(friendsRoutes, { prefix: '/friends' });
 await server.register(messagesRoutes, { prefix: '/messages' });
 await server.register(blocksRoutes, { prefix: '/blocks' });
+await server.register(gamesRoutes, { prefix: '/games' });
+await server.register(laddersRoutes, { prefix: '/ladders' });
 
 server.get('/ping', async (request, reply) => {
   return 'pong-from-docker\n';
