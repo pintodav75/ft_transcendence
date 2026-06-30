@@ -24,8 +24,7 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Contexte perso Claude
-CLAUDE.md
+# Contexte Claude — CLAUDE.md est versionné (contexte projet partagé)
 CLAUDE.local.md
 .claude/
 
