@@ -16,7 +16,7 @@ Compte ~1h30 d'installation au total.
 1. **WSL 2** (Linux dans Windows)
 2. **Docker Desktop** (pour faire tourner les conteneurs Postgres/Redis/MinIO/backend/frontend)
 3. **VS Code** + extension WSL (l'IDE qu'on utilise)
-4. **Git** + **clé SSH GitHub** (pour cloner et push)
+4. **Git** + **clé SSH 42** (pour cloner et push sur vogsphere)
 5. **Node 24** via **nvm** (versions de Node propres)
 6. **Postman** (pour tester l'API)
 
@@ -104,7 +104,9 @@ Tu dois voir un message "Hello from Docker!" → tout marche ✅
 
 ---
 
-## Étape 5 — Installer Git + configurer SSH pour GitHub
+## Étape 5 — Installer Git + configurer SSH pour le git 42 (vogsphere)
+
+> ⚠️ Le projet est hébergé sur le **git 42 (vogsphere)**, pas sur GitHub. C'est le dépôt officiel que 42 vérifie pour noter les contributions individuelles.
 
 Dans le terminal Ubuntu :
 
@@ -112,43 +114,46 @@ Dans le terminal Ubuntu :
 sudo apt install -y git
 ```
 
-### Configurer ton identité git (locale ou globale)
+### Configurer ton identité git — avec TON identité 42
+
+⚠️ **Chaque membre commit avec sa propre identité 42** : 42 vérifie qui a contribué quoi. Mets ton login 42 et l'email rattaché à ton compte 42.
 
 ```bash
-git config --global user.name "ton-pseudo-github"
-git config --global user.email "ton-email@example.com"
+git config --global user.name "ton-login-42"
+git config --global user.email "ton-email-42"
 ```
+
+(Tu pourras aussi la définir par-dépôt avec `git config --local ...` une fois le projet cloné.)
 
 ### Générer une clé SSH
 
 ```bash
-ssh-keygen -t ed25519 -C "ton-email@example.com" -f ~/.ssh/id_ed25519 -N ""
+ssh-keygen -t ed25519 -C "ton-email-42" -f ~/.ssh/id_ed25519 -N ""
 ```
 
 (Le `-N ""` met une passphrase vide pour simplifier. Tu peux en mettre une si tu veux.)
 
-### Ajouter la clé à ton compte GitHub
+### Ajouter la clé publique à ton compte 42
 
 Affiche ta clé publique :
 ```bash
 cat ~/.ssh/id_ed25519.pub
 ```
 
-Copie tout le contenu (commence par `ssh-ed25519 AAAA...`).
+Copie tout le contenu (commence par `ssh-ed25519 AAAA...`), puis sur l'intra 42 :
+1. Va sur https://profile.intra.42.fr/ → **Settings**
+2. Section **SSH keys** → ajoute ta clé publique
+3. Sauvegarde
 
-Puis :
-1. Va sur https://github.com/settings/ssh/new
-2. **Title** : `WSL ft_transcendence` (ou ce que tu veux)
-3. **Key** : colle la clé publique
-4. Clique **Add SSH key**
+> Tu dois aussi être **inscrit comme membre du groupe de ce projet sur l'intra** pour que vogsphere t'autorise à cloner/push. Si le clone échoue en "access denied", vérifie ton inscription au projet avec l'équipe.
 
 ### Tester la connexion SSH
 
 ```bash
-ssh -T git@github.com
+ssh -T git@vogsphere.42paris.fr
 ```
 
-Doit afficher : `Hi <ton-pseudo>! You've successfully authenticated...`
+Vogsphere ne renvoie pas toujours de message de bienvenue : le vrai test, c'est que le **clone** (Étape 7) passe sans "Permission denied".
 
 ---
 
@@ -172,11 +177,11 @@ npm --version
 
 ```bash
 cd ~
-git clone git@github.com:pintodav75/ft_transcendence.git transcendence
-cd transcendence
+git clone git@vogsphere.42paris.fr:vogsphere/intra-uuid-bddfec7e-b4c9-4920-887c-c250b3e9fd0c-7492998-wacista ft_transcendence
+cd ft_transcendence
 ```
 
-⚠️ Tu dois avoir été **ajouté comme collaborator** sur le repo GitHub par le proprio (Brahim/Da). S'il ne l'a pas encore fait, demande-le-lui (Settings → Collaborators sur GitHub).
+⚠️ Tous les membres clonent **la même URL vogsphere** ci-dessus. Si le clone échoue ("access denied" / "Permission denied"), c'est que ta clé SSH n'est pas sur l'intra (Étape 5) ou que tu n'es pas inscrit au groupe du projet sur l'intra 42.
 
 ---
 
@@ -255,6 +260,22 @@ Tous les services doivent être en **"Up"** :
 - `postgres`, `redis`, `minio`
 - `adminer`, `redis-commander`
 
+### Appliquer les migrations de la base (OBLIGATOIRE au 1er lancement)
+
+⚠️ La base démarre **vide** : aucune table n'existe tant que tu n'as pas appliqué les migrations Drizzle. Sans ça, Adminer n'affiche rien et register/login plantent.
+
+```bash
+docker compose exec backend npx drizzle-kit migrate
+```
+
+Vérifie que les 15 tables sont créées (remplace `<POSTGRES_USER>`/`<POSTGRES_DB>` par les valeurs de ton `.env`) :
+
+```bash
+docker compose exec postgres psql -U <POSTGRES_USER> -d <POSTGRES_DB> -c '\dt'
+```
+
+À refaire uniquement quand de nouvelles migrations arrivent (`git pull` qui ramène des fichiers dans `backend/drizzle/`).
+
 ### Tester le backend
 
 ```bash
@@ -292,7 +313,7 @@ Dans VS Code :
 
 Puis dans Ubuntu :
 ```bash
-cd ~/transcendence
+cd ~/ft_transcendence
 code .
 ```
 
@@ -366,9 +387,10 @@ Checklist rapide :
 
 - [ ] `wsl --version` affiche WSL 2
 - [ ] `docker --version` marche dans Ubuntu
-- [ ] `ssh -T git@github.com` te salue par ton pseudo
+- [ ] clé SSH ajoutée sur l'intra 42 et clone vogsphere OK
 - [ ] `node --version` affiche v24.x
-- [ ] `docker compose ps` (depuis `~/transcendence`) affiche tous les services Up
+- [ ] `docker compose ps` (depuis `~/ft_transcendence`) affiche tous les services Up
+- [ ] `docker compose exec backend npx drizzle-kit migrate` a créé les 15 tables (visibles dans Adminer)
 - [ ] `curl -k https://localhost:3000/ping` répond `pong-from-docker`
 - [ ] VS Code s'ouvre en mode WSL (`code .` depuis Ubuntu)
 - [ ] Postman → Login renvoie un 200 avec accessToken
@@ -386,11 +408,12 @@ https://learn.microsoft.com/fr-fr/windows/wsl/install-manual
 ### Docker Desktop ne démarre pas
 Vérifie que la virtualisation est activée dans le BIOS (Étape 1). Si oui, désinstalle/réinstalle Docker Desktop, et redémarre Windows.
 
-### "Permission denied" au push GitHub
-Ta clé SSH n'est pas chargée. Dans Ubuntu :
+### "Permission denied" au push (vogsphere)
+Ta clé SSH n'est pas chargée, ou pas enregistrée sur l'intra 42. Dans Ubuntu :
 ```bash
 ssh-add ~/.ssh/id_ed25519
 ```
+Si ça persiste : vérifie que la clé publique est bien sur l'intra (Étape 5) et que tu es inscrit au groupe du projet.
 
 ### `docker compose up -d` plante au build
 Réessaie : c'est souvent un timeout réseau au pull des images. Si ça persiste, regarde le log : `docker compose logs backend`.
@@ -430,28 +453,36 @@ Une fois le setup OK, lis dans cet ordre :
 
 ## 🤝 Workflow git en équipe
 
+> Pas de Pull Request sur vogsphere : la **review se fait en local** puis on merge sur `master`.
+
 Quand tu commences à coder :
 
 ```bash
-# Toujours partir d'un main à jour
-git checkout main
+# Toujours partir d'un master à jour
+git checkout master
 git pull
 
-# Créer une branche feature
-git checkout -b feature/ton-truc
+# Créer une branche feature (convention : feature/<code-ticket>-<sujet>)
+git checkout -b feature/f1-scaffolding-front
 
-# Coder, commiter régulièrement
+# Coder, commiter régulièrement (Conventional Commits : feat/fix/docs/...)
 git add ...
-git commit -m "feat: ..."
+git commit -m "feat(scope): ..."
 
-# Push ta branche
-git push -u origin feature/ton-truc
-
-# Sur GitHub : créer une Pull Request vers main
-# Faire reviewer par un coéquipier avant merge
+# Push ta branche sur vogsphere
+git push -u origin feature/f1-scaffolding-front
 ```
 
-⚠️ **Ne push jamais directement sur `main`**. Toujours via PR + review.
+**Review (en local, par un coéquipier — jamais sa propre branche) :**
+```bash
+git checkout master && git pull
+git diff master..feature/f1-scaffolding-front   # relire le diff
+git merge feature/f1-scaffolding-front          # si OK
+git push origin master
+```
+
+⚠️ **Ne push jamais de code non relu directement sur `master`.** Toujours branche → review locale → merge.
+⚠️ **Lance les tests avant de pusher / merger** : `docker compose exec backend npm test`.
 
 ---
 
