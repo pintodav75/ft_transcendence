@@ -1403,6 +1403,83 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /ladders/{id}/rankings:
+    get:
+      tags: [Ladders]
+      summary: Classement (leaderboard) d'un ladder
+      description: >
+        Renvoie le classement du ladder, trié par ELO décroissant. Chaque
+        entrée porte un `competitor` qui est soit un joueur (`type: user`),
+        soit une équipe (`type: team`) selon le ladder. Un ladder existant
+        sans classement renvoie une liste vide (pas d'erreur).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Classement trié par ELO décroissant (peut être vide)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rankings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rank:
+                          type: integer
+                          example: 1
+                        elo:
+                          type: integer
+                          example: 1580
+                        wins:
+                          type: integer
+                        losses:
+                          type: integer
+                        competitor:
+                          oneOf:
+                            - type: object
+                              properties:
+                                type:
+                                  type: string
+                                  enum: [user]
+                                pseudo:
+                                  type: string
+                                displayName:
+                                  type: string
+                                  nullable: true
+                                avatarUrl:
+                                  type: string
+                                  nullable: true
+                              required: [type, pseudo]
+                            - type: object
+                              properties:
+                                type:
+                                  type: string
+                                  enum: [team]
+                                name:
+                                  type: string
+                                logoUrl:
+                                  type: string
+                                  nullable: true
+                              required: [type, name]
+                      required: [rank, elo, wins, losses, competitor]
+                required: [rankings]
+        '404':
+          description: Ladder inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   # =====================================================================
   # SYSTEM
   # =====================================================================
