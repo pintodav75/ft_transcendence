@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, asc } from 'drizzle-orm';
 import { laddersTable, gamesTable, rankingsTable, usersTable, teamsTable } from '../db/schema.js';
 import { shapeRankings } from '../utils/leaderboard.js';
 
@@ -53,7 +53,12 @@ export const laddersRoutes: FastifyPluginAsync = async (server) => {
         .leftJoin(usersTable, eq(usersTable.id, rankingsTable.userId))
         .leftJoin(teamsTable, eq(teamsTable.id, rankingsTable.teamId))
         .where(eq(rankingsTable.ladderId, id))
-        .orderBy(desc(rankingsTable.elo));
+        .orderBy(
+          desc(rankingsTable.elo),
+          desc(rankingsTable.wins),
+          asc(rankingsTable.losses),
+          asc(rankingsTable.id),
+        );
       const rankings = shapeRankings(rows);
       return reply.code(200).send({ rankings });
     } catch (error) {
