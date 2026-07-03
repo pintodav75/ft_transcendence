@@ -9,6 +9,7 @@
 **ft_transcendence** — projet final du Common Core 42, en équipe de 4. Le sujet est **libre** : on construit une web app de notre choix qui valide ≥ 14 points via les modules.
 
 **Concept choisi : plateforme compétitive multi-jeux type GameBattle**
+
 - Profils utilisateurs, équipes
 - Ladders par jeu avec ELO
 - Matchmaking automatique (file d'attente, matching par skill)
@@ -22,19 +23,19 @@
 
 ## 🧩 Modules choisis (14 points)
 
-| Module | Type | Points |
-|---|---|---|
-| Frameworks front + back | Major | 2 |
-| Standard user management | Major | 2 |
-| Real-time WebSocket | Major | 2 |
-| User interaction (chat + profil + amis) | Major | 2 |
-| ORM (Drizzle) | Minor | 1 |
-| OAuth 2.0 | Minor | 1 |
-| 2FA TOTP | Minor | 1 |
-| Game stats & match history | Minor | 1 |
-| File upload | Minor | 1 |
-| Notification system | Minor | 1 |
-| **TOTAL** | | **14** |
+| Module                                  | Type  | Points |
+| --------------------------------------- | ----- | ------ |
+| Frameworks front + back                 | Major | 2      |
+| Standard user management                | Major | 2      |
+| Real-time WebSocket                     | Major | 2      |
+| User interaction (chat + profil + amis) | Major | 2      |
+| ORM (Drizzle)                           | Minor | 1      |
+| OAuth 2.0                               | Minor | 1      |
+| 2FA TOTP                                | Minor | 1      |
+| Game stats & match history              | Minor | 1      |
+| File upload                             | Minor | 1      |
+| Notification system                     | Minor | 1      |
+| **TOTAL**                               |       | **14** |
 
 Modules de réserve éventuels : Advanced search (1pt), Custom design system (1pt).
 
@@ -43,11 +44,13 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ## 🛠️ Stack technique
 
 **Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4
+
 - ⚠️ **Encore à l'état démo Vite** — aucune lib applicative installée à ce jour
 - Libs prévues à installer : TanStack Router + TanStack Query, Zustand, React Hook Form, Zod, shadcn/ui
 - ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
 
-**Backend** : Fastify v5 sur Node 24 LTS (TypeScript strict, ESM) — *en place et bien avancé*
+**Backend** : Fastify v5 sur Node 24 LTS (TypeScript strict, ESM) — _en place et bien avancé_
+
 - `@fastify/websocket` (+ `ws`) — chat temps réel
 - `@fastify/multipart` — uploads avatar (limite 2 MB)
 - `@fastify/jwt` + `@fastify/cookie` — auth (access 15 min / refresh 7 j en cookie)
@@ -58,11 +61,13 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - `drizzle-orm` + `postgres` / `pg`, `zod`, `minio`, `redis` (client v6)
 
 **DB / Cache / Storage** :
+
 - PostgreSQL 17 (conteneur)
 - Redis (client connecté ; cache/pub-sub à exploiter — voir note présence ci-dessous)
 - MinIO (S3-compatible, fichiers ; bucket `avatars` public en lecture)
 
 **Infra** :
+
 - Docker Compose, **pas de Nginx** (Fastify sert tout : API + front statique en prod + HTTPS)
 - HTTPS via certificats auto-signés en dev (`backend/certs/`)
 
@@ -117,6 +122,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ### Backend — TERMINÉ et fonctionnel
 
 **Auth & user** (étapes 1-4) :
+
 - Docker (Postgres/Redis/MinIO/Adminer + hot reload WSL2), HTTPS auto-signé, `.env.example`
 - Drizzle ORM ; table `users` : id, pseudo, email, password_hash (nullable, OAuth), display_name, bio, avatar_url, oauth_provider/oauth_id (UNIQUE composite), totp_secret, totp_enabled, **is_admin**, created_at, updated_at
 - JWT access 15 min + refresh cookie httpOnly/Secure/SameSite=Strict/Path=/auth ; bcryptjs cost 12
@@ -126,6 +132,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - **Profil** : `GET/PATCH /users/me`, `GET /users/:pseudo` (public, strip privé), `POST /users/me/avatar` (MinIO, validation MIME, 2 MB)
 
 **Social** (étape 5) :
+
 - **Amis** (`/friends`) : 6 endpoints (request avec auto-accept sens inverse, list, requests, accept, reject=DELETE, unfriend)
 - **Blocks** (`/blocks`) : bloquer/débloquer un user (supprime l'amitié au passage), helper `isBlocked`
 - **Chat DM temps réel** (`/ws/chat?token=`, `chat.ts`) : auth par token en query, garde "amis acceptés uniquement" + check blocks à chaque message, persistance en DB, heartbeat ping/pong 30s. Double mécanisme de présence : **Map mémoire `userSockets`** (routage des sockets, obligatoire) + **Redis `online_users`** (`sAdd`/`sRem`). Events émis : `initial_presence` (à la connexion), `presence` (broadcast aux amis on/offline), `message`/`message_sent`, `error`. Multi-socket par user géré (premier/dernier socket)
@@ -134,6 +141,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - Sécurité transverse : CORS (5173, credentials), rate-limit global 100/min + limites par route (register 3, login 5, 2fa/verify 5, avatar 3)
 
 **Domaine jeu — schéma & migrations** (étapes 5.5 + 6 partielles) :
+
 - Design complet documenté dans `docs/schema.md`
 - Enums : `friendship_status`, `provider_enum` (riot/steam/epic/chess_com), `format_enum` (1v1/2v2/3v3/5v5), `match_status_enum` (pending/in_progress/awaiting_confirmation/completed/disputed/cancelled), `dispute_status_enum`, `dispute_resolution_enum`
 - Tables : `games`, `user_external_accounts` (champ `verified` central pour linking manuel vs OAuth), `ladders`, `teams`, `team_members`, `matches` (state machine via status), `match_sides` (check side_index ∈ {0,1}), `match_participants`, `disputes`, `dispute_evidence`, `rankings` (ELO, **XOR user/team** via check constraint, index ladder+elo desc)
@@ -142,9 +150,11 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - ⚠️ **Toutes les règles business §5.1–5.8 du design (`docs/schema.md`) sont à coder** : liaison de compte requise, lockout, soumission de score, accord/dispute, calcul ELO (K=32, départ 1000), dispute timeout. La DB est prête, la logique non.
 
 ### Frontend — ❌ NON COMMENCÉ
+
 Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contient que React + Tailwind — **aucune** lib applicative (router, query, store, forms, validation). `vite.config.ts` OK (host true, port 5173, polling WSL2). C'est le **gros retard** du projet et la priorité immédiate.
 
 ### Reste à faire (backend)
+
 - Routes **teams** (CRUD, membership), **user_external_accounts** (linking in-game manuel + OAuth Steam/Riot)
 - Routes **matches** : création, soumission de résultats, state machine, confirmation
 - Routes **disputes** (ouverture, evidence upload, résolution admin)
@@ -153,6 +163,7 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 - Migrer la présence chat vers Redis (optionnel)
 
 ### Reste à faire (transverse / 42)
+
 - Polish 42 : Privacy Policy, ToS, zéro warning console, README à jour
 - Préparation soutenance
 
@@ -163,6 +174,7 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 **Outil** : Trello, board à 4 colonnes — **Todo / In Progress / Review / Done**.
 
 **Workflow** :
+
 - On **s'assigne** une carte Todo (membre Trello) pour la passer en In Progress.
 - Une carte = une unité de travail ~1-3 j = une branche `feature/xxx` = une PR reviewable.
 - **Review** = PR ouverte ; un coéquipier review (jamais sa propre PR).
@@ -179,11 +191,13 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 ## 📋 Conventions du projet
 
 ### Code
+
 - **TypeScript strict** partout (`strict`, `noUncheckedIndexedAccess`…)
 - **ESM** (`"type": "module"`), **Node 24 LTS**
 - Imports nommés > default ; validation systématique **Zod** côté API
 
 ### Git
+
 - **Dépôt de travail = Git vogsphere 42** (rendu + collaboration directe, pas de repo miroir). Pas d'interface PR → la "Review" se fait en local (`git diff main..<branche>`, jamais sa propre branche), puis merge sur `main`.
 - **Branches** : `feature/<code-ticket>-<sujet-court>` / `fix/<sujet>` — kebab-case, sans accents/espaces. Ex : `feature/f1-scaffolding-front`, `fix/refresh-token`
 - **Commits** : Conventional Commits `type(scope): description` — types feat/fix/docs/refactor/chore/test/style, scope optionnel (db, auth, front…). Commits atomiques. Pas de force push sur `main`.
@@ -191,10 +205,12 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 - ⚠️ Pas de trailer `Co-Authored-By: Claude` dans les commits (préférence user)
 
 ### Docker
+
 - Services nommés explicitement, env **uniquement** dans `.env` (`${VAR}` dans compose)
 - Volumes bind-mount sous `./data/`, hot reload via polling (WSL2)
 
 ### Sécurité
+
 - `.env` jamais commit, `.env.example` versionné (obligatoire sujet)
 - Backend **HTTPS partout**, mots de passe forts hashés+salés, validation front **ET** back
 - Backend écoute sur `0.0.0.0`
@@ -220,10 +236,12 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 > ⚠️ **Préférence par défaut, ajustable par chaque membre de l'équipe.** On est 4 sur ce repo. Le point « code » ci-dessous est la préférence du créateur du repo — chacun peut dire à son Claude comment il préfère travailler.
 
 **Contexte commun à l'équipe** :
+
 - **On vient du C, on débute en TypeScript/Node/Docker** — explications claires, sans jargon inutile
 - On veut **comprendre le pourquoi** ; on apprécie les **questions de clarification** avant d'attaquer
 
 **Préférence par défaut du créateur du repo (brahim / pintodav75)** :
+
 - **Ne pas générer le code à sa place** (sauf demande explicite). Pas de blocs de code, même illustratifs : décrire les concepts, il écrit le code lui-même.
 - Préfère **explications + commandes shell** plutôt que blocs de code complets.
 - Mode de travail : 1) annoncer quoi/pourquoi 2) décrire les concepts 3) donner les commandes shell 4) laisser coder 5) relire ensemble.
@@ -254,18 +272,19 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 **Le frontend est le goulot d'étranglement absolu** (backend très en avance, front à zéro). Objectif semaine du 29 juin : faire décoller le front et prouver le stack end-to-end (register → login +2FA → profil → amis) branché sur le backend existant, + servir les rankings côté back.
 
 Tickets de la semaine (voir Trello) :
-- **F1** Scaffolding front + libs (TanStack Router/Query, Zustand, RHF, Zod, shadcn init) ; virer la démo ; layout/routing — *débloque les autres*
+
+- **F1** Scaffolding front + libs (TanStack Router/Query, Zustand, RHF, Zod, shadcn init) ; virer la démo ; layout/routing — _débloque les autres_
 - **F2** Client API + store auth (token + refresh auto, store Zustand) — dépend de F1
 - **FD** Design system : thème Tailwind + composants shadcn de base + style guide — dépend de F1, débloque le rendu de F3/F4/F5 (bonus possible : module Custom design system)
 - **F3** Pages register/login + flow 2FA — dépend de F2 + FD
 - **F4** Page profil + upload avatar — dépend de F2 + FD
 - **F5** Page amis — dépend de F2 + FD
-- **F6** *(stretch)* UI chat DM temps réel (WebSocket natif) — dépend de F2
+- **F6** _(stretch)_ UI chat DM temps réel (WebSocket natif) — dépend de F2
 - **B1** Endpoint leaderboard/rankings (sert la table `rankings`)
-- **B2** *(stretch)* Seed de données jeu (games/ladders/rankings factices)
+- **B2** _(stretch)_ Seed de données jeu (games/ladders/rankings factices)
 
 ⚠️ **Cette semaine on NE touche PAS** : matchmaking, notifications, UI matchs/disputes/teams — ce serait s'éparpiller tant que le front n'existe pas.
 
 ---
 
-*Dernière mise à jour : 29 juin 2026*
+_Dernière mise à jour : 3 juillet 2026_
