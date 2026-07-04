@@ -225,7 +225,7 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 4. **Fastify host** : toujours `host: '0.0.0.0'`
 5. **Nom de service ≠ localhost** dans le réseau Docker (`postgres:5432`)
 6. **Fastify affiche `127.0.0.1`** même en écoute `0.0.0.0` (cosmétique)
-7. **`node_modules` dans bind mount** : volume anonyme `/app/node_modules`
+7. **`node_modules` dans bind mount** : volume anonyme `/app/node_modules`. ⚠️ Ce volume ne se met **pas** à jour tout seul quand une dépendance est ajoutée → erreur Vite `Failed to resolve import` pour les coéquipiers. Fix : back **et** front font `npm install` au démarrage (`CMD ["sh","-c","npm install && npm run dev"]` dans les deux Dockerfiles) → le volume se resynchronise à chaque `docker compose up` (ticket I1)
 8. **Enum Drizzle sans `export`** non détecté par drizzle-kit → migration cassée. Toujours `export const xxxEnum = pgEnum(...)`
 9. **Interop CJS `@fastify/oauth2`** + `verbatimModuleSyntax` : workaround `(oauth2 as any).GOOGLE_CONFIGURATION`
 
