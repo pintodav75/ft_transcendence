@@ -19,6 +19,7 @@ import { redisClient } from './storage/redis.js';
 import fastifyCors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { laddersRoutes } from './routes/ladders.js';
+import { externalAccountsRoutes } from './routes/external-accounts.js';
 
 const server = fastify({
   https: {
@@ -74,6 +75,7 @@ await server.register(messagesRoutes, { prefix: '/messages' });
 await server.register(blocksRoutes, { prefix: '/blocks' });
 await server.register(gamesRoutes, { prefix: '/games' });
 await server.register(laddersRoutes, { prefix: '/ladders' });
+await server.register(externalAccountsRoutes, { prefix: '/users/me/external-accounts' });
 
 server.get('/ping', async (request, reply) => {
   return 'pong-from-docker\n';
