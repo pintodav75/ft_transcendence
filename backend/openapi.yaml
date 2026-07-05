@@ -6,7 +6,7 @@ info:
     Auth JWT (access token Bearer 15 min) + refresh token en cookie httpOnly
     (SameSite=Strict, Path=/auth). Chat temps réel hors-OpenAPI via WebSocket
     `/ws/chat` (documenté en fin de fichier pour mémoire).
-  version: 0.6.0
+  version: 0.7.0
   contact:
     name: ft_transcendence team
 
@@ -23,6 +23,8 @@ tags:
     description: Double authentification TOTP
   - name: Users
     description: Profil utilisateur et avatar
+  - name: External accounts
+    description: Liaisons de comptes in-game (§5.1 — requis pour jouer)
   - name: Friends
     description: Demandes d'amis et liste d'amis
   - name: Messages
@@ -304,6 +306,25 @@ components:
           type: string
           format: date-time
       required: [id, gameId, format, name, lockoutMinutes, createdAt]
+
+    # ---------- External accounts (in-game) ----------
+    ExternalAccount:
+      type: object
+      description: Un compte externe (in-game) lié par l'user (§5.1 du design).
+      properties:
+        provider:
+          type: string
+          enum: [riot, steam, epic, chess_com]
+        externalId:
+          type: string
+          description: Identifiant du compte chez le provider (saisi manuellement au MVP).
+          example: STEAM_76561198000000000
+        verified:
+          type: boolean
+          description: >
+            true si la liaison a été vérifiée (OAuth futur). Au MVP toujours false
+            (liaison manuelle déclarative).
+      required: [provider, externalId, verified]
 
   responses:
     Unauthorized:
@@ -856,6 +877,120 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # EXTERNAL ACCOUNTS (in-game)
+  # =====================================================================
+  /users/me/external-accounts:
+    get:
+      tags: [External accounts]
+      summary: Liste mes comptes externes liés
+      description: >
+        Renvoie les liaisons in-game de l'user authentifié (0 à 4, une par
+        provider). Liste vide si aucune liaison — pas une erreur (jamais 404).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des comptes liés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  externalAccounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExternalAccount'
+                required: [externalAccounts]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [External accounts]
+      summary: Lier un compte externe
+      description: >
+        Lie un compte in-game à l'user (MVP manuel → `verified = false`).
+        Un seul compte par provider (contrainte UNIQUE(user_id, provider)).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  enum: [riot, steam, epic, chess_com]
+                externalId:
+                  type: string
+                  minLength: 1
+                  example: Faker#KR1
+              required: [provider, externalId]
+      responses:
+        '201':
+          description: Liaison créée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  externalAccount:
+                    $ref: '#/components/schemas/ExternalAccount'
+                required: [externalAccount]
+        '400':
+          description: Body invalide (provider hors enum, externalId vide)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Provider déjà lié pour cet user (SQLSTATE 23505)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/me/external-accounts/{provider}:
+    delete:
+      tags: [External accounts]
+      summary: Délier un compte externe
+      description: >
+        Retire la liaison de ce provider pour l'user. Idempotent
+        (200 même si aucune liaison existante).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [riot, steam, epic, chess_com]
+      responses:
+        '200':
+          description: Liaison retirée (ou aucune existante)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Provider invalide (hors enum)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
 

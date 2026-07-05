@@ -104,7 +104,8 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 │       │   ├── messages.ts   # historique DM (REST)
 │       │   ├── chat.ts       # WebSocket DM temps réel (prefix /ws)
 │       │   ├── games.ts      # read-only (list + detail)
-│       │   └── ladders.ts    # read-only (list + detail)
+│       │   ├── ladders.ts    # read-only (list + detail + rankings)
+│       │   └── external-accounts.ts  # liaison compte in-game (GET/POST/DELETE, prefix /users/me/external-accounts)
 │       ├── storage/          # minio.ts, redis.ts
 │       ├── utils/            # blocks.ts (helper isBlocked)
 │       └── types/            # env.d.ts, fastify-jwt.d.ts, fastify-oauth2.d.ts
@@ -146,6 +147,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - Enums : `friendship_status`, `provider_enum` (riot/steam/epic/chess_com), `format_enum` (1v1/2v2/3v3/5v5), `match_status_enum` (pending/in_progress/awaiting_confirmation/completed/disputed/cancelled), `dispute_status_enum`, `dispute_resolution_enum`
 - Tables : `games`, `user_external_accounts` (champ `verified` central pour linking manuel vs OAuth), `ladders`, `teams`, `team_members`, `matches` (state machine via status), `match_sides` (check side_index ∈ {0,1}), `match_participants`, `disputes`, `dispute_evidence`, `rankings` (ELO, **XOR user/team** via check constraint, index ladder+elo desc)
 - Routes **read-only** faites : `GET /games`, `GET /games/:id`, `GET /ladders`, `GET /ladders/:id` (+ join game), `GET /ladders/:id/rankings` (leaderboard trié par ELO, join user/team, 404 si ladder absent — logique de mise en forme extraite dans le helper pur `utils/leaderboard.ts` `shapeRankings`, couverte par tests — **B2 fait**)
+- ✅ **Liaison de compte externe (in-game) faite — B4** : `external-accounts.ts` monté sur prefix `/users/me/external-accounts`, 3 routes authentifiées (validation Zod). `GET /` (liste mes liaisons, `[]` si aucune, projection `provider/externalId/verified`), `POST /` `{ provider, externalId }` (crée, `verified=false` par défaut, **201** ; provider hors enum ou externalId vide → **400** ; doublon `UNIQUE(user_id, provider)` capté via SQLSTATE `23505` → **409**), `DELETE /:provider` (idempotent → **200**, param validé contre l'enum → 400 sinon). Testé à la main (curl) + **openapi.yaml fait** ; ⚠️ **tests Vitest = à écrire** (DoD pas encore complète). Garde §5.1 « liaison requise pour jouer » **PAS ici** (sera dans le ticket création de match B5)
 - ✅ **Seed games/ladders fait** : les 5 jeux + 9 ladders sont insérés **dans les migrations `0008`/`0009`** (`INSERT ... ON CONFLICT DO NOTHING`, idempotent) — pas de script `seed.ts` séparé. Un `drizzle-kit migrate` sur clone neuf peuple donc les tables. ⚠️ La table `rankings` reste **vide** (pas encore de matchs → pas d'ELO) : le leaderboard renvoie donc `[]` tant qu'aucun match n'a généré de classement. Pour des faux classements en local : `npm run seed:dev` (script dev-only `backend/src/scripts/seed-dev.ts`, faux users/teams — **jamais** dans une migration).
 - ⚠️ **Toutes les règles business §5.1–5.8 du design (`docs/schema.md`) sont à coder** : liaison de compte requise, lockout, soumission de score, accord/dispute, calcul ELO (K=32, départ 1000), dispute timeout. La DB est prête, la logique non.
 
@@ -155,7 +157,7 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 
 ### Reste à faire (backend)
 
-- Routes **teams** (CRUD, membership), **user_external_accounts** (linking in-game manuel + OAuth Steam/Riot)
+- Routes **teams** (CRUD, membership) ; **vérification** des comptes externes (OAuth Steam/Riot → `verified = true`) — le linking manuel est fait (B4)
 - Routes **matches** : création, soumission de résultats, state machine, confirmation
 - Routes **disputes** (ouverture, evidence upload, résolution admin)
 - **Matchmaking worker** (file d'attente, matching par ELO) — la pièce centrale, pas encore commencée
