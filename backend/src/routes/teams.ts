@@ -9,6 +9,8 @@ const createTeamSchema = z.object({
   name: z.string().trim().min(1).max(50),
 });
 const addMemberSchema = z.object({ userId: z.uuid() });
+const idParamSchema = z.object({ id: z.uuid() });
+const memberParamsSchema = z.object({ id: z.uuid(), userId: z.uuid() });
 
 export const teamsRoutes: FastifyPluginAsync = async (server) => {
   server.post('/', { onRequest: [server.authenticate] }, async (request, reply) => {
@@ -87,7 +89,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
     { onRequest: [server.authenticate] },
     async (request, reply) => {
       try {
-        const id = request.params.id;
+        const { id } = idParamSchema.parse(request.params);
         const [team] = await db
           .select()
           .from(teamsTable)
@@ -118,6 +120,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         };
         return reply.code(200).send({ team: teamSafe, members: membersSafe });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         return reply.code(500).send({ error: 'Internal error' });
       }
     },
@@ -129,7 +132,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       try {
         const data = addMemberSchema.parse(request.body);
         const captainId = request.user.sub;
-        const teamId = request.params.id;
+        const { id: teamId } = idParamSchema.parse(request.params);
         const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
         if (!team) return reply.code(404).send({ error: 'no team found' });
         if (team.captainId !== captainId)
@@ -177,8 +180,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const me = request.user.sub;
-        const teamId = request.params.id;
-        const targetId = request.params.userId;
+        const { id: teamId, userId: targetId } = memberParamsSchema.parse(request.params);
         const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
         if (!team) return reply.code(404).send({ error: 'no team found' });
         if (me !== team.captainId && me !== targetId)
@@ -190,6 +192,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, targetId)));
         return reply.code(200).send({ ok: true });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         return reply.code(500).send({ error: 'Internal error' });
       }
     },
@@ -200,7 +203,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const me = request.user.sub;
-        const teamId = request.params.id;
+        const { id: teamId } = idParamSchema.parse(request.params);
         const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
         if (!team) return reply.code(404).send({ error: 'team not found' });
         if (team.captainId !== me)
@@ -208,6 +211,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         await db.delete(teamsTable).where(eq(teamsTable.id, teamId));
         return reply.code(200).send({ ok: true });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         return reply.code(500).send({ error: 'Internal error' });
       }
     },
