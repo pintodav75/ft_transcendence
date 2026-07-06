@@ -35,6 +35,8 @@ tags:
     description: Catalogue des jeux supportés (lecture seule, seed initial)
   - name: Ladders
     description: Compétitions = jeu × format (lecture seule, seed initial)
+  - name: Teams
+    description: Équipes par ladder (CRUD, membres, capitaine) — socle du matchmaking
   - name: System
     description: Endpoints utilitaires
 
@@ -325,6 +327,61 @@ components:
             true si la liaison a été vérifiée (OAuth futur). Au MVP toujours false
             (liaison manuelle déclarative).
       required: [provider, externalId, verified]
+
+    # ---------- Teams ----------
+    Team:
+      type: object
+      description: Ligne brute d'une équipe (renvoyée à la création).
+      properties:
+        id: { type: string, format: uuid }
+        ladderId: { type: string, format: uuid }
+        name: { type: string, maxLength: 50 }
+        captainId: { type: string, format: uuid }
+        logoUrl: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, ladderId, name, captainId, logoUrl, createdAt, updatedAt]
+
+    TeamListItem:
+      type: object
+      description: Une de mes teams (GET /teams), infos ladder aplaties.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        ladderId: { type: string, format: uuid }
+        ladder:
+          type: string
+          description: Nom du ladder
+        format: { type: string, enum: [1v1, 2v2, 3v3, 5v5] }
+        gameId: { type: string }
+        isCaptain: { type: boolean }
+        logoUrl: { type: string, nullable: true }
+      required: [id, name, ladderId, ladder, format, gameId, isCaptain, logoUrl]
+
+    TeamDetail:
+      type: object
+      description: Détail d'une team (GET /teams/{id}), infos ladder aplaties.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        ladderId: { type: string, format: uuid }
+        ladderName: { type: string }
+        format: { type: string, enum: [1v1, 2v2, 3v3, 5v5] }
+        gameId: { type: string }
+        captainId: { type: string, format: uuid }
+        logoUrl: { type: string, nullable: true }
+      required: [id, name, ladderId, ladderName, format, gameId, captainId, logoUrl]
+
+    TeamMember:
+      type: object
+      description: Un membre d'une team (le capitaine y figure avec isCaptain=true).
+      properties:
+        id: { type: string, format: uuid }
+        pseudo: { type: string }
+        displayName: { type: string, nullable: true }
+        avatarUrl: { type: string, nullable: true }
+        isCaptain: { type: boolean }
+      required: [id, pseudo, displayName, avatarUrl, isCaptain]
 
   responses:
     Unauthorized:
@@ -1608,6 +1665,275 @@ paths:
                 required: [rankings]
         '404':
           description: Ladder inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # =====================================================================
+  # TEAMS
+  # =====================================================================
+  /teams:
+    post:
+      tags: [Teams]
+      summary: Créer une équipe
+      description: >
+        Crée une team sur un ladder d'équipe (2v2+). Le créateur devient
+        capitaine ET premier membre (transaction). Refusé sur un ladder 1v1
+        (solo). Roster plafonné à 10 (enforcé au fil des ajouts).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ladderId: { type: string, format: uuid }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+                  example: Bisounours
+              required: [ladderId, name]
+      responses:
+        '201':
+          description: Team créée (capitaine ajouté comme membre)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    $ref: '#/components/schemas/Team'
+                required: [team]
+        '400':
+          description: Body invalide (ValidationError) ou ladder 1v1 (Error)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Ladder inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Nom déjà pris sur ce ladder, ou déjà dans une team sur ce ladder (23505)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Teams]
+      summary: Mes équipes
+      description: >
+        Toutes mes teams, tous jeux et ladders confondus (une par ladder).
+        Liste vide si aucune.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Mes teams
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TeamListItem'
+                required: [teams]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /teams/{id}:
+    get:
+      tags: [Teams]
+      summary: Détail d'une équipe
+      description: >
+        Team + ladder aplati + liste des membres (le capitaine y figure
+        avec isCaptain=true).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Détail de la team
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    $ref: '#/components/schemas/TeamDetail'
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TeamMember'
+                required: [team, members]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Team inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Teams]
+      summary: Dissoudre une équipe
+      description: Supprime la team (capitaine only). Les membres partent en cascade DB.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Team dissoute (cascade sur les membres)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Seul le capitaine peut dissoudre
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Team inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /teams/{id}/members:
+    post:
+      tags: [Teams]
+      summary: Ajouter un membre
+      description: >
+        Ajoute un membre (capitaine only). Gardes : roster < 10, user existant,
+        pas déjà membre, pas déjà dans une autre team du même ladder.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId: { type: string, format: uuid }
+              required: [userId]
+      responses:
+        '201':
+          description: Membre ajouté
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Body invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Seul le capitaine peut ajouter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Team ou user inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Team pleine (10), déjà membre, ou déjà dans une team sur ce ladder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /teams/{id}/members/{userId}:
+    delete:
+      tags: [Teams]
+      summary: Retirer un membre (kick ou quit)
+      description: >
+        Retire un membre : autorisé au capitaine (kick) ou au membre lui-même
+        (quit). Le capitaine ne peut pas se retirer (400 → dissoudre). Idempotent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Membre retiré (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: Le capitaine ne peut pas se retirer (dissoudre plutôt)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Ni capitaine, ni le membre lui-même
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Team inconnue
           content:
             application/json:
               schema:
