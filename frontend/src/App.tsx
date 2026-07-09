@@ -1,13 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useAuthStore } from '@/stores/auth-store'
 
 function App() {
   const [showPassword, setShowPassword] = useState(false)
+  const ready = useAuthStore((state) => state.ready)
+  const user = useAuthStore((state) => state.user)
+  const restoreSession = useAuthStore((state) => state.restoreSession)
+
+  useEffect(() => {
+    void restoreSession()
+  }, [restoreSession])
 
   return (
     <main className="arena-background relative min-h-screen overflow-hidden px-5 py-5 text-text-primary sm:px-8">
@@ -49,6 +57,9 @@ function App() {
             <p className="flex items-center gap-3 text-xs font-bold uppercase text-text-muted">
               <span className="arena-dot-success h-2 w-2 rounded-full" />
               Terminal de match / Connexion
+              <span className="ml-auto max-w-[120px] truncate text-[10px]">
+                {ready ? user?.pseudo ?? 'invite' : 'session...'}
+              </span>
             </p>
 
             <div>

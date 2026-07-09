@@ -91,7 +91,8 @@ cp .env.example .env
 ```bash
 mkdir -p backend/certs
 openssl req -x509 -newkey rsa:4096 -keyout backend/certs/key.pem \
-  -out backend/certs/cert.pem -days 365 -nodes -subj "/CN=localhost"
+  -out backend/certs/cert.pem -days 365 -nodes -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 
 ### 4. Lancer toute l'infra
@@ -102,12 +103,32 @@ docker compose up -d
 
 Premier démarrage : Docker va build les images backend/frontend (~1-2 min). Les suivants seront instantanés.
 
-### 5. Vérifier que ça tourne
+### 5. Appliquer les migrations de la base
+
+⚠️ Obligatoire au premier lancement : Postgres démarre vide. Sans migrations,
+les tables n'existent pas et les routes auth (`register`, `login`) échouent.
+
+```bash
+docker compose exec backend npx drizzle-kit migrate
+```
+
+Vérifie que les tables ont bien été créées :
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
+```
+
+À refaire après un `git pull` qui ramène de nouvelles migrations dans `backend/drizzle/`.
+
+### 6. Vérifier que ça tourne
 
 ```bash
 docker compose ps                  # tous les services en "Up"
 curl -k https://localhost:3000/ping  # doit renvoyer "pong-from-docker"
 ```
+
+Dans le navigateur, ouvre aussi `https://localhost:3000/ping` et accepte
+l'exception de sécurité du certificat auto-signé avant d'utiliser le front.
 
 ## 🌐 UIs locales
 
@@ -142,8 +163,10 @@ docker compose down -v
 # Rebuild après modif du Dockerfile (le `-V` rafraîchit les volumes anonymes)
 docker compose up -d --build -V <service>
 
-# Migrations Drizzle (à lancer depuis le backend conteneurisé)
+# Générer une migration après modification du schéma Drizzle
 docker compose exec backend npx drizzle-kit generate
+
+# Appliquer les migrations existantes
 docker compose exec backend npx drizzle-kit migrate
 ```
 

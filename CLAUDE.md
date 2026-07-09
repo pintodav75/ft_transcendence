@@ -43,10 +43,12 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 
 ## 🛠️ Stack technique
 
-**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4
+**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4 — _fondation F0 en place, F0-A implémenté et testé_
 
-- ⚠️ **Encore à l'état démo Vite** — aucune lib applicative installée à ce jour
-- Libs prévues à installer : TanStack Router + TanStack Query, Zustand, React Hook Form, Zod, shadcn/ui
+- ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
+- ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
+- Libs front installées : TanStack Router + TanStack Query, Zustand, React Hook Form, Zod, `lucide-react`, `clsx`, `tailwind-merge`
+- ⚠️ **Pas encore de pages applicatives** : `App.tsx` reste un écran temporaire de validation visuelle de la DA + bootstrap session
 - ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
 
 **Backend** : Fastify v5 sur Node 24 LTS (TypeScript strict, ESM) — _en place et bien avancé_
@@ -111,15 +113,22 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 │       ├── utils/            # blocks.ts (helper isBlocked)
 │       └── types/            # env.d.ts, fastify-jwt.d.ts, fastify-oauth2.d.ts
 │
-├── frontend/                # ⚠️ encore la démo Vite (App.tsx, assets) — RIEN de réel
-│   └── src/ (main.tsx, App.tsx, App.css, index.css, assets/)
+├── frontend/                # Fondation front F0 en place, pages applicatives à faire
+│   ├── components.json       # config shadcn-like
+│   ├── package.json          # libs front installées (TanStack, Zustand, RHF, Zod, lucide, clsx...)
+│   └── src/
+│       ├── App.tsx           # écran temporaire de validation visuelle de la DA
+│       ├── index.css         # source de vérité visuelle : tokens Tailwind + styles globaux + utilitaires
+│       ├── main.tsx
+│       ├── lib/utils.ts      # helper cn() = clsx + tailwind-merge
+│       └── components/ui/    # button.tsx, input.tsx, label.tsx, card.tsx
 │
 └── data/                    # volumes bind-mount Postgres/MinIO (NON versionné)
 ```
 
 ---
 
-## ✅ État d'avancement (au 29 juin 2026)
+## ✅ État d'avancement (au 8 juillet 2026)
 
 ### Backend — TERMINÉ et fonctionnel
 
@@ -153,9 +162,32 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - ✅ **Seed games/ladders fait** : les 5 jeux + 9 ladders sont insérés **dans les migrations `0008`/`0009`** (`INSERT ... ON CONFLICT DO NOTHING`, idempotent) — pas de script `seed.ts` séparé. Un `drizzle-kit migrate` sur clone neuf peuple donc les tables. ⚠️ La table `rankings` reste **vide** (pas encore de matchs → pas d'ELO) : le leaderboard renvoie donc `[]` tant qu'aucun match n'a généré de classement. Pour des faux classements en local : `npm run seed:dev` (script dev-only `backend/src/scripts/seed-dev.ts`, faux users/teams — **jamais** dans une migration).
 - ⚠️ **Toutes les règles business §5.1–5.8 du design (`docs/schema.md`) sont à coder** : liaison de compte requise, lockout, soumission de score, accord/dispute, calcul ELO (K=32, départ 1000), dispute timeout. La DB est prête, la logique non.
 
-### Frontend — ❌ NON COMMENCÉ
+### Frontend — F0 TERMINÉ, F0-A implémenté/testé, pages applicatives à faire
 
-Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contient que React + Tailwind — **aucune** lib applicative (router, query, store, forms, validation). `vite.config.ts` OK (host true, port 5173, polling WSL2). C'est le **gros retard** du projet et la priorité immédiate.
+**Fondation design F0 mergée** :
+
+- `frontend/src/index.css` est la **source de vérité visuelle** : tokens Tailwind v4 couleurs, polices, radius, shadows, styles globaux et utilitaires DA
+- DA retenue : fond sombre compétitif et sobre ; rappels rouge/bleu ; action principale violette `action-primary` ; pas de texte courant en gradient
+- Composants UI de base : `Button` (`primary`, `secondary`, `ghost`), `Input`, `Label`, `Card` + `CardHeader`/`CardContent`/`CardFooter`
+- Setup shadcn-like : `frontend/components.json`, alias `@/*`, `src/lib/utils.ts` avec `cn()`
+- `App.tsx` n'est **pas** une page réelle : c'est seulement l'écran temporaire de validation visuelle de la DA
+
+**Client API + auth store F0-A implémenté/testé** :
+
+- Store Zustand dans `frontend/src/stores/auth-store.ts` : `user`, `accessToken`, `ready`, `setSession`, `setAccessToken`, `clearSession`, `restoreSession`, `logout`
+- Client API dans `frontend/src/lib/api.ts` : base `https://localhost:3000`, `credentials: 'include'`, Bearer automatique depuis le store, erreurs typées `ApiError`
+- Refresh transparent : sur `401`, `POST /auth/refresh`, mise à jour du token, replay de l'appel **une seule fois** ; si refresh échoue → session locale vidée + logout backend best-effort
+- Types auth dans `frontend/src/types/auth.ts`, config base URL dans `frontend/src/lib/api-config.ts`
+- Testé avec backend réel : register/login manuel en console navigateur, `apiFetch('/auth/me')`, token invalide → refresh/retry OK, reload page → session restaurée
+- Vérifications passées : `npm run build`, `npm run lint`, `git diff --check`
+
+**Règles front à respecter dès F0-A et les pages suivantes** :
+
+- importer avec `@/...`, éviter les chemins relatifs longs
+- ne pas écrire de couleurs/polices/radius/shadows en dur dans les pages ; ajouter d'abord un token dans `index.css` si nécessaire
+- réutiliser les composants `frontend/src/components/ui` autant que possible
+- utiliser `lucide-react` pour les icônes standard
+- lancer `npm run build` et `npm run lint` dans `frontend/` avant review
 
 ### Reste à faire (backend)
 
@@ -181,8 +213,8 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 
 - On **s'assigne** une carte Todo (membre Trello) pour la passer en In Progress.
 - Une carte = une unité de travail ~1-3 j = une branche `feature/xxx` = une PR reviewable.
-- **Review** = PR ouverte ; un coéquipier review (jamais sa propre PR).
-- Sur approbation → **merge sur `main`** → carte déplacée en **Done** (Done = code intégré, pas juste "prêt à merger").
+- **Review** = diff local relu par un coéquipier (jamais sa propre branche).
+- Sur approbation → **merge sur `master`** → carte déplacée en **Done** (Done = code intégré, pas juste "prêt à merger").
 
 **Gabarit de carte** : titre (verbe + objet), description, **Definition of Done**, assigné, label (`backend` / `frontend` / `infra` / `docs`).
 
@@ -199,12 +231,13 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 - **TypeScript strict** partout (`strict`, `noUncheckedIndexedAccess`…)
 - **ESM** (`"type": "module"`), **Node 24 LTS**
 - Imports nommés > default ; validation systématique **Zod** côté API
+- Front : tokens Tailwind depuis `frontend/src/index.css`, composants UI dans `frontend/src/components/ui`, imports `@/...`, pas de couleurs en dur dans les pages
 
 ### Git
 
-- **Dépôt de travail = Git vogsphere 42** (rendu + collaboration directe, pas de repo miroir). Pas d'interface PR → la "Review" se fait en local (`git diff main..<branche>`, jamais sa propre branche), puis merge sur `main`.
+- **Dépôt de travail = Git vogsphere 42** (rendu + collaboration directe, pas de repo miroir). Pas d'interface PR → la "Review" se fait en local (`git diff master..<branche>`, jamais sa propre branche), puis merge sur `master`.
 - **Branches** : `feature/<code-ticket>-<sujet-court>` / `fix/<sujet>` — kebab-case, sans accents/espaces. Ex : `feature/f1-scaffolding-front`, `fix/refresh-token`
-- **Commits** : Conventional Commits `type(scope): description` — types feat/fix/docs/refactor/chore/test/style, scope optionnel (db, auth, front…). Commits atomiques. Pas de force push sur `main`.
+- **Commits** : Conventional Commits `type(scope): description` — types feat/fix/docs/refactor/chore/test/style, scope optionnel (db, auth, front…). Commits atomiques. Pas de force push sur `master`.
 - ⚠️ **Identité git par dev** = identité 42 (`user.name`/`user.email`) — 42 vérifie les contributions individuelles.
 - ⚠️ Pas de trailer `Co-Authored-By: Claude` dans les commits (préférence user)
 
@@ -232,6 +265,9 @@ Encore la démo Vite (`App.tsx` = page démo "wemby"). `package.json` ne contien
 7. **`node_modules` dans bind mount** : volume anonyme `/app/node_modules`. ⚠️ Ce volume ne se met **pas** à jour tout seul quand une dépendance est ajoutée → erreur Vite `Failed to resolve import` pour les coéquipiers. Fix : back **et** front font `npm install` au démarrage (`CMD ["sh","-c","npm install && npm run dev"]` dans les deux Dockerfiles) → le volume se resynchronise à chaque `docker compose up` (ticket I1)
 8. **Enum Drizzle sans `export`** non détecté par drizzle-kit → migration cassée. Toujours `export const xxxEnum = pgEnum(...)`
 9. **Interop CJS `@fastify/oauth2`** + `verbatimModuleSyntax` : workaround `(oauth2 as any).GOOGLE_CONFIGURATION`
+10. **F0 front = fondation visuelle uniquement** : ne pas traiter `App.tsx` comme une vraie page login ; elle sert seulement de référence DA temporaire
+11. **Certificat HTTPS dev** : générer `backend/certs` avec `subjectAltName=DNS:localhost,IP:127.0.0.1`, puis accepter `https://localhost:3000/ping` dans le navigateur avant d'utiliser le front
+12. **Migrations obligatoires au 1er lancement** : `docker compose exec backend npx drizzle-kit migrate`, sinon `register/login` plantent car la table `users` n'existe pas
 
 ---
 
@@ -273,22 +309,15 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ## 🎯 Prochaine action immédiate
 
-**Le frontend est le goulot d'étranglement absolu** (backend très en avance, front à zéro). Objectif semaine du 29 juin : faire décoller le front et prouver le stack end-to-end (register → login +2FA → profil → amis) branché sur le backend existant, + servir les rankings côté back.
+**Ticket F0-A — Client API + store auth (fetch/refresh + Zustand session) : implémenté et testé.**
 
-Tickets de la semaine (voir Trello) :
+État technique : complet côté branche et testé avec backend réel.
 
-- **F1** Scaffolding front + libs (TanStack Router/Query, Zustand, RHF, Zod, shadcn init) ; virer la démo ; layout/routing — _débloque les autres_
-- **F2** Client API + store auth (token + refresh auto, store Zustand) — dépend de F1
-- **FD** Design system : thème Tailwind + composants shadcn de base + style guide — dépend de F1, débloque le rendu de F3/F4/F5 (bonus possible : module Custom design system)
-- **F3** Pages register/login + flow 2FA — dépend de F2 + FD
-- **F4** Page profil + upload avatar — dépend de F2 + FD
-- **F5** Page amis — dépend de F2 + FD
-- **F6** _(stretch)_ UI chat DM temps réel (WebSocket natif) — dépend de F2
-- **B1** Endpoint leaderboard/rankings (sert la table `rankings`)
-- **B2** _(stretch)_ Seed de données jeu (games/ladders/rankings factices)
-
-⚠️ **Cette semaine on NE touche PAS** : matchmaking, notifications, UI matchs/disputes/teams — ce serait s'éparpiller tant que le front n'existe pas.
+- Workflow restant hors code : review locale par un coéquipier, puis merge sur `master`
+- Après merge sur `master` : carte Trello → Done
+- Ticket suivant logique : F0-B garde de routes / bootstrap app, maintenant débloqué par `ready`, `user`, `accessToken`
+- Pages auth/profil/social restent à faire après ce socle
 
 ---
 
-_Dernière mise à jour : 6 juillet 2026_
+_Dernière mise à jour : 9 juillet 2026_
