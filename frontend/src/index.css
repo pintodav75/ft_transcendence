@@ -1,9 +1,10 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-display: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 
   --color-background-app: #070a12;
   --color-surface-card: #111723;
@@ -29,6 +30,24 @@
   --radius-control: 6px;
   --shadow-card: 0 28px 90px rgba(0, 0, 0, 0.48), 0 0 60px rgba(82, 70, 188, 0.1);
   --shadow-action-primary: 0 18px 38px rgba(82, 70, 188, 0.3);
+}
+
+/* Shared "panel" surface: the rounded, bordered card used by the floating nav
+   boxes. Arena flavour of the old neon-green panel — define the look once,
+   components add only their own layout (width, padding, flex, position). */
+@utility panel {
+  @apply rounded-card border border-border-subtle bg-surface-card/80 shadow-card;
+}
+
+/* bold + uppercase + wide-tracking text style. */
+@utility label-caps {
+  @apply font-bold uppercase tracking-wide;
+}
+
+/* For accessibility, interactive elements when focused with the keyboard (TAB) have a purple outline for interactive elements.
+   constant here; the offset (2 or 4) stays at the call site. */
+@utility focus-ring {
+  @apply focus-visible:outline-2 focus-visible:outline-action-primary-hover;
 }
 
 @layer base {
@@ -61,9 +80,21 @@
 @layer utilities {
   .arena-background {
     background:
-      radial-gradient(circle at 10% 48%, color-mix(in srgb, var(--color-arena-red) 18%, transparent), transparent 34%),
-      radial-gradient(circle at 90% 46%, color-mix(in srgb, var(--color-arena-blue) 21%, transparent), transparent 36%),
-      radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--color-action-primary) 10%, transparent), transparent 28%),
+      radial-gradient(
+        circle at 10% 48%,
+        color-mix(in srgb, var(--color-arena-red) 18%, transparent),
+        transparent 34%
+      ),
+      radial-gradient(
+        circle at 90% 46%,
+        color-mix(in srgb, var(--color-arena-blue) 21%, transparent),
+        transparent 36%
+      ),
+      radial-gradient(
+        circle at 50% 45%,
+        color-mix(in srgb, var(--color-action-primary) 10%, transparent),
+        transparent 28%
+      ),
       linear-gradient(180deg, var(--color-background-app) 0%, var(--color-surface-input) 100%);
   }
 
@@ -83,11 +114,21 @@
   }
 
   .bg-arena-gradient {
-    background-image: linear-gradient(100deg, var(--color-arena-red) 0%, var(--color-action-primary) 48%, var(--color-arena-blue) 100%);
+    background-image: linear-gradient(
+      100deg,
+      var(--color-arena-red) 0%,
+      var(--color-action-primary) 48%,
+      var(--color-arena-blue) 100%
+    );
   }
 
   .text-arena-gradient {
-    background-image: linear-gradient(100deg, var(--color-arena-red) 0%, var(--color-action-primary) 45%, var(--color-arena-blue) 100%);
+    background-image: linear-gradient(
+      100deg,
+      var(--color-arena-red) 0%,
+      var(--color-action-primary) 45%,
+      var(--color-arena-blue) 100%
+    );
     background-clip: text;
     color: transparent;
     -webkit-background-clip: text;

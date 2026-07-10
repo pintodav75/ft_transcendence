@@ -1,14 +1,17 @@
-import path from 'node:path'
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
+import { defineConfig } from 'vite';
+import { fileURLToPath, URL } from 'node:url';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { tanstackRouter } from '@tanstack/router-plugin/vite';
+// tanstackRouter is the auto generation of the routeTree.gen.ts
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react(), tailwindcss()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // this makes imports like @/components/ui/button work instead of ../../components/ui/button.
     },
   },
   server: {
@@ -16,6 +19,7 @@ export default defineConfig({
     port: 5173,
     watch: {
       usePolling: true,
+      // idk alternative way of hot reload that works on Windows too
     },
   },
-})
+});

@@ -43,12 +43,13 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 
 ## 🛠️ Stack technique
 
-**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4 — _fondation F0 en place, F0-A implémenté et testé_
+**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4 — _fondation F0 + F0-A + F0-B (routing & home) en place_
 
 - ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
 - ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
-- Libs front installées : TanStack Router + TanStack Query, Zustand, React Hook Form, Zod, `lucide-react`, `clsx`, `tailwind-merge`
-- ⚠️ **Pas encore de pages applicatives** : `App.tsx` reste un écran temporaire de validation visuelle de la DA + bootstrap session
+- ✅ **F0-B routing + home (branche `feature/f0b-routeur-base-home`)** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, root layout `__root.tsx` (restore session au mount), garde de route sur `/dashboard`, page home/landing arène complète + page login (UI seule, pas encore câblée au back)
+- Libs front : **TanStack Router branché** + TanStack Query (installé), Zustand, React Hook Form, Zod, `lucide-react`, `clsx`, `tailwind-merge`
+- ⚠️ **Pages encore majoritairement placeholders** : `/` (home/landing) et `/login` ont une vraie UI ; `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` sont des stubs. Login **pas encore câblé** (formulaire non soumis). `App.tsx` supprimé (renommé `pages/login.tsx`)
 - ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
 
 **Backend** : Fastify v5 sur Node 24 LTS (TypeScript strict, ESM) — _en place et bien avancé_
@@ -85,8 +86,8 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ├── .env / .env.example / .gitignore
 ├── CLAUDE.md
 ├── docs/
-│   ├── schema.md            # design complet du domaine jeu (étape 5.5)
-│   └── mockups/             # maquettes UI
+│   └── schema.md            # design complet du domaine jeu (étape 5.5)
+│                            # (maquettes HTML/CSS déplacées hors repo → .idea/, gitignoré)
 │
 ├── backend/
 │   ├── Dockerfile, package.json, tsconfig.json
@@ -113,15 +114,23 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 │       ├── utils/            # blocks.ts (helper isBlocked)
 │       └── types/            # env.d.ts, fastify-jwt.d.ts, fastify-oauth2.d.ts
 │
-├── frontend/                # Fondation front F0 en place, pages applicatives à faire
+├── frontend/                # F0 + F0-A + F0-B en place (routing, home, login UI)
 │   ├── components.json       # config shadcn-like
-│   ├── package.json          # libs front installées (TanStack, Zustand, RHF, Zod, lucide, clsx...)
+│   ├── package.json          # TanStack Router (branché) + Query, Zustand, RHF, Zod, lucide, clsx...
 │   └── src/
-│       ├── App.tsx           # écran temporaire de validation visuelle de la DA
-│       ├── index.css         # source de vérité visuelle : tokens Tailwind + styles globaux + utilitaires
-│       ├── main.tsx
-│       ├── lib/utils.ts      # helper cn() = clsx + tailwind-merge
-│       └── components/ui/    # button.tsx, input.tsx, label.tsx, card.tsx
+│       ├── main.tsx          # createRouter(routeTree) + RouterProvider (plus d'App.tsx)
+│       ├── routeTree.gen.ts  # généré par le plugin TanStack (VERSIONNÉ, ne pas éditer à la main)
+│       ├── index.css         # source de vérité visuelle : tokens Tailwind + @utility (panel/label-caps/focus-ring) + utilitaires arène
+│       ├── routes/           # wrappers file-based createFileRoute : __root, index, home, login, register, privacy, terms, dashboard (gardé)
+│       ├── pages/            # composants de page : index (home/landing arène), login (UI), home/register/privacy/terms (stubs)
+│       ├── stores/           # auth-store.ts (Zustand session — F0-A)
+│       ├── lib/              # api.ts (fetch+refresh), api-config.ts, utils.ts (cn())
+│       ├── types/            # auth.ts
+│       ├── assets/images/    # bg.webp (hero)
+│       └── components/
+│           ├── ui/           # button, input, label, card, avatar, menu-item, icon-menu-item
+│           ├── layout/       # LeftNav, RightNav, AuthNav, SiteFooter
+│           └── home/         # HeroBanner, GameRail
 │
 └── data/                    # volumes bind-mount Postgres/MinIO (NON versionné)
 ```
@@ -162,7 +171,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - ✅ **Seed games/ladders fait** : les 5 jeux + 9 ladders sont insérés **dans les migrations `0008`/`0009`** (`INSERT ... ON CONFLICT DO NOTHING`, idempotent) — pas de script `seed.ts` séparé. Un `drizzle-kit migrate` sur clone neuf peuple donc les tables. ⚠️ La table `rankings` reste **vide** (pas encore de matchs → pas d'ELO) : le leaderboard renvoie donc `[]` tant qu'aucun match n'a généré de classement. Pour des faux classements en local : `npm run seed:dev` (script dev-only `backend/src/scripts/seed-dev.ts`, faux users/teams — **jamais** dans une migration).
 - ⚠️ **Toutes les règles business §5.1–5.8 du design (`docs/schema.md`) sont à coder** : liaison de compte requise, lockout, soumission de score, accord/dispute, calcul ELO (K=32, départ 1000), dispute timeout. La DB est prête, la logique non.
 
-### Frontend — F0 TERMINÉ, F0-A implémenté/testé, pages applicatives à faire
+### Frontend — F0 + F0-A + F0-B (routing/home) en place, câblage auth des pages à faire
 
 **Fondation design F0 mergée** :
 
@@ -170,7 +179,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - DA retenue : fond sombre compétitif et sobre ; rappels rouge/bleu ; action principale violette `action-primary` ; pas de texte courant en gradient
 - Composants UI de base : `Button` (`primary`, `secondary`, `ghost`), `Input`, `Label`, `Card` + `CardHeader`/`CardContent`/`CardFooter`
 - Setup shadcn-like : `frontend/components.json`, alias `@/*`, `src/lib/utils.ts` avec `cn()`
-- `App.tsx` n'est **pas** une page réelle : c'est seulement l'écran temporaire de validation visuelle de la DA
+- ⚠️ `App.tsx` (ex-écran de validation DA) a été **supprimé** en F0-B : le bootstrap se fait via le routeur (`main.tsx` → `RouterProvider`) et `pages/login.tsx`
 
 **Client API + auth store F0-A implémenté/testé** :
 
@@ -180,6 +189,17 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - Types auth dans `frontend/src/types/auth.ts`, config base URL dans `frontend/src/lib/api-config.ts`
 - Testé avec backend réel : register/login manuel en console navigateur, `apiFetch('/auth/me')`, token invalide → refresh/retry OK, reload page → session restaurée
 - Vérifications passées : `npm run build`, `npm run lint`, `git diff --check`
+
+**Routing + home F0-B implémenté (branche `feature/f0b-routeur-base-home`, pas encore mergé)** :
+
+- **TanStack Router file-based** : plugin `@tanstack/router-plugin/vite` (`tanstackRouter({ target: 'react', autoCodeSplitting: true })`) génère `src/routeTree.gen.ts` (**versionné**, ne pas éditer) ; `main.tsx` monte `createRouter({ routeTree })` + `<RouterProvider>` avec augmentation de module TS (`Register`)
+- **Pattern route/page** : `src/routes/*.tsx` = wrappers minces `createFileRoute` (config routeur) ; `src/pages/*.tsx` = vrais composants. Routes : `/` (home/landing), `/home`, `/login`, `/register`, `/privacy`, `/terms`, `/dashboard`
+- **`__root.tsx`** = layout racine monté **une seule fois** pour toute l'app : lance `restoreSession()` au mount (`useEffect`), rend `<Outlet/>` + `<TanStackRouterDevtools/>` (c'est ici que la session est restaurée, plus dans `App.tsx`)
+- **Garde de route** sur `/dashboard` : `beforeLoad` attend `restoreSession()` si `!ready` (dédupliqué dans le store, donc peu coûteux), puis `throw redirect({ to: '/login' })` si pas de `user` — **le patron à réutiliser** pour toute page protégée
+- **Home / landing (`pages/index.tsx`)** : layout arène complet — rails flottants fixes `LeftNav` (nav + sélecteur langue + `AuthNav`) et `RightNav` (avatar + icônes), viewport central scrollable avec `HeroBanner` (asset `bg.webp`) + `GameRail` (rail scroll-snap de cartes jeu, **données en dur** pour l'instant) + `SiteFooter` (liens Terms/Privacy)
+- **Nouveaux composants UI** : `avatar` (sans dépendance radix), `menu-item` (rend un `<Link>` TanStack si prop `to`, sinon `<button>`), `icon-menu-item` (bouton icône + tooltip)
+- **Nouveaux `@utility` dans `index.css`** : `panel` (surface carte des rails flottants), `label-caps` (gras/majuscules/tracking), `focus-ring` (outline violet clavier, a11y). Utilitaires arène (`arena-background`, `text-arena-gradient`, `arena-wordmark`…) déjà présents
+- ⚠️ **Login (`pages/login.tsx`) pas encore câblé** : UI complète (fond arène, wordmark VS, champ password avec toggle œil `lucide`) mais **aucun handler de soumission**, pas d'appel `login` — lit juste `ready`/`user` du store pour l'affichage. Idem `/register` (stub)
 
 **Règles front à respecter dès F0-A et les pages suivantes** :
 
@@ -309,15 +329,14 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ## 🎯 Prochaine action immédiate
 
-**Ticket F0-A — Client API + store auth (fetch/refresh + Zustand session) : implémenté et testé.**
+**Ticket F0-B — Routing (TanStack file-based) + page home + garde de route : implémenté sur `feature/f0b-routeur-base-home`.**
 
-État technique : complet côté branche et testé avec backend réel.
+État technique : routing branché, home/landing + login UI en place, garde `/dashboard` fonctionnelle. Reste le **câblage auth des formulaires** (login/register non soumis au back).
 
-- Workflow restant hors code : review locale par un coéquipier, puis merge sur `master`
-- Après merge sur `master` : carte Trello → Done
-- Ticket suivant logique : F0-B garde de routes / bootstrap app, maintenant débloqué par `ready`, `user`, `accessToken`
-- Pages auth/profil/social restent à faire après ce socle
+- Workflow restant hors code : review locale par un coéquipier, puis merge sur `master` (Trello → Done)
+- Ticket suivant logique : **câbler le formulaire de login** (`login` → `setSession` → `redirect`), puis register/2FA, puis les vraies pages profil/social
+- Les stubs `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` restent à remplir
 
 ---
 
-_Dernière mise à jour : 9 juillet 2026_
+_Dernière mise à jour : 10 juillet 2026_

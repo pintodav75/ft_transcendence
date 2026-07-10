@@ -7,15 +7,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuthStore } from '@/stores/auth-store'
 
-function App() {
+export function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const ready = useAuthStore((state) => state.ready)
   const user = useAuthStore((state) => state.user)
-  const restoreSession = useAuthStore((state) => state.restoreSession)
-
-  useEffect(() => {
-    void restoreSession()
-  }, [restoreSession])
 
   return (
     <main className="arena-background relative min-h-screen overflow-hidden px-5 py-5 text-text-primary sm:px-8">
@@ -142,4 +137,4 @@ function App() {
   )
 }
 
-export default App
+export default Login
