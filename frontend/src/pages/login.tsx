@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { useAuthStore } from '@/stores/auth-store'
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useAuthStore } from '@/stores/auth-store';
 
 export function Login() {
-  const [showPassword, setShowPassword] = useState(false)
-  const ready = useAuthStore((state) => state.ready)
-  const user = useAuthStore((state) => state.user)
+  const [showPassword, setShowPassword] = useState(false);
+  const ready = useAuthStore((state) => state.ready);
+  const user = useAuthStore((state) => state.user);
 
   return (
     <main className="arena-background relative min-h-screen overflow-hidden px-5 py-5 text-text-primary sm:px-8">
@@ -19,14 +19,10 @@ export function Login() {
 
       <div className="pointer-events-none absolute inset-0 hidden lg:block">
         <div className="arena-wordmark-left absolute inset-0">
-          <div className="arena-wordmark-v arena-wordmark">
-            V
-          </div>
+          <div className="arena-wordmark-v arena-wordmark">V</div>
         </div>
         <div className="arena-wordmark-right absolute inset-0">
-          <div className="arena-wordmark-s arena-wordmark">
-            S
-          </div>
+          <div className="arena-wordmark-s arena-wordmark">S</div>
         </div>
       </div>
 
@@ -53,7 +49,7 @@ export function Login() {
               <span className="arena-dot-success h-2 w-2 rounded-full" />
               Terminal de match / Connexion
               <span className="ml-auto max-w-[120px] truncate text-[10px]">
-                {ready ? user?.pseudo ?? 'invite' : 'session...'}
+                {ready ? (user?.pseudo ?? 'invite') : 'session...'}
               </span>
             </p>
 
@@ -63,8 +59,8 @@ export function Login() {
                 <span className="ml-3 text-text-secondary">Mode</span>
               </h1>
               <p className="mt-3 max-w-[300px] text-sm leading-6 text-text-secondary">
-                Identifie-toi pour rejoindre l&apos;ar&egrave;ne, trouver des
-                adversaires et suivre ton classement.
+                Identifie-toi pour rejoindre l&apos;ar&egrave;ne, trouver des adversaires et suivre
+                ton classement.
               </p>
             </div>
           </CardHeader>
@@ -87,16 +83,8 @@ export function Login() {
                 <button
                   type="button"
                   className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-control text-text-secondary transition hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action-primary-hover"
-                  aria-label={
-                    showPassword
-                      ? 'Masquer le mot de passe'
-                      : 'Afficher le mot de passe'
-                  }
-                  title={
-                    showPassword
-                      ? 'Masquer le mot de passe'
-                      : 'Afficher le mot de passe'
-                  }
+                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                   onClick={() => setShowPassword((visible) => !visible)}
                 >
                   {showPassword ? (
@@ -134,7 +122,7 @@ export function Login() {
         </Card>
       </section>
     </main>
-  )
+  );
 }
 
-export default Login
+export default Login;
