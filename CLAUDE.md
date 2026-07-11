@@ -92,11 +92,11 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ├── backend/
 │   ├── Dockerfile, package.json, tsconfig.json
 │   ├── certs/               # cert auto-signé (NON versionné)
-│   ├── drizzle/             # migrations 0000 → 0012 (13 migrations) + meta
+│   ├── drizzle/             # migrations 0000 → 0014 (15 migrations) + meta
 │   └── src/
 │       ├── server.ts        # entry Fastify (HTTPS, registre plugins/routes)
 │       ├── db/
-│       │   ├── schema.ts     # 15 tables + 5 enums (voir État ci-dessous)
+│       │   ├── schema.ts     # 16 tables + 5 enums (voir État ci-dessous)
 │       │   └── index.ts      # client drizzle
 │       ├── auth/             # password.ts (bcrypt), tokens.ts (JWT + tempToken 2FA)
 │       ├── routes/
@@ -109,7 +109,8 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 │       │   ├── games.ts      # read-only (list + detail)
 │       │   ├── ladders.ts    # read-only (list + detail + rankings)
 │       │   ├── external-accounts.ts  # liaison compte in-game (GET/POST/DELETE, prefix /users/me/external-accounts)
-│       │   └── teams.ts       # équipes CRUD + membres (prefix /teams) — B5a
+│       │   ├── teams.ts       # équipes CRUD + membres (prefix /teams) — B5a
+│       │   └── matches.ts     # slots de match : créer/lister/détail (prefix /matches) — B5b
 │       ├── storage/          # minio.ts, redis.ts
 │       ├── utils/            # blocks.ts (helper isBlocked)
 │       └── types/            # env.d.ts, fastify-jwt.d.ts, fastify-oauth2.d.ts
@@ -168,6 +169,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - Routes **read-only** faites : `GET /games`, `GET /games/:id`, `GET /ladders`, `GET /ladders/:id` (+ join game), `GET /ladders/:id/rankings` (leaderboard trié par ELO, join user/team, 404 si ladder absent — logique de mise en forme extraite dans le helper pur `utils/leaderboard.ts` `shapeRankings`, couverte par tests — **B2 fait**)
 - ✅ **Liaison de compte externe (in-game) faite — B4** : `external-accounts.ts` monté sur prefix `/users/me/external-accounts`, 3 routes authentifiées (validation Zod). `GET /` (liste mes liaisons, `[]` si aucune, projection `provider/externalId/verified`), `POST /` `{ provider, externalId }` (crée, `verified=false` par défaut, **201** ; provider hors enum ou externalId vide → **400** ; doublon `UNIQUE(user_id, provider)` capté via SQLSTATE `23505` → **409**), `DELETE /:provider` (idempotent → **200**, param validé contre l'enum → 400 sinon). Testé à la main (curl) + **openapi.yaml fait**. Garde §5.1 « liaison requise pour jouer » **PAS ici** (sera dans le ticket création de match B5b)
 - ✅ **Équipes (teams) faites — B5a** : `teams.ts` monté sur prefix `/teams`, 6 routes authentifiées (Zod). `POST /` `{ ladderId, name }` (crée team + capitaine comme 1er membre en **transaction**, `ladderId` dénormalisé recopié ; ladder 1v1 → **400** ; `unique(ladder_id,name)` → **409** ; `unique(user_id,ladder_id)` → **409** ; **201**), `GET /` (mes teams tous ladders confondus, `[]` si aucune), `GET /:id` (détail + capitaine + membres, pas de fuite de champs privés), `POST /:id/members` `{ userId }` (**capitaine only** 403 ; user existe 404 ; **roster < 10** check code sinon 409 ; doublon/`user_ladder` → 409 ; 201), `DELETE /:id/members/:userId` (**kick capitaine OU quit soi-même** ; retrait du capitaine → 400 ; 200 idempotent), `DELETE /:id` (dissolution capitaine only, **cascade** DB sur les membres, 200). Roster **max 10** (§5.6 relâché) ; **lineup choisie au match** (B5b), pas à l'adhésion. Testé à la main (curl, tous cas) + **openapi.yaml fait**. Pas de tests Vitest (abandonnés — non exigés par le sujet).
+- ✅ **Matchmaking — créer/lister les slots faits — B5b** : migration `0013` (table `game_maps` `game_id`+`name` avec `unique(game_id,name)`, colonne `maps text[]` sur `matches`, **seed val 6 / cs2 7** en `ON CONFLICT DO NOTHING`) + `0014` (`game_maps.name` **NOT NULL**). `matches.ts` sur prefix `/matches`, 3 routes Zod (**corps + query + param**). `POST /` `{ ladderId, scheduledAt, lineup? }` : **2 modes selon le format** — **2v2+** : capitaine engage sa team (team déduite du ladder ; lineup = **`format_size`** joueurs, tous membres + **§5.1** compte lié) ; **1v1** : créateur **solo** (lineup **ignorée**, side sans team `team_id=NULL`, participant = lui, §5.1 sur lui). **§5.2** slot ouvert unique + **lockout temporel** (`started_at + lockout_minutes`) → 409, **par team** (2v2+) ou **par joueur** (1v1). **Tirage 3 maps** distinctes (`ORDER BY random()`) si le jeu a un pool sinon `[]` ; transaction `match`(pending) + `match_side`(index 0, team ou NULL) + `match_participants` ; **201**. `GET /?ladderId=` : slots `pending`, **créateur ET maps masqués**, mes slots exclus (par team en 2v2+, par `user_id` en 1v1). `GET /:id` : détail brut (sides + participants + maps), **réservé aux participants** — membre d'une team engagée **OU** joueur solo du match (403 sinon → anonymat préservé). Validations : `scheduledAt` doit être **dans le futur** (400 sinon) ; `GET /?ladderId=` sur un ladder inconnu → **404**. Testé **end-to-end** (26 cas automatisés : solo, team, gardes, anonymat, lockout) + **openapi.yaml fait**. ⚠️ **§5.2 lockout** : seuls les matchs **actifs** (`in_progress` / `awaiting_confirmation` / `disputed`) dont `started_at + lockout_minutes` n'est pas écoulé bloquent une nouvelle création (**409**) — un match `completed` ou `cancelled` **libère aussitôt** (conforme §5.2). `started_at` étant posé à l'**accept** (B5c), le lockout est **dormant** tant que B5c n'est pas mergé, et devra être **reposé sur l'accept**.
 - ✅ **Seed games/ladders fait** : les 5 jeux + 9 ladders sont insérés **dans les migrations `0008`/`0009`** (`INSERT ... ON CONFLICT DO NOTHING`, idempotent) — pas de script `seed.ts` séparé. Un `drizzle-kit migrate` sur clone neuf peuple donc les tables. ⚠️ La table `rankings` reste **vide** (pas encore de matchs → pas d'ELO) : le leaderboard renvoie donc `[]` tant qu'aucun match n'a généré de classement. Pour des faux classements en local : `npm run seed:dev` (script dev-only `backend/src/scripts/seed-dev.ts`, faux users/teams — **jamais** dans une migration).
 - ⚠️ **Toutes les règles business §5.1–5.8 du design (`docs/schema.md`) sont à coder** : liaison de compte requise, lockout, soumission de score, accord/dispute, calcul ELO (K=32, départ 1000), dispute timeout. La DB est prête, la logique non.
 
@@ -212,7 +214,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ### Reste à faire (backend)
 
 - **vérification** des comptes externes (OAuth Steam/Riot → `verified = true`) — le linking manuel est fait (B4) ; les routes teams sont faites (B5a)
-- Routes **matches** : création, soumission de résultats, state machine, confirmation
+- Routes **matches** : ✅ création + liste des slots faites (B5b) ; **reste** : accepter un slot (side 1, → `in_progress` + `started_at`) & « mes matchs » (B5c), soumission de résultats, state machine, confirmation
 - Routes **disputes** (ouverture, evidence upload, résolution admin)
 - **Matchmaking worker** (file d'attente, matching par ELO) — la pièce centrale, pas encore commencée
 - **Notifications système** — pas commencé
@@ -339,4 +341,4 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ---
 
-_Dernière mise à jour : 10 juillet 2026_
+_Dernière mise à jour : 11 juillet 2026_

@@ -37,6 +37,8 @@ tags:
     description: Compétitions = jeu × format (lecture seule, seed initial)
   - name: Teams
     description: Équipes par ladder (CRUD, membres, capitaine) — socle du matchmaking
+  - name: Matchmaking
+    description: Slots de match (créer / lister / détail) — §5.1 lineup, §5.2 lockout, tirage maps BO3
   - name: System
     description: Endpoints utilitaires
 
@@ -1944,6 +1946,213 @@ paths:
   # =====================================================================
   # SYSTEM
   # =====================================================================
+  /matches:
+    post:
+      tags: [Matchmaking]
+      summary: Créer un slot de match (team ou solo 1v1)
+      description: >
+        Ouvre un slot (match en attente d'adversaire). Deux modes selon le format
+        du ladder :
+        • **2v2+** : un **capitaine** engage sa team avec une **lineup** (team déduite
+        du ladder).
+        • **1v1** : le **créateur** s'engage **seul** (lineup ignorée, side sans team).
+        Maps BO3 tirées à la création (3 distinctes pour val/cs2 ; [] sinon). Gardes
+        §5.1 (compte externe lié) et §5.2 (slot ouvert unique + lockout temporel),
+        appliquées à la team (2v2+) ou au joueur (1v1).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ladderId: { type: string, format: uuid }
+                scheduledAt: { type: string, format: date-time }
+                lineup:
+                  type: array
+                  items: { type: string, format: uuid }
+                  minItems: 1
+                  description: >
+                    **Requise en 2v2+** : exactement format_size joueurs (2 / 3 / 5),
+                    tous membres de la team, tous avec un compte lié pour le provider
+                    du jeu, sans doublon. **Ignorée en 1v1** (le participant = le créateur).
+              required: [ladderId, scheduledAt]
+      responses:
+        '201':
+          description: Slot créé (side 0 = ma team, maps tirées)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  match:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      ladderId: { type: string, format: uuid }
+                      status: { type: string, example: pending }
+                      maps:
+                        type: array
+                        items: { type: string }
+                        example: [Breeze, Split, Summit]
+                      scheduledAt: { type: string, format: date-time }
+                      createdAt: { type: string, format: date-time }
+                required: [match]
+        '400':
+          description: >
+            Body invalide (ValidationError) ; scheduledAt dans le passé ; en 2v2+ :
+            lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors
+            team ; §5.1 compte non lié (team ou solo) (Error).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Seul le capitaine peut créer un match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ladder ou jeu inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            §5.2 — la team a déjà un slot ouvert (pending), ou est en lockout
+            (started_at + lockout_minutes non écoulé).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Matchmaking]
+      summary: Lister les slots ouverts d'un ladder (anonyme)
+      description: >
+        Slots pending d'un ladder. Team créatrice ET maps masquées (anonymat) ;
+        mes propres slots exclus. Ne renvoie que id / format / jeu / heure.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ladderId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Slots ouverts (anonymes)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slots:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        format: { type: string, example: 2v2 }
+                        gameId: { type: string, example: val }
+                        scheduledAt: { type: string, format: date-time }
+                required: [slots]
+        '400':
+          description: Query invalide (ladderId manquant ou non-uuid)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Ladder inconnu
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: ladder not found }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /matches/{id}:
+    get:
+      tags: [Matchmaking]
+      summary: Détail d'un match (participants only)
+      description: >
+        Détail brut : sides (avec teamId), participants et maps. Réservé aux
+        participants — **membre d'une team engagée** (2v2+) **OU joueur du match**
+        (1v1). 403 sinon — préserve l'anonymat des slots ouverts.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Détail du match
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  match:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      ladderId: { type: string, format: uuid }
+                      status: { type: string }
+                      scheduledAt: { type: string, format: date-time, nullable: true }
+                      maps:
+                        type: array
+                        items: { type: string }
+                      createdAt: { type: string, format: date-time }
+                  sides:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sideIndex: { type: integer, example: 0 }
+                        teamId: { type: string, format: uuid, nullable: true }
+                        participants:
+                          type: array
+                          items: { type: string, format: uuid }
+                required: [match, sides]
+        '400':
+          description: Param :id non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Non-participant du match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Match inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /ping:
     get:
       tags: [System]

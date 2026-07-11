@@ -199,6 +199,7 @@ export const matchesTable = pgTable(
       .notNull()
       .references(() => laddersTable.id, { onDelete: 'restrict' }),
     status: matchStatusEnum('status').notNull().default('pending'),
+    maps: text('maps').array().notNull().default([]),
     winnerSideId: uuid('winner_side_id').references((): any => matchSidesTable.id),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
     startedAt: timestamp('started_at', { withTimezone: true }),
@@ -322,4 +323,16 @@ export const rankingsTable = pgTable(
       .where(sql`${table.teamId} IS NOT NULL`),
     index('rankings_ladder_elo_idx').on(table.ladderId, table.elo.desc()),
   ],
+);
+
+export const gameMapsTable = pgTable(
+  'game_maps',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gamesTable.id, { onDelete: 'cascade' }),
+    name: varchar().notNull(),
+  },
+  (table) => [unique('game_maps_game_name_unique').on(table.gameId, table.name)],
 );
