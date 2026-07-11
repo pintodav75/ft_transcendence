@@ -21,6 +21,7 @@ import rateLimit from '@fastify/rate-limit';
 import { laddersRoutes } from './routes/ladders.js';
 import { externalAccountsRoutes } from './routes/external-accounts.js';
 import { teamsRoutes } from './routes/teams.js';
+import { matchesRoutes } from './routes/matches.js';
 
 const server = fastify({
   https: {
@@ -78,6 +79,7 @@ await server.register(gamesRoutes, { prefix: '/games' });
 await server.register(laddersRoutes, { prefix: '/ladders' });
 await server.register(externalAccountsRoutes, { prefix: '/users/me/external-accounts' });
 await server.register(teamsRoutes, { prefix: '/teams' });
+await server.register(matchesRoutes, { prefix: '/matches' });
 
 server.get('/ping', async (request, reply) => {
   return 'pong-from-docker\n';

@@ -1,0 +1,1 @@
+ALTER TABLE "game_maps" ALTER COLUMN "name" SET NOT NULL;
