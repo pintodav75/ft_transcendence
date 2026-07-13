@@ -43,6 +43,7 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
   minio:
     image: minio/minio
+    restart: always
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}

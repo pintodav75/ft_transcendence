@@ -26,6 +26,10 @@
   --color-action-primary-foreground: #ffffff;
   --color-success: #25d49a;
 
+  --color-rank-gold: #d9a441;
+  --color-rank-silver: #c7d0d4;
+  --color-rank-bronze: #bf7145;
+
   --radius-card: 8px;
   --radius-control: 6px;
   --shadow-card: 0 28px 90px rgba(0, 0, 0, 0.48), 0 0 60px rgba(82, 70, 188, 0.1);
@@ -80,6 +84,14 @@
 @layer utilities {
   .arena-background {
     background:
+      /* side wash — was a separate overlay div, now the topmost layer */
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--color-arena-red) 11%, transparent),
+        transparent 32%,
+        transparent 68%,
+        color-mix(in srgb, var(--color-arena-blue) 12%, transparent)
+      ),
       radial-gradient(
         circle at 10% 48%,
         color-mix(in srgb, var(--color-arena-red) 18%, transparent),
@@ -95,17 +107,8 @@
         color-mix(in srgb, var(--color-action-primary) 10%, transparent),
         transparent 28%
       ),
+      /* opaque base — must stay last */
       linear-gradient(180deg, var(--color-background-app) 0%, var(--color-surface-input) 100%);
-  }
-
-  .arena-sidewash {
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--color-arena-red) 11%, transparent),
-      transparent 32%,
-      transparent 68%,
-      color-mix(in srgb, var(--color-arena-blue) 12%, transparent)
-    );
   }
 
   .arena-center-line {

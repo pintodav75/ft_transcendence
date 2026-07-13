@@ -15,10 +15,12 @@ function RootLayout() {
   }, [restoreSession]);
 
   return (
-    <>
+    // arena-background lives here so every route inherits it once (no per-page
+    // <main> class, no overlay div). Pages own only their layout/scrolling.
+    <div className="arena-background min-h-screen text-text-primary">
       <Outlet />
       <TanStackRouterDevtools />
-    </>
+    </div>
   );
 }
 

@@ -13,8 +13,7 @@ export function Login() {
   const user = useAuthStore((state) => state.user);
 
   return (
-    <main className="arena-background relative min-h-screen overflow-hidden px-5 py-5 text-text-primary sm:px-8">
-      <div className="arena-sidewash pointer-events-none absolute inset-0" />
+    <main className="relative min-h-screen overflow-hidden px-5 py-5 sm:px-8">
       <div className="arena-center-line pointer-events-none absolute left-1/2 top-[-8%] h-[116%] w-px rotate-[8deg]" />
 
       <div className="pointer-events-none absolute inset-0 hidden lg:block">
@@ -26,9 +25,9 @@ export function Login() {
         </div>
       </div>
 
-      <header className="relative z-10 flex items-center justify-between text-xs font-bold uppercase text-text-muted">
+      <header className="relative z-10 flex items-center justify-between text-xs label-caps text-text-muted">
         <div className="flex items-center gap-2">
-          <span className="arena-dot-red h-2 w-2 rounded-full" />
+          <span className="arena-dot-red size-2 rounded-full" />
           <span>Rouge</span>
           <span className="text-text-primary">1 284</span>
           <span>en file</span>
@@ -38,15 +37,15 @@ export function Login() {
           <span>en file</span>
           <span className="text-text-primary">1 251</span>
           <span>Bleu</span>
-          <span className="arena-dot-blue h-2 w-2 rounded-full" />
+          <span className="arena-dot-blue size-2 rounded-full" />
         </div>
       </header>
 
       <section className="relative z-10 flex min-h-[calc(100vh-72px)] items-center justify-center py-10">
         <Card className="w-full max-w-[420px] p-8">
           <CardHeader>
-            <p className="flex items-center gap-3 text-xs font-bold uppercase text-text-muted">
-              <span className="arena-dot-success h-2 w-2 rounded-full" />
+            <p className="flex items-center gap-3 text-xs label-caps text-text-muted">
+              <span className="arena-dot-success size-2 rounded-full" />
               Terminal de match / Connexion
               <span className="ml-auto max-w-[120px] truncate text-[10px]">
                 {ready ? (user?.pseudo ?? 'invite') : 'session...'}
@@ -82,7 +81,7 @@ export function Login() {
                 />
                 <button
                   type="button"
-                  className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-control text-text-secondary transition hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action-primary-hover"
+                  className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-control text-text-secondary transition hover:text-text-primary focus-ring focus-visible:outline-offset-2"
                   aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                   title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                   onClick={() => setShowPassword((visible) => !visible)}
@@ -112,7 +111,7 @@ export function Login() {
             <div className="flex flex-col items-center gap-2">
               <p>Pas encore de compte ?</p>
               <a
-                className="font-bold text-text-secondary transition hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-action-primary-hover"
+                className="font-bold text-text-secondary transition hover:text-text-primary focus-ring focus-visible:outline-offset-4"
                 href="/"
               >
                 Cr&eacute;er ton profil

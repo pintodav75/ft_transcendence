@@ -9,9 +9,7 @@ import { GameRail } from '@/components/home/GameRail'
 // between them (padded so content never slides under the rails).
 export function Index() {
   return (
-    <main className="arena-background relative h-screen overflow-hidden">
-      <div className="arena-sidewash pointer-events-none absolute inset-0 z-0" />
-
+    <main className="relative h-screen overflow-hidden">
       <LeftNav />
       <RightNav />
 
