@@ -47,7 +47,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 
 - ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
 - ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
-- ✅ **F0-B routing + home (branche `feature/f0b-routeur-base-home`)** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, root layout `__root.tsx` (restore session au mount), garde de route sur `/dashboard`, page home/landing arène complète + page login (UI seule, pas encore câblée au back)
+- ✅ **F0-B routing + home mergé / Trello Done** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, root layout `__root.tsx` (restore session au mount), garde de route sur `/dashboard`, page home/landing arène complète + page login (UI seule, pas encore câblée au back)
 - Libs front : **TanStack Router branché** + TanStack Query (installé), Zustand, React Hook Form, Zod, `lucide-react`, `clsx`, `tailwind-merge`
 - ⚠️ **Pages encore majoritairement placeholders** : `/` (home/landing) et `/login` ont une vraie UI ; `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` sont des stubs. Login **pas encore câblé** (formulaire non soumis). `App.tsx` supprimé (renommé `pages/login.tsx`)
 - ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
@@ -65,14 +65,15 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 
 **DB / Cache / Storage** :
 
-- PostgreSQL 17 (conteneur)
-- Redis (client connecté ; cache/pub-sub à exploiter — voir note présence ci-dessous)
-- MinIO (S3-compatible, fichiers ; bucket `avatars` public en lecture)
+- PostgreSQL 17.10 (conteneur, image figée)
+- Redis 8.8.0 (authentification par mot de passe réellement activée ; client backend authentifié ; cache/pub-sub à exploiter — voir note présence ci-dessous)
+- MinIO `RELEASE.2025-09-07T16-13-09Z` (S3-compatible, fichiers ; bucket `avatars` public en lecture)
 
 **Infra** :
 
-- Docker Compose, **pas de Nginx** (Fastify sert tout : API + front statique en prod + HTTPS)
-- HTTPS via certificats auto-signés en dev (`backend/certs/`)
+- Docker/Podman Compose, images tierces qualifiées et figées (**I2**), **pas de Nginx** (Fastify sert tout : API + front statique en prod + HTTPS)
+- Bootstrap **I3** : après configuration du `.env`, `docker compose up -d --build` suffit — healthchecks PostgreSQL/Redis/MinIO, migrations Drizzle automatiques, certificat HTTPS généré dans le volume `backend_certs`, frontend lancé après le backend sain
+- Dépendances Node installées avec `npm ci` ; les entrypoints comparent le hash du lockfile pour resynchroniser les volumes `node_modules` uniquement si nécessaire
 
 **Outils dev** : Adminer (8080), redis-commander (8081), console MinIO (9001)
 
@@ -90,8 +91,8 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 │                            # (maquettes HTML/CSS déplacées hors repo → .idea/, gitignoré)
 │
 ├── backend/
-│   ├── Dockerfile, package.json, tsconfig.json
-│   ├── certs/               # cert auto-signé (NON versionné)
+│   ├── Dockerfile, docker-entrypoint.sh, package.json, tsconfig.json
+│   ├── certs/               # point de montage du volume backend_certs (généré automatiquement)
 │   ├── drizzle/             # migrations 0000 → 0014 (15 migrations) + meta
 │   └── src/
 │       ├── server.ts        # entry Fastify (HTTPS, registre plugins/routes)
@@ -116,6 +117,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 │       └── types/            # env.d.ts, fastify-jwt.d.ts, fastify-oauth2.d.ts
 │
 ├── frontend/                # F0 + F0-A + F0-B en place (routing, home, login UI)
+│   ├── Dockerfile, docker-entrypoint.sh
 │   ├── components.json       # config shadcn-like
 │   ├── package.json          # TanStack Router (branché) + Query, Zustand, RHF, Zod, lucide, clsx...
 │   └── src/
@@ -138,13 +140,20 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 
 ---
 
-## ✅ État d'avancement (au 8 juillet 2026)
+## ✅ État d'avancement (au 13 juillet 2026)
+
+### Infrastructure — I2 + I3 prêts pour review
+
+- ✅ **I2 — images Compose reproductibles** (`feature/i2-pin-compose-images`) : noms de registres complets et tags figés pour PostgreSQL 17.10, Redis 8.8.0, Adminer 5.4.2 et MinIO `RELEASE.2025-09-07T16-13-09Z`. Redis Commander migre de l'ancienne image Docker Hub `0.7.2-rc3` vers l'image officielle maintenue `ghcr.io/joeferner/redis-commander:0.9.1`.
+- ✅ **I3 — bootstrap en une commande** (`feature/i3-one-command-bootstrap`, dépend de I2) : auth Redis effective, clients backend/Redis Commander authentifiés, healthchecks + `depends_on: service_healthy`, certificat auto-signé dans `backend_certs`, migrations automatiques avant le backend, builds `npm ci` et resynchronisation conditionnelle des volumes selon le hash des lockfiles.
+- ✅ Validé avec Podman : deux cycles `podman compose down` puis `podman compose up -d --build`, tous les services sains/accessibles ; Redis refuse sans mot de passe et répond avec authentification ; 12 tests backend passent ; build frontend passe ; lint frontend sans erreur (2 warnings Fast Refresh préexistants).
+- ⚠️ Le `.env` reste une configuration préalable volontaire : copier `.env.example`, remplacer les `changeme`, puis lancer Compose. Les certificats et migrations ne demandent plus de commande manuelle.
 
 ### Backend — TERMINÉ et fonctionnel
 
 **Auth & user** (étapes 1-4) :
 
-- Docker (Postgres/Redis/MinIO/Adminer + hot reload WSL2), HTTPS auto-signé, `.env.example`
+- Docker/Podman Compose (Postgres/Redis/MinIO/Adminer + hot reload), HTTPS auto-signé automatique, migrations automatiques, `.env.example`
 - Drizzle ORM ; table `users` : id, pseudo, email, password_hash (nullable, OAuth), display_name, bio, avatar_url, oauth_provider/oauth_id (UNIQUE composite), totp_secret, totp_enabled, **is_admin**, created_at, updated_at
 - JWT access 15 min + refresh cookie httpOnly/Secure/SameSite=Strict/Path=/auth ; bcryptjs cost 12
 - Endpoints auth : `register`, `login`, `me`, `refresh`, `logout`
@@ -192,7 +201,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - Testé avec backend réel : register/login manuel en console navigateur, `apiFetch('/auth/me')`, token invalide → refresh/retry OK, reload page → session restaurée
 - Vérifications passées : `npm run build`, `npm run lint`, `git diff --check`
 
-**Routing + home F0-B implémenté (branche `feature/f0b-routeur-base-home`, pas encore mergé)** :
+**Routing + home F0-B mergé (Trello Done)** :
 
 - **TanStack Router file-based** : plugin `@tanstack/router-plugin/vite` (`tanstackRouter({ target: 'react', autoCodeSplitting: true })`) génère `src/routeTree.gen.ts` (**versionné**, ne pas éditer) ; `main.tsx` monte `createRouter({ routeTree })` + `<RouterProvider>` avec augmentation de module TS (`Register`)
 - **Pattern route/page** : `src/routes/*.tsx` = wrappers minces `createFileRoute` (config routeur) ; `src/pages/*.tsx` = vrais composants. Routes : `/` (home/landing), `/home`, `/login`, `/register`, `/privacy`, `/terms`, `/dashboard`
@@ -267,6 +276,9 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 
 - Services nommés explicitement, env **uniquement** dans `.env` (`${VAR}` dans compose)
 - Volumes bind-mount sous `./data/`, hot reload via polling (WSL2)
+- Images tierces avec registre complet + version précise ; pas de tag `latest`
+- `npm ci` est utilisé dans les images. Les entrypoints resynchronisent les volumes `node_modules` seulement si le hash du `package-lock.json` a changé
+- Le backend attend PostgreSQL, Redis et MinIO sains, applique les migrations puis démarre ; le frontend attend le backend sain
 
 ### Sécurité
 
@@ -279,17 +291,18 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ## 🚨 Pièges déjà rencontrés
 
 1. **Espaces dans `.env`** : `VAR=valeur` sans espaces
-2. **Volume Postgres persiste** : changer `POSTGRES_USER/PASSWORD` après init → `docker compose down -v`
+2. **Données PostgreSQL en bind mount** : changer `POSTGRES_USER/PASSWORD` après initialisation ne reconfigure pas la base existante. `docker compose down -v` ne supprime pas `./data/postgres` ; une réinitialisation exige de supprimer explicitement ce dossier après sauvegarde (opération destructive)
 3. **Hot reload WSL2 + Docker** : polling obligatoire (`CHOKIDAR_USEPOLLING=true` ; `server.watch.usePolling` Vite)
 4. **Fastify host** : toujours `host: '0.0.0.0'`
 5. **Nom de service ≠ localhost** dans le réseau Docker (`postgres:5432`)
 6. **Fastify affiche `127.0.0.1`** même en écoute `0.0.0.0` (cosmétique)
-7. **`node_modules` dans bind mount** : volume anonyme `/app/node_modules`. ⚠️ Ce volume ne se met **pas** à jour tout seul quand une dépendance est ajoutée → erreur Vite `Failed to resolve import` pour les coéquipiers. Fix : back **et** front font `npm install` au démarrage (`CMD ["sh","-c","npm install && npm run dev"]` dans les deux Dockerfiles) → le volume se resynchronise à chaque `docker compose up` (ticket I1)
+7. **`node_modules` dans bind mount** : volume anonyme `/app/node_modules`. Il ne se met pas à jour seul lorsqu'une dépendance change. Les entrypoints I3 comparent désormais le hash de `package-lock.json` au marqueur du volume et lancent `npm ci` uniquement si nécessaire (I1 est ainsi conservé sans réinstallation systématique)
 8. **Enum Drizzle sans `export`** non détecté par drizzle-kit → migration cassée. Toujours `export const xxxEnum = pgEnum(...)`
 9. **Interop CJS `@fastify/oauth2`** + `verbatimModuleSyntax` : workaround `(oauth2 as any).GOOGLE_CONFIGURATION`
 10. **F0 front = fondation visuelle uniquement** : ne pas traiter `App.tsx` comme une vraie page login ; elle sert seulement de référence DA temporaire
-11. **Certificat HTTPS dev** : générer `backend/certs` avec `subjectAltName=DNS:localhost,IP:127.0.0.1`, puis accepter `https://localhost:3000/ping` dans le navigateur avant d'utiliser le front
-12. **Migrations obligatoires au 1er lancement** : `docker compose exec backend npx drizzle-kit migrate`, sinon `register/login` plantent car la table `users` n'existe pas
+11. **Certificat HTTPS dev** : l'entrypoint backend le génère automatiquement dans le volume `backend_certs` avec `subjectAltName=DNS:localhost,IP:127.0.0.1`. Il reste nécessaire d'accepter `https://localhost:3000/ping` dans le navigateur
+12. **Migrations au démarrage** : l'entrypoint backend lance `drizzle-kit migrate` avant Fastify. La commande manuelle ne sert plus qu'au diagnostic
+13. **Redis officiel** : la variable `REDIS_PASSWORD` seule n'active rien. Le Compose lance explicitement `redis-server --requirepass` et le backend fournit ce mot de passe au client
 
 ---
 
@@ -316,12 +329,12 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 
 ```bash
 cd ~/transcendence
-docker compose up -d              # démarrer l'infra
+docker compose up -d --build      # construire et démarrer toute l'application
 docker compose ps                 # état
 docker compose logs -f <service>  # logs
 docker compose exec <service> sh  # entrer dans un conteneur
 docker compose down               # arrêter (garde les données)
-docker compose down -v            # DANGER : supprime les volumes
+docker compose down -v            # supprime cert/node_modules ; conserve les bind mounts ./data
 docker compose up -d --build <service>  # rebuild après modif Dockerfile
 ```
 
@@ -329,16 +342,12 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ---
 
-## 🎯 Prochaine action immédiate
+## 🎯 Prochaines actions immédiates
 
-**Ticket F0-B — Routing (TanStack file-based) + page home + garde de route : implémenté sur `feature/f0b-routeur-base-home`.**
-
-État technique : routing branché, home/landing + login UI en place, garde `/dashboard` fonctionnelle. Reste le **câblage auth des formulaires** (login/register non soumis au back).
-
-- Workflow restant hors code : review locale par un coéquipier, puis merge sur `master` (Trello → Done)
-- Ticket suivant logique : **câbler le formulaire de login** (`login` → `setSession` → `redirect`), puis register/2FA, puis les vraies pages profil/social
+- **Infra** : faire reviewer puis merger I2 avant I3 (I3 est empilé sur I2). Après merge I2, reviewer `git diff master..feature/i3-one-command-bootstrap`, tester `docker compose up -d --build`, puis merger I3 et déplacer les deux cartes Trello en Done
+- **Frontend** : F0-B est mergé/Done ; prochaine étape logique : câbler le formulaire de login (`login` → `setSession` → `redirect`), puis register/2FA et les vraies pages profil/social
 - Les stubs `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` restent à remplir
 
 ---
 
-_Dernière mise à jour : 11 juillet 2026_
+_Dernière mise à jour : 13 juillet 2026 — I2 images figées + I3 bootstrap Compose autonome_
