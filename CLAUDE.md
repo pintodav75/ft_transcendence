@@ -8,14 +8,16 @@
 
 **ft_transcendence** — projet final du Common Core 42, en équipe de 4. Le sujet est **libre** : on construit une web app de notre choix qui valide ≥ 14 points via les modules.
 
-**Concept choisi : plateforme compétitive multi-jeux type GameBattle**
+**Concept choisi : plateforme compétitive multi-jeux type GameBattle / LiveNplay**
 
 - Profils utilisateurs, équipes
 - Ladders par jeu avec ELO
-- Matchmaking automatique (file d'attente, matching par skill)
+- **Matchmaking par défi (challenge/accept)** : une team (ou un joueur en 1v1) **ouvre un slot**, une autre **l'accepte**
 - Soumission de résultats, système de disputes
 - Chat, amis, notifications temps réel
 - Pattern config-driven pour supporter plusieurs jeux
+
+> ⚠️ **PAS de file d'attente, PAS de worker de matchmaking automatique.** La référence produit est **LiveNplay / GameBattle**, pas Valorant/LoL. Il n'y a **aucun** bouton « chercher une partie », aucun job périodique d'appariement par ELO. Un ladder est un **classement où l'on se défie** : créer un slot → l'autre accepte → les deux entrent le score → l'ELO bouge. Rien d'autre. (Décision explicite de David, 13/07 — ne pas réintroduire cette idée.)
 
 **Statut équipe** : ✅ équipe de 4 formée — début du travail de groupe (fin juin 2026). Deadline courte → focus, pas d'éparpillement.
 
@@ -92,6 +94,8 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ├── backend/
 │   ├── Dockerfile, package.json, tsconfig.json
 │   ├── certs/               # cert auto-signé (NON versionné)
+│   ├── openapi.yaml         # contrat d'API (à jour : auth, users, social, teams, matches)
+│   ├── tests/               # tests e2e Python (run_all.py — 8 suites, 164 cas) + unit/ (Vitest) + README
 │   ├── drizzle/             # migrations 0000 → 0014 (15 migrations) + meta
 │   └── src/
 │       ├── server.ts        # entry Fastify (HTTPS, registre plugins/routes)
@@ -110,7 +114,7 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 │       │   ├── ladders.ts    # read-only (list + detail + rankings)
 │       │   ├── external-accounts.ts  # liaison compte in-game (GET/POST/DELETE, prefix /users/me/external-accounts)
 │       │   ├── teams.ts       # équipes CRUD + membres (prefix /teams) — B5a
-│       │   └── matches.ts     # slots de match : créer/lister/détail (prefix /matches) — B5b
+│       │   └── matches.ts     # cycle de match complet : créer/lister/accepter/annuler/mes matchs/détail — B5b+B5c
 │       ├── storage/          # minio.ts, redis.ts
 │       ├── utils/            # blocks.ts (helper isBlocked)
 │       └── types/            # env.d.ts, fastify-jwt.d.ts, fastify-oauth2.d.ts
@@ -169,9 +173,20 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 - Routes **read-only** faites : `GET /games`, `GET /games/:id`, `GET /ladders`, `GET /ladders/:id` (+ join game), `GET /ladders/:id/rankings` (leaderboard trié par ELO, join user/team, 404 si ladder absent — logique de mise en forme extraite dans le helper pur `utils/leaderboard.ts` `shapeRankings`, couverte par tests — **B2 fait**)
 - ✅ **Liaison de compte externe (in-game) faite — B4** : `external-accounts.ts` monté sur prefix `/users/me/external-accounts`, 3 routes authentifiées (validation Zod). `GET /` (liste mes liaisons, `[]` si aucune, projection `provider/externalId/verified`), `POST /` `{ provider, externalId }` (crée, `verified=false` par défaut, **201** ; provider hors enum ou externalId vide → **400** ; doublon `UNIQUE(user_id, provider)` capté via SQLSTATE `23505` → **409**), `DELETE /:provider` (idempotent → **200**, param validé contre l'enum → 400 sinon). Testé à la main (curl) + **openapi.yaml fait**. Garde §5.1 « liaison requise pour jouer » **PAS ici** (sera dans le ticket création de match B5b)
 - ✅ **Équipes (teams) faites — B5a** : `teams.ts` monté sur prefix `/teams`, 6 routes authentifiées (Zod). `POST /` `{ ladderId, name }` (crée team + capitaine comme 1er membre en **transaction**, `ladderId` dénormalisé recopié ; ladder 1v1 → **400** ; `unique(ladder_id,name)` → **409** ; `unique(user_id,ladder_id)` → **409** ; **201**), `GET /` (mes teams tous ladders confondus, `[]` si aucune), `GET /:id` (détail + capitaine + membres, pas de fuite de champs privés), `POST /:id/members` `{ userId }` (**capitaine only** 403 ; user existe 404 ; **roster < 10** check code sinon 409 ; doublon/`user_ladder` → 409 ; 201), `DELETE /:id/members/:userId` (**kick capitaine OU quit soi-même** ; retrait du capitaine → 400 ; 200 idempotent), `DELETE /:id` (dissolution capitaine only, **cascade** DB sur les membres, 200). Roster **max 10** (§5.6 relâché) ; **lineup choisie au match** (B5b), pas à l'adhésion. Testé à la main (curl, tous cas) + **openapi.yaml fait**. Pas de tests Vitest (abandonnés — non exigés par le sujet).
-- ✅ **Matchmaking — créer/lister les slots faits — B5b** : migration `0013` (table `game_maps` `game_id`+`name` avec `unique(game_id,name)`, colonne `maps text[]` sur `matches`, **seed val 6 / cs2 7** en `ON CONFLICT DO NOTHING`) + `0014` (`game_maps.name` **NOT NULL**). `matches.ts` sur prefix `/matches`, 3 routes Zod (**corps + query + param**). `POST /` `{ ladderId, scheduledAt, lineup? }` : **2 modes selon le format** — **2v2+** : capitaine engage sa team (team déduite du ladder ; lineup = **`format_size`** joueurs, tous membres + **§5.1** compte lié) ; **1v1** : créateur **solo** (lineup **ignorée**, side sans team `team_id=NULL`, participant = lui, §5.1 sur lui). **§5.2** slot ouvert unique + **lockout temporel** (`started_at + lockout_minutes`) → 409, **par team** (2v2+) ou **par joueur** (1v1). **Tirage 3 maps** distinctes (`ORDER BY random()`) si le jeu a un pool sinon `[]` ; transaction `match`(pending) + `match_side`(index 0, team ou NULL) + `match_participants` ; **201**. `GET /?ladderId=` : slots `pending`, **créateur ET maps masqués**, mes slots exclus (par team en 2v2+, par `user_id` en 1v1). `GET /:id` : détail brut (sides + participants + maps), **réservé aux participants** — membre d'une team engagée **OU** joueur solo du match (403 sinon → anonymat préservé). Validations : `scheduledAt` doit être **dans le futur** (400 sinon) ; `GET /?ladderId=` sur un ladder inconnu → **404**. Testé **end-to-end** (26 cas automatisés : solo, team, gardes, anonymat, lockout) + **openapi.yaml fait**. ⚠️ **§5.2 lockout** : seuls les matchs **actifs** (`in_progress` / `awaiting_confirmation` / `disputed`) dont `started_at + lockout_minutes` n'est pas écoulé bloquent une nouvelle création (**409**) — un match `completed` ou `cancelled` **libère aussitôt** (conforme §5.2). `started_at` étant posé à l'**accept** (B5c), le lockout est **dormant** tant que B5c n'est pas mergé, et devra être **reposé sur l'accept**.
+- ✅ **Matchmaking — créer/lister les slots faits — B5b** : migration `0013` (table `game_maps` `game_id`+`name` avec `unique(game_id,name)`, colonne `maps text[]` sur `matches`, **seed val 6 / cs2 7** en `ON CONFLICT DO NOTHING`) + `0014` (`game_maps.name` **NOT NULL**). `matches.ts` sur prefix `/matches`, 3 routes Zod (**corps + query + param**). `POST /` `{ ladderId, scheduledAt, lineup? }` : **2 modes selon le format** — **2v2+** : capitaine engage sa team (team déduite du ladder ; lineup = **`format_size`** joueurs, tous membres + **§5.1** compte lié) ; **1v1** : créateur **solo** (lineup **ignorée**, side sans team `team_id=NULL`, participant = lui, §5.1 sur lui). **§5.2** slot ouvert unique + **lockout temporel** (`started_at + lockout_minutes`) → 409, **par team** (2v2+) ou **par joueur** (1v1). **Tirage 3 maps** distinctes (`ORDER BY random()`) si le jeu a un pool sinon `[]` ; transaction `match`(pending) + `match_side`(index 0, team ou NULL) + `match_participants` ; **201**. `GET /?ladderId=` : slots `pending`, **créateur ET maps masqués**, mes slots exclus (par team en 2v2+, par `user_id` en 1v1). `GET /:id` : détail brut (sides + participants + maps), **réservé aux participants** — membre d'une team engagée **OU** joueur solo du match (403 sinon → anonymat préservé). Validations : `scheduledAt` doit être **dans le futur** (400 sinon) ; `GET /?ladderId=` sur un ladder inconnu → **404**. Testé **end-to-end** (26 cas automatisés : solo, team, gardes, anonymat, lockout) + **openapi.yaml fait**. ⚠️ **§5.2 lockout** : seuls les matchs **actifs** (`in_progress` / `awaiting_confirmation` / `disputed`) dont `started_at + lockout_minutes` n'est pas écoulé bloquent une nouvelle création (**409**) — un match `completed` ou `cancelled` **libère aussitôt** (conforme §5.2).
+- ✅ **Matchmaking — accepter / annuler / mes matchs / détail enrichi faits — B5c** : **aucune migration**. `matches.ts` compte désormais 6 routes.
+  - **`validateSide()` extrait** au niveau module : valide **un côté** (§5.1 compte lié, lineup présente/taille `format_size`/⊆ roster, garde capitaine, §5.2 lockout) et rend une **union discriminée** (`{ok:true, sideTeamId, participantIds}` | `{ok:false, code, error, unlinkedPlayers?}`). Il n'a **pas accès à `reply`** : il rend un verdict, la route le traduit en HTTP. Appelé **deux fois** — à la création (side 0) et à l'accept (side 1) → **les deux camps sont validés à l'identique**. Le check « j'ai déjà un slot ouvert » n'y est **pas** (il valide l'action d'ouvrir, pas le côté) → reste dans `POST /`.
+  - **`POST /:id/accept`** `{ lineup? }` : engage le side 1. **Garde anti-auto-accept** — ⚠️ **par `team_id` en 2v2+**, mais **par `user_id` en 1v1** (les deux sides y ont `team_id = NULL` : comparer les teamId ne détecterait rien et refuserait *tous* les accepts solo). En **transaction** : update **conditionnel** (`WHERE status='pending'` + `.returning()` → tableau vide = deux accepts simultanés → **409**) posant `status='in_progress'` + **`started_at = now()`**, puis side 1 + participants, puis **annulation des slots `pending` restants des deux camps** (**par team** en 2v2+ — annuler par joueur raterait un slot dont la lineup est disjointe ; **par joueur + filtre ladder** en solo). Sans cette annulation, une 3e équipe accepterait le slot d'un camp déjà en match → **deux matchs actifs, lockout contourné**. Body **facultatif** (`request.body ?? {}` : en 1v1 le client n'envoie rien).
+  - 🔑 **Le lockout §5.2 est ENFIN ARMÉ** : `started_at` restait `NULL` partout, donc `started_at + lockout_minutes > now()` ne pouvait jamais être vrai. La règle existait depuis B5b mais était **dormante**. C'est l'accept qui la réveille.
+  - **`DELETE /:id`** : annuler **son** slot ouvert → `status = 'cancelled'` (on **n'efface pas** : historique conservé). Créateur = **side_index 0** (capitaine en 2v2+, joueur en 1v1). Idempotent (200). Update conditionnel → **409** si quelqu'un a accepté entre-temps.
+  - **`GET /me`** : mes matchs, **deux sources** — (A) je suis dans `match_participants` (mes solos + les matchs où j'étais **aligné**), (B) une de mes teams est sur un side (→ **le remplaçant sur le banc voit le match de sa team** ; sans B il serait invisible, il n'a aucune ligne participant). Union dédoublonnée (un match d'équipe où j'ai joué remonte des **deux** sources). **Rien n'est masqué** ici (maps visibles). Aucun match → `[]`, pas 404.
+  - **`GET /:id` enrichi** : rend l'**objet team** (nom, logo, `captainId` — `null` en 1v1) et les **joueurs** (pseudo, avatar) au lieu d'ids bruts, sides **triés** (0 = créateur, 1 = accepteur). **Deux requêtes seulement** quel que soit le nombre de joueurs (ids collectés → 2 `SELECT` → indexés dans des `Map` → assemblage en mémoire) : **pas de N+1**. Projection **explicite** sur `users` (jamais de `select()` nu : fuite `email`/`passwordHash`). Garde « participants only » inchangée (banc compris).
+  - Testé **end-to-end** : **164 cas verts** (`cd backend/tests && python3 run_all.py`) — 8 suites. **openapi.yaml fait**.
 - ✅ **Seed games/ladders fait** : les 5 jeux + 9 ladders sont insérés **dans les migrations `0008`/`0009`** (`INSERT ... ON CONFLICT DO NOTHING`, idempotent) — pas de script `seed.ts` séparé. Un `drizzle-kit migrate` sur clone neuf peuple donc les tables. ⚠️ La table `rankings` reste **vide** (pas encore de matchs → pas d'ELO) : le leaderboard renvoie donc `[]` tant qu'aucun match n'a généré de classement. Pour des faux classements en local : `npm run seed:dev` (script dev-only `backend/src/scripts/seed-dev.ts`, faux users/teams — **jamais** dans une migration).
-- ⚠️ **Toutes les règles business §5.1–5.8 du design (`docs/schema.md`) sont à coder** : liaison de compte requise, lockout, soumission de score, accord/dispute, calcul ELO (K=32, départ 1000), dispute timeout. La DB est prête, la logique non.
+- ✅ **Règles business §5.1 et §5.2 codées** (`docs/schema.md`) : liaison de compte requise pour jouer (§5.1) et slot ouvert unique + lockout temporel (§5.2, **armé depuis B5c**). ⚠️ **Reste à coder** : §5.3/§5.4 soumission de score + accord/dispute, calcul **ELO** (K=32, départ 1000), dispute timeout. La DB est prête, la logique non.
+- ✅ **Tests — deux niveaux, deux outils** (`backend/tests/`) :
+  - **Unitaires (Vitest)** — `npm test` (`tests/unit/` : `elo`, `leaderboard`, `password`). Réservés aux **helpers purs**, sans DB ni HTTP.
+  - **End-to-end (Python, stdlib seule)** — `cd backend/tests && python3 run_all.py` : **8 suites, 164 cas** qui tapent sur le **vrai** backend et la **vraie** base de dev, sans mocks. Les users de test sont créés puis **supprimés** (motif `^(alice|bob|carol|dave|erin)[0-9a-f]{8}$`) → les données de l'équipe ne sont jamais touchées. `helpers.py` gère le rate-limit de `register` (3/min) et l'accès SQL direct (pour forcer des états que l'API ne permet pas encore d'atteindre). Voir `backend/tests/README.md`.
 
 ### Frontend — F0 + F0-A + F0-B (routing/home) en place, câblage auth des pages à faire
 
@@ -214,11 +229,12 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 ### Reste à faire (backend)
 
 - **vérification** des comptes externes (OAuth Steam/Riot → `verified = true`) — le linking manuel est fait (B4) ; les routes teams sont faites (B5a)
-- Routes **matches** : ✅ création + liste des slots faites (B5b) ; **reste** : accepter un slot (side 1, → `in_progress` + `started_at`) & « mes matchs » (B5c), soumission de résultats, state machine, confirmation
+- Routes **matches** : ✅ le cycle de matchmaking complet est fait (B5b + B5c : créer / lister / accepter / annuler / mes matchs / détail). **Reste** : **soumission de résultats** (§5.3/§5.4 : les deux camps déclarent un score → accord = `completed`, désaccord = `disputed`, timeout), puis **calcul de l'ELO** (K=32, départ 1000) et écriture dans `rankings` (table encore vide → le leaderboard renvoie `[]`)
 - Routes **disputes** (ouverture, evidence upload, résolution admin)
-- **Matchmaking worker** (file d'attente, matching par ELO) — la pièce centrale, pas encore commencée
-- **Notifications système** — pas commencé
+- **Notifications système** — pas commencé (« ton défi a été accepté », « l'adversaire a soumis un score », « une dispute est ouverte »)
 - Migrer la présence chat vers Redis (optionnel)
+
+> ⚠️ Il n'y a **pas** de « matchmaking worker » à écrire. Cette ligne a longtemps figuré ici par erreur (« file d'attente, matching par ELO — la pièce centrale ») : **c'est faux**, le modèle est challenge/accept et il est **déjà implémenté**. Voir l'encadré du concept en haut du fichier.
 
 ### Reste à faire (transverse / 42)
 
@@ -290,6 +306,9 @@ Modules de réserve éventuels : Advanced search (1pt), Custom design system (1p
 10. **F0 front = fondation visuelle uniquement** : ne pas traiter `App.tsx` comme une vraie page login ; elle sert seulement de référence DA temporaire
 11. **Certificat HTTPS dev** : générer `backend/certs` avec `subjectAltName=DNS:localhost,IP:127.0.0.1`, puis accepter `https://localhost:3000/ping` dans le navigateur avant d'utiliser le front
 12. **Migrations obligatoires au 1er lancement** : `docker compose exec backend npx drizzle-kit migrate`, sinon `register/login` plantent car la table `users` n'existe pas
+13. **Un check en code n'est JAMAIS atomique** (leçon de la review de B5c). Entre le moment où tu lis (« ce joueur est-il libre ? ») et celui où tu écris, une autre requête a pu changer le monde — c'est le TOCTOU. Un `UPDATE ... WHERE status='pending'` ne sérialise que les acteurs qui visent **la même ligne** ; deux requêtes sur des **lignes différentes** passent toutes les deux. Pour un invariant qui porte sur un **acteur** (« un seul match actif par équipe »), il faut un **verrou** (`pg_advisory_xact_lock`) **et** re-jouer la vérification **dans** la transaction, sous ce verrou. Cf. `isLockedOut` / `hasOpenSlot` / `lockCompetitors` dans `routes/matches.ts`.
+14. **Verrous multiples → les prendre dans un ORDRE DÉTERMINISTE** (trier les clés). Sinon : A verrouille x puis attend y pendant que B verrouille y puis attend x → **interblocage**. Postgres le détecte et tue une transaction → **500 sur un conflit métier normal**. C'est arrivé sur l'acceptation croisée (alice prend le slot de bob pendant que bob prend celui d'alice). L'acquisition ordonnée est le remède canonique.
+15. **Tester une course sans barrière ne prouve RIEN.** Deux threads lancés à la suite démarrent en décalé et ne se croisent jamais : le test **passe** alors que le bug est bien là. Faux négatif — pire qu'aucun test. Utiliser `threading.Barrier` et **répéter** (une course ne se déclenche pas à tous les coups). L'interblocage ci-dessus a été masqué comme ça au premier essai.
 
 ---
 
@@ -331,14 +350,18 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ## 🎯 Prochaine action immédiate
 
-**Ticket F0-B — Routing (TanStack file-based) + page home + garde de route : implémenté sur `feature/f0b-routeur-base-home`.**
+**Backend — Ticket B5c terminé sur `feature/b5c-accept-match`** (accept / annuler / mes matchs / détail enrichi ; **164 tests verts** ; openapi à jour). Deux passes de review absorbées : courses concurrentes + fuite d'autorisation.
 
-État technique : routing branché, home/landing + login UI en place, garde `/dashboard` fonctionnelle. Reste le **câblage auth des formulaires** (login/register non soumis au back).
+- Reste hors code : review locale par un coéquipier, puis merge sur `master` (Trello → Done). Penser à intégrer `origin/master` avant (le front a bougé).
+- **Ticket backend suivant : B6 — soumission de résultats** (§5.3/§5.4). Les deux camps déclarent un score ; accord → `completed` ; désaccord → `disputed` ; timeout. Puis **calcul ELO** (K=32, départ 1000) → `rankings` (la table est encore vide, donc le leaderboard renvoie `[]`).
 
-- Workflow restant hors code : review locale par un coéquipier, puis merge sur `master` (Trello → Done)
-- Ticket suivant logique : **câbler le formulaire de login** (`login` → `setSession` → `redirect`), puis register/2FA, puis les vraies pages profil/social
-- Les stubs `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` restent à remplir
+**Frontend — F0-B (routing TanStack + home + garde de route) implémenté** sur `feature/f0b-routeur-base-home`.
+
+- Routing branché, home/landing + login UI en place, garde `/dashboard` fonctionnelle. Reste le **câblage auth des formulaires** (login/register non soumis au back).
+- Ticket suivant : **câbler le formulaire de login** (`login` → `setSession` → `redirect`), puis register/2FA, puis les vraies pages profil/social.
+- Les stubs `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` restent à remplir.
+- ⚠️ **Types d'API côté front** : le front **écrit ses propres types à la main**, dans un fichier de contrat unique (`frontend/src/types/api.ts`). **Ne jamais importer les types du backend** : ils décrivent la DB, pas le JSON (`scheduledAt` est un `Date` côté back mais arrive en **`string` ISO** au front — le type partagé mentirait). Une codegen depuis `openapi.yaml` (`openapi-typescript`) est un **ticket futur back+front**, à faire seulement **après** avoir passé les réponses du YAML en `components/schemas` réutilisables.
 
 ---
 
-_Dernière mise à jour : 11 juillet 2026_
+_Dernière mise à jour : 13 juillet 2026_

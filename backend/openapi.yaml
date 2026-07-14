@@ -370,9 +370,16 @@ components:
         ladderName: { type: string }
         format: { type: string, enum: [1v1, 2v2, 3v3, 5v5] }
         gameId: { type: string }
+        requiredProvider:
+          type: string
+          enum: [riot, steam, epic, chess_com]
+          description: >
+            Le provider imposé par le JEU de ce ladder (§5.1). Le front sait ainsi quel
+            message afficher (« compte Riot non lié ») pour les membres non sélectionnables.
         captainId: { type: string, format: uuid }
         logoUrl: { type: string, nullable: true }
-      required: [id, name, ladderId, ladderName, format, gameId, captainId, logoUrl]
+      required:
+        [id, name, ladderId, ladderName, format, gameId, requiredProvider, captainId, logoUrl]
 
     TeamMember:
       type: object
@@ -383,7 +390,28 @@ components:
         displayName: { type: string, nullable: true }
         avatarUrl: { type: string, nullable: true }
         isCaptain: { type: boolean }
-      required: [id, pseudo, displayName, avatarUrl, isCaptain]
+        hasLinkedAccount:
+          type: boolean
+          description: >
+            §5.1 — ce membre a-t-il un compte lié pour le `requiredProvider` du jeu ?
+            `false` = **non sélectionnable dans une lineup** → le front le grise AVANT que
+            le capitaine ne compose son équipe (prévenir plutôt que refuser).
+      required: [id, pseudo, displayName, avatarUrl, isCaptain, hasLinkedAccount]
+
+    UnlinkedPlayersError:
+      type: object
+      description: >
+        400 spécifique au §5.1 en 2v2+ : un ou plusieurs joueurs de la lineup n'ont pas
+        de compte lié. `unlinkedPlayers` dit **lesquels** — sans lui, le capitaine devrait
+        deviner parmi ses 5 sélectionnés.
+      properties:
+        error:
+          type: string
+          example: every selected player must have a linked riot account
+        unlinkedPlayers:
+          type: array
+          items: { type: string, format: uuid }
+      required: [error, unlinkedPlayers]
 
   responses:
     Unauthorized:
@@ -2004,12 +2032,14 @@ paths:
           description: >
             Body invalide (ValidationError) ; scheduledAt dans le passé ; en 2v2+ :
             lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors
-            team ; §5.1 compte non lié (team ou solo) (Error).
+            team (Error) ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus
+            `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/UnlinkedPlayersError'
                   - $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -2085,14 +2115,59 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /matches/me:
+    get:
+      tags: [Matchmaking]
+      summary: Mes matchs (tous ladders, tous statuts)
+      description: >
+        Les matchs qui **me concernent**, réunis depuis **deux sources** :
+        • je suis dans `match_participants` → mes solos + les matchs où j'étais **aligné** ;
+        • une de **mes teams** est engagée sur un side → y compris quand j'étais **sur le banc**
+        (un membre du roster hors lineup n'a aucune ligne dans `match_participants` : sans cette
+        seconde source il ne verrait pas le match de son équipe).
+        Résultats dédoublonnés (un match d'équipe où j'ai joué remonte des deux sources) et
+        triés du plus récent au plus ancien. **Rien n'est masqué ici** (maps visibles) —
+        contrairement à `GET /matches?ladderId=`, ces matchs sont les miens.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Mes matchs (tableau vide si aucun — pas une 404)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        ladderId: { type: string, format: uuid }
+                        status: { type: string, example: in_progress }
+                        scheduledAt: { type: string, format: date-time, nullable: true }
+                        startedAt: { type: string, format: date-time, nullable: true }
+                        maps:
+                          type: array
+                          items: { type: string }
+                          example: [Breeze, Split, Summit]
+                required: [matches]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /matches/{id}:
     get:
       tags: [Matchmaking]
-      summary: Détail d'un match (participants only)
+      summary: Détail enrichi d'un match (participants only)
       description: >
-        Détail brut : sides (avec teamId), participants et maps. Réservé aux
-        participants — **membre d'une team engagée** (2v2+) **OU joueur du match**
-        (1v1). 403 sinon — préserve l'anonymat des slots ouverts.
+        Détail complet, prêt à afficher : pour chaque side, l'**objet team**
+        (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar),
+        plus les maps. Sides **triés** (0 = créateur, 1 = accepteur).
+        Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**)
+        **OU joueur du match** (1v1). 403 sinon — préserve l'anonymat des slots ouverts.
       security:
         - bearerAuth: []
       parameters:
@@ -2115,6 +2190,7 @@ paths:
                       ladderId: { type: string, format: uuid }
                       status: { type: string }
                       scheduledAt: { type: string, format: date-time, nullable: true }
+                      startedAt: { type: string, format: date-time, nullable: true }
                       maps:
                         type: array
                         items: { type: string }
@@ -2125,10 +2201,25 @@ paths:
                       type: object
                       properties:
                         sideIndex: { type: integer, example: 0 }
-                        teamId: { type: string, format: uuid, nullable: true }
-                        participants:
+                        team:
+                          nullable: true
+                          description: '`null` en 1v1 (le côté est un joueur, pas une team).'
+                          type: object
+                          properties:
+                            id: { type: string, format: uuid }
+                            name: { type: string, example: Los Ratones }
+                            logoUrl: { type: string, nullable: true }
+                            captainId: { type: string, format: uuid }
+                        players:
                           type: array
-                          items: { type: string, format: uuid }
+                          description: La lineup engagée sur ce side (pas le roster entier).
+                          items:
+                            type: object
+                            properties:
+                              id: { type: string, format: uuid }
+                              pseudo: { type: string, example: alice }
+                              displayName: { type: string, nullable: true }
+                              avatarUrl: { type: string, nullable: true }
                 required: [match, sides]
         '400':
           description: Param :id non-uuid (ValidationError)
@@ -2146,6 +2237,165 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Match inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Matchmaking]
+      summary: Annuler son slot ouvert
+      description: >
+        Passe le match à `cancelled` — on **n'efface pas** la ligne (l'historique est
+        conservé). Réservé au **créateur**, c'est-à-dire au **side_index 0** :
+        le **capitaine** de la team engagée (2v2+) ou le **joueur** du side (1v1).
+        Idempotent (200 si déjà `cancelled`). L'update est **conditionnel**
+        (`WHERE status = 'pending'`) : si quelqu'un accepte entre-temps → 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Slot annulé (ou déjà annulé — idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                required: [ok]
+        '400':
+          description: Param :id non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Je ne suis pas le créateur (ni capitaine de la team engagée, ni le joueur solo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Match inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Le match n'est plus `pending` (accepté, terminé…) — rien n'est écrasé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /matches/{id}/accept:
+    post:
+      tags: [Matchmaking]
+      summary: Accepter un slot ouvert (engager le side 1)
+      description: >
+        Engage le **second camp** d'un slot `pending`. Le côté de l'accepteur est validé
+        **exactement comme celui du créateur** (même helper `validateSide`) : §5.1 compte
+        externe lié, lineup (présente, de taille `format_size`, incluse dans le roster),
+        garde capitaine, §5.2 lockout.
+        • **2v2+** : un **capitaine d'une autre team** du même ladder, avec sa **lineup**.
+        • **1v1** : le **joueur** s'engage seul (body facultatif, lineup ignorée).
+        Effets (en **transaction**) : `status → in_progress`, **`started_at = now()`**
+        (c'est ce qui **arme le lockout §5.2**), création du side 1 + ses participants, et
+        **annulation des slots `pending` restants des deux camps** (sinon une 3e équipe
+        accepterait le slot d'un camp déjà en match → deux matchs actifs, lockout contourné).
+        L'update de statut est **conditionnel** : deux accepts simultanés → le second reçoit 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        description: Requis en 2v2+ (la lineup). **Aucun body en 1v1.**
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lineup:
+                  type: array
+                  items: { type: string, format: uuid }
+                  minItems: 1
+                  description: >
+                    **Requise en 2v2+** : exactement format_size joueurs (2 / 3 / 5), tous
+                    membres de ma team, tous avec un compte lié pour le provider du jeu,
+                    sans doublon. **Ignorée en 1v1.**
+      responses:
+        '200':
+          description: Match accepté — il démarre
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  match:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      ladderId: { type: string, format: uuid }
+                      status: { type: string, example: in_progress }
+                      startedAt: { type: string, format: date-time }
+                      scheduledAt: { type: string, format: date-time, nullable: true }
+                      maps:
+                        type: array
+                        items: { type: string }
+                required: [match]
+        '400':
+          description: >
+            Body/param invalide (ValidationError) ; **on ne peut pas accepter son propre slot**
+            (vérifié **par team** en 2v2+, **par user_id** en 1v1 — les deux sides y ont
+            `team_id = NULL`) ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce
+            ladder, joueur hors roster ; **§5.1 compte non lié** → en 2v2+ la réponse porte
+            en plus `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/UnlinkedPlayersError'
+                  - $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Seul le capitaine peut engager sa team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Match, ladder ou jeu inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Trois causes.
+            (1) Le match n'est plus `pending` (déjà accepté, annulé, terminé).
+            (2) **Course perdue sur CE match** : deux camps l'acceptent au même instant →
+            l'update conditionnel n'en laisse passer qu'un, le second reçoit 409.
+            (3) **§5.2 lockout** : le camp est déjà en match récent — y compris quand il
+            vient de s'engager **ailleurs au même instant** (deux accepts simultanés du même
+            camp sur **deux matchs différents**). Ce cas est fermé par un **verrou
+            transactionnel** sur l'identité de l'accepteur + une re-vérification du lockout
+            **dans** la transaction : le second accept attend, relit, et se voit refusé.
           content:
             application/json:
               schema:

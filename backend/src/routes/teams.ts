@@ -1,7 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/index.js';
-import { teamsTable, teamMembersTable, laddersTable, usersTable } from '../db/schema.js';
-import { eq, and, count } from 'drizzle-orm';
+import {
+  teamsTable,
+  teamMembersTable,
+  laddersTable,
+  usersTable,
+  gamesTable,
+  userExternalAccountsTable,
+} from '../db/schema.js';
+import { eq, and, count, inArray } from 'drizzle-orm';
 import z from 'zod';
 
 const createTeamSchema = z.object({
@@ -90,23 +97,47 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const { id } = idParamSchema.parse(request.params);
+        // team → ladder → game : c'est le JEU qui porte le provider requis (riot, steam…).
         const [team] = await db
           .select()
           .from(teamsTable)
           .innerJoin(laddersTable, eq(laddersTable.id, teamsTable.ladderId))
+          .innerJoin(gamesTable, eq(gamesTable.id, laddersTable.gameId))
           .where(eq(teamsTable.id, id));
         if (!team) return reply.code(404).send({ error: 'team not found' });
+
+        const requiredProvider = team.games.requiredProvider;
+
         const members = await db
           .select()
           .from(teamMembersTable)
           .innerJoin(usersTable, eq(usersTable.id, teamMembersTable.userId))
           .where(eq(teamMembersTable.teamId, id));
+
+        // §5.1 — qui, parmi ces membres, a lié le compte exigé par CE jeu ?
+        // Une seule requête pour tout le roster (pas un appel par membre).
+        const memberIds = members.map((row) => row.users.id);
+        const linked = memberIds.length
+          ? await db
+              .select({ userId: userExternalAccountsTable.userId })
+              .from(userExternalAccountsTable)
+              .where(
+                and(
+                  inArray(userExternalAccountsTable.userId, memberIds),
+                  eq(userExternalAccountsTable.provider, requiredProvider),
+                ),
+              )
+          : [];
+        const linkedIds = new Set(linked.map((l) => l.userId));
+
         const membersSafe = members.map((row) => ({
           id: row.users.id,
           pseudo: row.users.pseudo,
           displayName: row.users.displayName,
           avatarUrl: row.users.avatarUrl,
           isCaptain: row.users.id === team.teams.captainId,
+          // true = sélectionnable dans une lineup ; false = le front le grise
+          hasLinkedAccount: linkedIds.has(row.users.id),
         }));
         const teamSafe = {
           id: team.teams.id,
@@ -115,6 +146,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           ladderName: team.ladders.name,
           format: team.ladders.format,
           gameId: team.ladders.gameId,
+          requiredProvider, // le front sait quel logo/message afficher ("compte Riot non lié")
           captainId: team.teams.captainId,
           logoUrl: team.teams.logoUrl,
         };
