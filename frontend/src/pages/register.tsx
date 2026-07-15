@@ -16,17 +16,17 @@ import { useAuthStore } from '@/stores/auth-store';
 import type { AuthSessionResponse } from '@/types/auth';
 
 const languages = [
-  { code: 'fr', shortLabel: 'FR', label: 'Français' },
   { code: 'en', shortLabel: 'EN', label: 'English' },
+  { code: 'fr', shortLabel: 'FR', label: 'Français' },
   { code: 'es', shortLabel: 'ES', label: 'Español' },
 ] as const;
 
 type Language = (typeof languages)[number];
 
 const backendFieldMessages: Record<keyof RegisterFormValues, string> = {
-  pseudo: 'Le pseudo doit contenir entre 3 et 30 caractères.',
-  email: 'Saisis une adresse e-mail valide.',
-  password: 'Le mot de passe ne respecte pas les critères demandés.',
+  pseudo: 'Nickname must be between 3 and 30 characters.',
+  email: 'Enter a valid email address.',
+  password: 'Password does not meet the requirements.',
 };
 
 export function Register() {
@@ -94,7 +94,7 @@ export function Register() {
         if (!hasFieldError) {
           setError('root.server', {
             type: 'server',
-            message: 'Les informations envoyées sont invalides.',
+            message: 'The submitted information is invalid.',
           });
         }
 
@@ -104,7 +104,7 @@ export function Register() {
       if (error instanceof ApiError && error.status === 409) {
         setError('root.server', {
           type: 'server',
-          message: 'Ce pseudo ou cette adresse e-mail est déjà utilisé.',
+          message: 'This nickname or email address is already in use.',
         });
         return;
       }
@@ -112,14 +112,14 @@ export function Register() {
       if (error instanceof ApiError && error.status === 429) {
         setError('root.server', {
           type: 'server',
-          message: 'Trop de tentatives. Réessaie dans quelques instants.',
+          message: 'Too many attempts. Please try again in a moment.',
         });
         return;
       }
 
       setError('root.server', {
         type: 'server',
-        message: 'Impossible de créer le compte pour le moment. Réessaie plus tard.',
+        message: 'Unable to create your account right now. Please try again later.',
       });
     }
   });
@@ -162,14 +162,14 @@ export function Register() {
           <CardHeader>
             <p className="flex items-center gap-3 text-xs label-caps text-text-muted">
               <span className="arena-dot-success size-2 rounded-full" />
-              Cr&eacute;ation de compte
+              Create account
             </p>
 
             <div>
               <h1 className="font-display text-5xl font-black italic uppercase leading-none">
                 <Link
                   to="/"
-                  aria-label="Retour &agrave; l'accueil"
+                  aria-label="Back to home"
                   className="inline-block transition hover:opacity-90 focus-ring focus-visible:outline-offset-4"
                 >
                   <span className="-mr-[0.12em] inline-block pr-[0.12em] text-arena-gradient tracking-[-0.06em]">
@@ -179,7 +179,7 @@ export function Register() {
                 </Link>
               </h1>
               <p className="mt-3 max-w-[320px] text-sm leading-6 text-text-secondary">
-                Passe en mode comp&eacute;tition.
+                Switch to competitive mode.
               </p>
             </div>
           </CardHeader>
@@ -191,12 +191,12 @@ export function Register() {
               onSubmit={submitValidatedForm}
             >
               <div className="space-y-2">
-                <Label htmlFor="pseudo">Pseudo</Label>
+                <Label htmlFor="pseudo">Nickname</Label>
                 <Input
                   id="pseudo"
                   type="text"
                   autoComplete="username"
-                  placeholder="Pseudo"
+                  placeholder="Nickname"
                   aria-invalid={Boolean(errors.pseudo)}
                   aria-describedby={errors.pseudo ? 'pseudo-error' : undefined}
                   {...register('pseudo')}
@@ -209,12 +209,12 @@ export function Register() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">E-mail</Label>
+                <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="Adresse e-mail"
+                  placeholder="Email address"
                   aria-invalid={Boolean(errors.email)}
                   aria-describedby={errors.email ? 'email-error' : undefined}
                   {...register('email')}
@@ -227,13 +227,13 @@ export function Register() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Mot de passe</Label>
+                <Label htmlFor="password">Password</Label>
                 <div className="relative">
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="new-password"
-                    placeholder="Mot de passe"
+                    placeholder="Password"
                     className="pr-12"
                     aria-invalid={Boolean(errors.password)}
                     aria-describedby={errors.password ? 'password-error' : undefined}
@@ -242,8 +242,8 @@ export function Register() {
                   <button
                     type="button"
                     className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-control text-text-secondary transition hover:text-text-primary focus-ring focus-visible:outline-offset-2"
-                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
-                    title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    title={showPassword ? 'Hide password' : 'Show password'}
                     onClick={() => setShowPassword((visible) => !visible)}
                   >
                     {showPassword ? (
@@ -271,12 +271,12 @@ export function Register() {
                 className="w-full border border-action-primary-border font-semibold"
                 disabled={isSubmitting}
               >
-                {isSubmitting ? 'Création…' : 'Créer mon compte'}
+                {isSubmitting ? 'Creating…' : 'Create account'}
               </Button>
 
               <div className="flex items-center gap-3 text-xs text-text-muted">
                 <span className="h-px flex-1 bg-border-subtle" />
-                <span className="whitespace-nowrap">Ou continuer avec</span>
+                <span className="whitespace-nowrap">Or continue with</span>
                 <span className="h-px flex-1 bg-border-subtle" />
               </div>
 
@@ -286,12 +286,12 @@ export function Register() {
 
           <CardFooter className="register-card-footer mt-7 border-t border-border-subtle pt-6 text-center text-sm text-text-secondary">
             <div className="flex flex-col items-center gap-2">
-              <p>D&eacute;j&agrave; un compte ?</p>
+              <p>Already have an account?</p>
               <Link
                 className="font-bold text-text-secondary transition hover:text-text-primary focus-ring focus-visible:outline-offset-4"
                 to="/login"
               >
-                Se connecter
+                Sign in
               </Link>
             </div>
           </CardFooter>
@@ -299,13 +299,13 @@ export function Register() {
 
         <nav
           className="register-options mt-4 flex w-full max-w-[440px] items-center justify-between gap-5 px-1 text-xs text-text-muted"
-          aria-label="Options de page"
+          aria-label="Page options"
         >
           <div ref={languageMenuRef} className="relative">
             <button
               type="button"
               className="flex h-8 items-center gap-2 rounded-control px-2 font-bold transition hover:text-text-primary focus-ring focus-visible:outline-offset-2"
-              aria-label={`Langue : ${selectedLanguage.label}`}
+              aria-label={`Language: ${selectedLanguage.label}`}
               aria-haspopup="menu"
               aria-expanded={languageMenuOpen}
               onClick={() => setLanguageMenuOpen((open) => !open)}
@@ -322,7 +322,7 @@ export function Register() {
               <div
                 className="absolute left-0 top-full z-20 mt-2 w-36 rounded-control border border-border-subtle bg-surface-card-strong p-1 shadow-card"
                 role="menu"
-                aria-label="Choisir la langue"
+                aria-label="Choose language"
               >
                 {languages.map((language) => {
                   const isSelected = selectedLanguage.code === language.code;
@@ -353,13 +353,13 @@ export function Register() {
               to="/terms"
               className="transition hover:text-text-primary focus-ring focus-visible:outline-offset-4"
             >
-              Modalit&eacute;s
+              Terms
             </Link>
             <Link
               to="/privacy"
               className="transition hover:text-text-primary focus-ring focus-visible:outline-offset-4"
             >
-              Politique
+              Privacy
             </Link>
           </div>
         </nav>
