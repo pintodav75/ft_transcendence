@@ -63,7 +63,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 - ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
 - ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
-- ✅ **F0-B routing + home mergé / Trello Done** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, root layout `__root.tsx` (restore session au mount), garde de route sur `/dashboard`, page home/landing arène complète + page login (UI seule, pas encore câblée au back)
+- ✅ **F0-B routing + home mergé / Trello Done** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, root layout global (restore session au mount), garde de route sur `/dashboard`, page home/landing arène complète + page login (UI seule, pas encore câblée au back)
 - Libs front : **TanStack Router branché** + TanStack Query (installé), Zustand, React Hook Form, Zod, `lucide-react`, `clsx`, `tailwind-merge`
 - ⚠️ **Pages encore majoritairement placeholders** : `/` (home/landing) et `/login` ont une vraie UI ; `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` sont des stubs. Login **pas encore câblé** (formulaire non soumis). `App.tsx` supprimé (renommé `pages/login.tsx`)
 - ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
@@ -144,14 +144,14 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 │       ├── routeTree.gen.ts  # généré par le plugin TanStack (VERSIONNÉ, ne pas éditer à la main)
 │       ├── index.css         # source de vérité visuelle : tokens Tailwind + @utility (panel/label-caps/focus-ring) + utilitaires arène
 │       ├── routes/           # wrappers file-based createFileRoute : __root, index, home, login, register, privacy, terms, dashboard (gardé)
-│       ├── pages/            # composants de page : index (home/landing arène), login (UI), home/register/privacy/terms (stubs)
+│       ├── pages/            # index (landing), login (UI), home/register/privacy/terms/dashboard (stubs)
 │       ├── stores/           # auth-store.ts (Zustand session — F0-A)
 │       ├── lib/              # api.ts (fetch+refresh), api-config.ts, utils.ts (cn())
 │       ├── types/            # auth.ts
 │       ├── assets/images/    # bg.webp (hero)
 │       └── components/
 │           ├── ui/           # button, input, label, card, avatar, menu-item, icon-menu-item
-│           ├── layout/       # LeftNav, RightNav, AuthNav, SiteFooter
+│           ├── layout/       # RootLayout, LeftNav, RightNav, AuthNav, SiteFooter
 │           └── home/         # HeroBanner, GameRail
 │
 └── data/                    # volumes bind-mount Postgres/MinIO (NON versionné)
@@ -165,7 +165,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 - ✅ **I2 — images Compose reproductibles** (mergé) : noms de registres complets et tags figés pour PostgreSQL 17.10, Redis 8.8.0, Adminer 5.4.2 et MinIO `RELEASE.2025-09-07T16-13-09Z`. Redis Commander migre de l'ancienne image Docker Hub `0.7.2-rc3` vers l'image officielle maintenue `ghcr.io/joeferner/redis-commander:0.9.1`.
 - ✅ **I3 — bootstrap en une commande** (mergé, empilé sur I2) : auth Redis effective, clients backend/Redis Commander authentifiés, healthchecks + `depends_on: service_healthy`, certificat auto-signé dans `backend_certs`, migrations automatiques avant le backend, builds `npm ci` et resynchronisation conditionnelle des volumes selon le hash des lockfiles.
-- ✅ Validé avec Podman : deux cycles `podman compose down` puis `podman compose up -d --build`, tous les services sains/accessibles ; Redis refuse sans mot de passe et répond avec authentification ; 12 tests backend passent ; build frontend passe ; lint frontend sans erreur (2 warnings Fast Refresh préexistants).
+- ✅ Validé avec Podman : deux cycles `podman compose down` puis `podman compose up -d --build`, tous les services sains/accessibles ; Redis refuse sans mot de passe et répond avec authentification ; 12 tests backend passent ; build frontend passe ; lint frontend avec 0 erreur et 0 warning après le correctif Fast Refresh empilé sur I3.
 - ⚠️ Le `.env` reste une configuration préalable volontaire : copier `.env.example`, remplacer les `changeme`, puis lancer Compose. Les certificats et migrations ne demandent plus de commande manuelle.
 
 ### Backend — TERMINÉ et fonctionnel
@@ -246,8 +246,9 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 **Routing + home F0-B mergé (Trello Done)** :
 
 - **TanStack Router file-based** : plugin `@tanstack/router-plugin/vite` (`tanstackRouter({ target: 'react', autoCodeSplitting: true })`) génère `src/routeTree.gen.ts` (**versionné**, ne pas éditer) ; `main.tsx` monte `createRouter({ routeTree })` + `<RouterProvider>` avec augmentation de module TS (`Register`)
-- **Pattern route/page** : `src/routes/*.tsx` = wrappers minces `createFileRoute` (config routeur) ; `src/pages/*.tsx` = vrais composants. Routes : `/` (home/landing), `/home`, `/login`, `/register`, `/privacy`, `/terms`, `/dashboard`
-- **`__root.tsx`** = layout racine monté **une seule fois** pour toute l'app : lance `restoreSession()` au mount (`useEffect`), rend `<Outlet/>` + `<TanStackRouterDevtools/>` (c'est ici que la session est restaurée, plus dans `App.tsx`)
+- **Pattern route/page** : `src/routes/*.tsx` = wrappers minces `createFileRoute` (config routeur) ; `src/pages/*.tsx` = vrais composants. Le composant Dashboard est dans `pages/dashboard.tsx` et le layout racine dans `components/layout/RootLayout.tsx`. Routes : `/` (home/landing), `/home`, `/login`, `/register`, `/privacy`, `/terms`, `/dashboard`
+- **`__root.tsx`** = wrapper TanStack mince qui importe `RootLayout`. Ce layout est monté **une seule fois** pour toute l'app : il lance `restoreSession()` au mount (`useEffect`), rend `<Outlet/>` + `<TanStackRouterDevtools/>`
+- ✅ **Correctif Fast Refresh** (`fix/frontend-fast-refresh-routes`) : composants extraits des fichiers de routes ; `npm run lint` passe désormais avec 0 erreur et 0 warning, `npm run build` passe
 - **Garde de route** sur `/dashboard` : `beforeLoad` attend `restoreSession()` si `!ready` (dédupliqué dans le store, donc peu coûteux), puis `throw redirect({ to: '/login' })` si pas de `user` — **le patron à réutiliser** pour toute page protégée
 - **Home / landing (`pages/index.tsx`)** : layout arène complet — rails flottants fixes `LeftNav` (nav + sélecteur langue + `AuthNav`) et `RightNav` (avatar + icônes), viewport central scrollable avec `HeroBanner` (asset `bg.webp`) + `GameRail` (rail scroll-snap de cartes jeu, **données en dur** pour l'instant) + `SiteFooter` (liens Terms/Privacy)
 - **Nouveaux composants UI** : `avatar` (sans dépendance radix), `menu-item` (rend un `<Link>` TanStack si prop `to`, sinon `<button>`), `icon-menu-item` (bouton icône + tooltip)
@@ -398,7 +399,7 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 - **Ticket backend suivant : B6 — soumission de résultats** (§5.3/§5.4). Les deux camps déclarent un score ; accord → `completed` ; désaccord → `disputed` ; timeout. Puis **calcul ELO** (K=32, départ 1000) → `rankings` (la table est encore vide, donc le leaderboard renvoie `[]`).
 
-**Frontend — F0-B mergé / Trello Done** : routing TanStack, home/landing et garde `/dashboard` en place.
+**Frontend — F0-B et correctif Fast Refresh mergés** : routing TanStack, home/landing, garde `/dashboard` et composants de routes isolés sont en place ; lint à 0 erreur / 0 warning.
 
 - Ticket suivant : **câbler le formulaire de login** (`login` → `setSession` → `redirect`), puis register/2FA, puis les vraies pages profil/social.
 - Les stubs `/home`, `/register`, `/privacy`, `/terms`, `/dashboard` restent à remplir.
@@ -406,4 +407,4 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ---
 
-_Dernière mise à jour : 15 juillet 2026 — I2/I3 intégrés, contexte B5d conservé_
+_Dernière mise à jour : 15 juillet 2026 — I2/I3 et correctif Fast Refresh intégrés, contexte B5d conservé_

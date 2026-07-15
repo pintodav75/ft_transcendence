@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
+import { Dashboard } from '@/pages/dashboard'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/dashboard')({
@@ -17,9 +18,5 @@ export const Route = createFileRoute('/dashboard')({
       throw redirect({ to: '/login' })
     }
   },
-  component: RouteComponent,
+  component: Dashboard,
 })
-
-function RouteComponent() {
-  return <div>Hello "/dashboard"!</div>
-}
