@@ -15,7 +15,7 @@ export function AuthNav({ className }: { className?: string }) {
         <select
           defaultValue="en"
           aria-label="language"
-          className="w-full cursor-pointer appearance-none rounded-control border border-border-subtle bg-surface-input px-3 py-2 pr-9 text-sm label-caps text-text-primary transition focus:border-action-primary-hover focus:outline-none"
+          className="w-full cursor-pointer appearance-none rounded-control border border-border-subtle bg-surface-input px-3 py-2 pr-9 text-sm label-caps text-text-primary transition focus:border-focus-ring focus:outline-none"
         >
           <option value="en">English</option>
           <option value="fr">Français</option>
