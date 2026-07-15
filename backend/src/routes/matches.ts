@@ -12,7 +12,7 @@ import {
   userExternalAccountsTable,
   usersTable,
 } from '../db/schema.js';
-import { eq, and, ne, inArray, notInArray, sql, desc } from 'drizzle-orm';
+import { eq, and, ne, or, gt, lt, gte, inArray, notInArray, sql, desc } from 'drizzle-orm';
 import z from 'zod';
 
 // §5.2 — seuls les matchs ACTIFS verrouillent : un match terminé ou annulé libère aussitôt.
@@ -22,46 +22,110 @@ const LOCKING_STATUSES: ('in_progress' | 'awaiting_confirmation' | 'disputed')[]
   'disputed',
 ];
 
+// Les slots ne peuvent tomber que sur un quart fixe : :00, :15, :30, :45.
+const SLOT_GRID_MINUTES = 15;
+
+// Il faut au moins ce délai avant l'heure du match — pour créer ET pour accepter.
+// Un slot qui passe sous cette barre est périmé : plus personne ne peut l'accepter.
+const MIN_LEAD_MINUTES = 15;
+
+// Un camp est ENGAGÉ par un slot ouvert (il peut être accepté à tout moment) comme par
+// un match actif. Un match `completed` ou `cancelled` n'engage plus personne.
+const ENGAGING_STATUSES: ('pending' | 'in_progress' | 'awaiting_confirmation' | 'disputed')[] = [
+  'pending',
+  ...LOCKING_STATUSES,
+];
+
+// Anti-spam : rien n'empêcherait une team d'ouvrir 50 slots pour saturer le tableau.
+const MAX_OPEN_SLOTS = 5;
+
 type Ladder = typeof laddersTable.$inferSelect;
 type Game = typeof gamesTable.$inferSelect;
 
 // `db` ou le `tx` d'une transaction : les deux exposent la même API de requête.
-// Indispensable ici — le check du lockout DOIT pouvoir tourner à l'intérieur d'une
-// transaction (sinon il lit un instantané pris avant le verrou → cf. isLockedOut).
+// Indispensable — les checks de disponibilité DOIVENT pouvoir tourner à l'intérieur
+// d'une transaction (sinon ils lisent un instantané pris avant le verrou).
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * §5.2 — un match ACTIF récent verrouille-t-il ce camp sur ce ladder ?
+ * §5.2 — ce camp a-t-il déjà un match dont la FENÊTRE chevauche celle-ci ?
  *
- * Interroge par TEAM (2v2+) ou par JOUEUR (1v1). Extrait ici parce qu'il tourne
- * DEUX fois : une fois hors transaction (chemin rapide, message d'erreur propre),
- * et une fois DANS la transaction de l'accept, après le verrou — c'est celui-là
- * qui fait autorité.
+ * Chaque match occupe [scheduled_at, scheduled_at + lockout_minutes]. Plutôt que de
+ * comparer des intervalles, on retourne la question : un match me gêne si SON heure
+ * tombe strictement dans ]mon_heure − lockout, mon_heure + lockout[.
+ * Les deux bornes sont calculées EN JS → deux simples comparaisons colonne/valeur,
+ * aucun SQL brut, et l'index (status, scheduled_at) est utilisé.
+ *
+ * ⚠️ INÉGALITÉS STRICTES (gt/lt, jamais gte/lte) : deux matchs qui se TOUCHENT
+ * (21h–22h puis 22h–23h) ne se chevauchent PAS → l'enchaînement dos à dos est autorisé.
+ * C'est le cas d'usage n°1 du ticket (« je planifie ma soirée »). Écrire gte/lte
+ * casserait la feature.
+ *
+ * Remplace hasOpenSlot() + isLockedOut() : une seule question, posée à la création
+ * ET à l'accept.
+ *
+ * ⚠️ PORTÉE : le « camp » est PAR LADDER, pas par personne (décision du 14/07).
+ *   • 2v2+ → la TEAM (elle n'appartient qu'à un seul ladder)
+ *   • 1v1  → le couple (JOUEUR, LADDER) — d'où le filtre eq(ladderId) dans la branche solo
+ * Conséquence ASSUMÉE : un joueur peut avoir un match d'échecs ET un match Rocket League
+ * à 21h. Un joueur aligné dans deux teams sur deux ladders peut être engagé deux fois.
+ * CE N'EST PAS UN BUG — ne « corrigez » pas en retirant le filtre ladder.
+ * Raison : la plateforme n'observe pas les parties ; l'absence se règle par dispute →
+ * forfait ; et c'est une responsabilité humaine (le capitaine engage sa team en connaissance
+ * de cause — si son joueur ne vient pas, c'est SA team qui perd). Cf. docs/schema.md §5.2.
+ *
+ * ⚠️ `statuses` DIFFÈRE selon l'appelant, et c'est essentiel :
+ *   • CRÉATION → ENGAGING_STATUSES (pending + actifs). Je ne peux pas PROPOSER deux
+ *     créneaux qui se chevauchent : si les deux slots étaient acceptés, je jouerais
+ *     deux matchs à la fois.
+ *   • ACCEPT   → LOCKING_STATUSES (actifs SEULEMENT). Mes slots `pending` qui
+ *     chevauchent ne doivent PAS me bloquer : ce ne sont que des propositions, et
+ *     l'option A (plus bas dans la transaction) va justement les RETIRER quand je
+ *     m'engage pour de bon. Les compter ici reviendrait à me refuser un match à cause
+ *     d'une offre que je m'apprête à annuler.
+ *     La course « on accepte mon slot pendant que j'accepte le sien » reste couverte :
+ *     le verrou sérialise, et la relecture sous verrou voit le match devenu ACTIF.
  */
-async function isLockedOut(
+async function hasConflictingMatch(
   executor: Executor,
   ladder: Ladder,
   teamId: string | null,
   userId: string,
+  scheduledAt: Date,
+  statuses: readonly ('pending' | 'in_progress' | 'awaiting_confirmation' | 'disputed')[],
+  excludeMatchId?: string,
 ): Promise<boolean> {
-  const notExpired = sql`${matchesTable.startedAt} + make_interval(mins => ${ladder.lockoutMinutes}) > now()`;
+  const lockoutMs = ladder.lockoutMinutes * 60 * 1000;
+  const windowStart = new Date(scheduledAt.getTime() - lockoutMs);
+  const windowEnd = new Date(scheduledAt.getTime() + lockoutMs);
+
+  // Un slot `pending` dont l'heure approche à moins de MIN_LEAD_MINUTES est PÉRIMÉ :
+  // plus personne ne peut l'accepter, il ne doit donc plus bloquer son propre créateur.
+  const stillAcceptable = new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000);
+
+  const conditions = [
+    inArray(matchesTable.status, [...statuses]),
+    gt(matchesTable.scheduledAt, windowStart),
+    lt(matchesTable.scheduledAt, windowEnd),
+    // « soit ce n'est pas un slot ouvert (donc un match actif : il compte toujours),
+    //   soit c'est un slot ouvert encore acceptable »
+    or(ne(matchesTable.status, 'pending'), gte(matchesTable.scheduledAt, stillAcceptable)),
+  ];
+  // À l'accept, le match qu'on accepte est DÉJÀ en base à cette heure exacte :
+  // sans cette exclusion, il se déclarerait en conflit avec lui-même.
+  if (excludeMatchId) conditions.push(ne(matchesTable.id, excludeMatchId));
 
   if (teamId) {
-    const [locked] = await executor
+    // Une team n'appartient qu'à un seul ladder → pas besoin de filtrer dessus.
+    const [conflict] = await executor
       .select({ id: matchesTable.id })
       .from(matchSidesTable)
       .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
-      .where(
-        and(
-          eq(matchSidesTable.teamId, teamId),
-          inArray(matchesTable.status, LOCKING_STATUSES),
-          notExpired,
-        ),
-      );
-    return !!locked;
+      .where(and(eq(matchSidesTable.teamId, teamId), ...conditions));
+    return !!conflict;
   }
 
-  const [locked] = await executor
+  const [conflict] = await executor
     .select({ id: matchesTable.id })
     .from(matchParticipantsTable)
     .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
@@ -70,37 +134,40 @@ async function isLockedOut(
       and(
         eq(matchParticipantsTable.userId, userId),
         eq(matchesTable.ladderId, ladder.id),
-        inArray(matchesTable.status, LOCKING_STATUSES),
-        notExpired,
+        ...conditions,
       ),
     );
-  return !!locked;
+  return !!conflict;
 }
 
 /**
- * §5.2 — ce camp a-t-il déjà un slot OUVERT (`pending`) sur ce ladder ?
+ * Combien de slots ENCORE OUVERTS (et non périmés) ce camp a-t-il sur ce ladder ?
  *
- * Propre à la CRÉATION : ce n'est pas le côté qu'on valide, c'est l'action d'ouvrir.
- * Comme isLockedOut, il prend un `executor` : la vérification qui fait autorité tourne
- * DANS la transaction, sous verrou (sinon deux POST simultanés créent 2 slots).
+ * Sert au plafond anti-spam. Les slots périmés ne comptent pas : ils sont morts, ils
+ * n'ont pas à consommer un des 5 emplacements de leur créateur.
  */
-async function hasOpenSlot(
+async function countOpenSlots(
   executor: Executor,
   ladder: Ladder,
   teamId: string | null,
   userId: string,
-): Promise<boolean> {
+): Promise<number> {
+  const stillAcceptable = new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000);
+  const conditions = [
+    eq(matchesTable.status, 'pending' as const),
+    gte(matchesTable.scheduledAt, stillAcceptable),
+  ];
+
   if (teamId) {
-    // Une team n'appartient qu'à un seul ladder → pas besoin de filtrer dessus.
-    const [open] = await executor
+    const rows = await executor
       .select({ id: matchesTable.id })
       .from(matchSidesTable)
       .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
-      .where(and(eq(matchSidesTable.teamId, teamId), eq(matchesTable.status, 'pending')));
-    return !!open;
+      .where(and(eq(matchSidesTable.teamId, teamId), ...conditions));
+    return rows.length;
   }
 
-  const [open] = await executor
+  const rows = await executor
     .select({ id: matchesTable.id })
     .from(matchParticipantsTable)
     .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
@@ -109,10 +176,10 @@ async function hasOpenSlot(
       and(
         eq(matchParticipantsTable.userId, userId),
         eq(matchesTable.ladderId, ladder.id),
-        eq(matchesTable.status, 'pending'),
+        ...conditions,
       ),
     );
-  return !!open;
+  return rows.length;
 }
 
 /** Identité d'un camp sur un ladder : la team en 2v2+, le couple joueur+ladder en 1v1. */
@@ -169,8 +236,9 @@ type SideValidation =
  * Appelé DEUX fois : à la création du slot (side 0) et à l'acceptation (side 1).
  * C'est tout l'intérêt : les deux camps d'un match sont validés à l'identique.
  *
- * ⚠️ Le check « j'ai déjà un slot ouvert » n'est PAS ici : il ne valide pas le côté,
- * il valide l'action d'ouvrir un slot → il reste dans POST /.
+ * ⚠️ Il ne dit RIEN du créneau. « Suis-je libre à cette heure ? » est une autre
+ * question — c'est hasConflictingMatch(), appelé par les routes. validateSide valide
+ * le CÔTÉ (qui joue), pas l'HORAIRE (quand).
  */
 async function validateSide(
   ladder: Ladder,
@@ -195,16 +263,6 @@ async function validateSide(
         ok: false,
         code: 400,
         error: `you must have a linked ${game.requiredProvider} account`,
-      };
-
-    // §5.2 lockout — un match ACTIF récent (moi, ce ladder) me verrouille.
-    // ⚠️ Chemin RAPIDE seulement : la vérification qui fait autorité est refaite
-    // dans la transaction de l'accept, après le verrou (course du double accept).
-    if (await isLockedOut(db, ladder, null, me))
-      return {
-        ok: false,
-        code: 409,
-        error: `locked out for ${ladder.lockoutMinutes} min after your last match`,
       };
 
     return { ok: true, sideTeamId: null, participantIds: [me] };
@@ -259,23 +317,23 @@ async function validateSide(
       unlinkedPlayers,
     };
 
-  // §5.2 lockout — un match ACTIF récent verrouille la team.
-  // ⚠️ Chemin RAPIDE seulement (cf. la note du cas solo ci-dessus).
-  if (await isLockedOut(db, ladder, team.id, me))
-    return {
-      ok: false,
-      code: 409,
-      error: `team is locked out for ${ladder.lockoutMinutes} min after its last match`,
-    };
-
   return { ok: true, sideTeamId: team.id, participantIds: lineup };
 }
 
 const createMatchSchema = z.object({
   ladderId: z.uuid(),
-  scheduledAt: z.coerce.date().refine((date) => date.getTime() > Date.now(), {
-    message: 'scheduledAt must be in the future',
-  }),
+  scheduledAt: z.coerce
+    .date()
+    .refine(
+      (date) =>
+        date.getUTCMinutes() % SLOT_GRID_MINUTES === 0 &&
+        date.getUTCSeconds() === 0 &&
+        date.getUTCMilliseconds() === 0,
+      { message: `scheduledAt must be on a ${SLOT_GRID_MINUTES}-minute slot (:00, :15, :30, :45)` },
+    )
+    .refine((date) => date.getTime() - Date.now() >= MIN_LEAD_MINUTES * 60 * 1000, {
+      message: `scheduledAt must be at least ${MIN_LEAD_MINUTES} minutes from now`,
+    }),
   // lineup : requise pour les ladders d'équipe (2v2+), ignorée en 1v1 (solo = le créateur)
   lineup: z
     .array(z.uuid())
@@ -317,14 +375,23 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       }
       const { sideTeamId, participantIds } = side;
 
-      // Spécifique à la CRÉATION : pas de 2e slot déjà ouvert sur ce ladder.
-      // (Ce check ne valide pas le côté, il valide l'action d'ouvrir → il reste ici.)
-      // ⚠️ Chemin RAPIDE seulement : la vérification qui fait autorité est refaite dans la
-      // transaction, sous verrou (sinon 2 POST simultanés créent 2 slots — TOCTOU).
-      if (await hasOpenSlot(db, ladder, sideTeamId, me))
+      // §5.2 — suis-je déjà pris à cette heure ? Un slot ouvert m'engage autant qu'un
+      // match actif : les deux occupent le créneau. (Ce check ne valide pas le CÔTÉ,
+      // il valide le CRÉNEAU → il ne peut pas vivre dans validateSide.)
+      // ⚠️ Chemin RAPIDE : la vérification qui fait autorité est refaite dans la
+      // transaction, sous verrou (sinon 2 POST simultanés passent tous les deux — TOCTOU).
+      if (await hasConflictingMatch(db, ladder, sideTeamId, me, data.scheduledAt, ENGAGING_STATUSES))
+        return reply.code(409).send({
+          error: sideTeamId
+            ? 'your team already has a match around that time'
+            : 'you already have a match around that time',
+        });
+
+      // Plafond anti-spam (chemin rapide, revérifié sous verrou).
+      if ((await countOpenSlots(db, ladder, sideTeamId, me)) >= MAX_OPEN_SLOTS)
         return reply
           .code(409)
-          .send({ error: sideTeamId ? 'team already has an open slot' : 'you already have an open slot' });
+          .send({ error: `you cannot have more than ${MAX_OPEN_SLOTS} open slots on a ladder` });
 
       // tirage de 3 maps distinctes si le jeu a un pool, sinon []
       const drawn = await db
@@ -342,10 +409,12 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         // Un seul camp est en jeu ici (on ouvre, on n'affronte encore personne).
         await lockCompetitors(tx, [competitorKey(ladder, sideTeamId, me)]);
 
-        // Relectures SOUS le verrou — ce sont celles-ci qui font autorité.
-        if (await hasOpenSlot(tx, ladder, sideTeamId, me)) return { raced: 'open_slot' } as const;
-        // Un accept concurrent a pu m'engager dans un match entre-temps → §5.2.
-        if (await isLockedOut(tx, ladder, sideTeamId, me)) return { raced: 'locked' } as const;
+        // Relectures SOUS le verrou — ce sont CELLES-CI qui font autorité. Un POST ou un
+        // accept concurrent a pu m'engager sur ce créneau entre-temps.
+        if (await hasConflictingMatch(tx, ladder, sideTeamId, me, data.scheduledAt, ENGAGING_STATUSES))
+          return { raced: 'conflict' } as const;
+        if ((await countOpenSlots(tx, ladder, sideTeamId, me)) >= MAX_OPEN_SLOTS)
+          return { raced: 'too_many' } as const;
 
         const [createdMatch] = await tx
           .insert(matchesTable)
@@ -363,16 +432,16 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         return { raced: null, match: createdMatch } as const;
       });
 
-      if (created.raced === 'open_slot')
-        return reply
-          .code(409)
-          .send({ error: sideTeamId ? 'team already has an open slot' : 'you already have an open slot' });
-      if (created.raced === 'locked')
+      if (created.raced === 'conflict')
         return reply.code(409).send({
           error: sideTeamId
-            ? `team is locked out for ${ladder.lockoutMinutes} min after its last match`
-            : `locked out for ${ladder.lockoutMinutes} min after your last match`,
+            ? 'your team already has a match around that time'
+            : 'you already have a match around that time',
         });
+      if (created.raced === 'too_many')
+        return reply
+          .code(409)
+          .send({ error: `you cannot have more than ${MAX_OPEN_SLOTS} open slots on a ladder` });
 
       return reply.code(201).send({ match: created.match });
     } catch (error) {
@@ -390,7 +459,15 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       const [ladder] = await db.select().from(laddersTable).where(eq(laddersTable.id, ladderId));
       if (!ladder) return reply.code(404).send({ error: 'ladder not found' });
 
-      const conditions = [eq(matchesTable.ladderId, ladderId), eq(matchesTable.status, 'pending')];
+      const conditions = [
+        eq(matchesTable.ladderId, ladderId),
+        eq(matchesTable.status, 'pending'),
+        // Masquer les slots PÉRIMÉS : à moins de MIN_LEAD_MINUTES du coup d'envoi, plus
+        // personne ne peut les accepter — ils n'ont plus rien à faire sur le tableau.
+        // (Le job les passera à `cancelled` à sa prochaine passe ; en attendant, on ne
+        //  les montre pas.)
+        gte(matchesTable.scheduledAt, new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000)),
+      ];
 
       if (ladder.format === '1v1') {
         // solo : exclure les matchs où je suis participant
@@ -601,6 +678,24 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         if (!match) return reply.code(404).send({ error: 'match not found' });
         if (match.status !== 'pending')
           return reply.code(409).send({ error: "match isn't pending" });
+
+        // EXPIRATION — un slot n'est plus acceptable à moins de MIN_LEAD_MINUTES de son
+        // heure. Le job d'expiration tourne à la minute : il existe donc une fenêtre où le
+        // slot est déjà mort mais encore `pending` en base. Cette garde la ferme.
+        // (Le `!match.scheduledAt` ne devrait jamais arriver — Zod l'impose à la création —
+        //  mais la colonne est nullable, donc TypeScript exige qu'on le traite.)
+        if (
+          !match.scheduledAt ||
+          match.scheduledAt.getTime() - Date.now() < MIN_LEAD_MINUTES * 60 * 1000
+        )
+          return reply
+            .code(409)
+            .send({ error: `slot is no longer acceptable (less than ${MIN_LEAD_MINUTES} min before kickoff)` });
+
+        // L'heure du match, capturée dans une const : le narrowing de `match.scheduledAt`
+        // (Date | null → Date) ne survit pas à l'intérieur du callback de la transaction.
+        const kickoff = match.scheduledAt;
+
         const [ladder] = await db
           .select()
           .from(laddersTable)
@@ -641,6 +736,17 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             return reply.code(400).send({ error: 'you cannot accept your own slot' });
         }
 
+        // §5.2 — l'ACCEPTEUR est-il libre sur ce créneau ? (chemin rapide ; la vérif qui
+        // fait autorité est refaite sous verrou dans la transaction). On EXCLUT le match
+        // lui-même : il est déjà en base à cette heure exacte, il se déclarerait en
+        // conflit avec lui-même.
+        if (await hasConflictingMatch(db, ladder, side.sideTeamId, me, kickoff, LOCKING_STATUSES, id))
+          return reply.code(409).send({
+            error: side.sideTeamId
+              ? 'your team already has a match around that time'
+              : 'you already have a match around that time',
+          });
+
         // Les DEUX camps du match, identifiés avant la transaction.
         // Il faut verrouiller les deux (pas seulement l'accepteur) : la transaction va
         // toucher les slots ouverts des deux côtés (option A, plus bas). Verrouiller un
@@ -649,6 +755,12 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         const lockKeys = [competitorKey(ladder, side.sideTeamId, me)];
         if (side0.teamId) lockKeys.push(competitorKey(ladder, side0.teamId, me));
         else if (creatorUserId) lockKeys.push(competitorKey(ladder, null, creatorUserId));
+
+        // La fenêtre occupée par le match qu'on accepte. Sert à l'option A ci-dessous :
+        // seuls les slots qui CHEVAUCHENT cette fenêtre doivent tomber.
+        const lockoutMs = ladder.lockoutMinutes * 60 * 1000;
+        const windowStart = new Date(kickoff.getTime() - lockoutMs);
+        const windowEnd = new Date(kickoff.getTime() + lockoutMs);
 
         const accepted = await db.transaction(async (tx) => {
           // 0. VERROUS des deux camps, pris dans un ORDRE DÉTERMINISTE (tri des clés).
@@ -659,13 +771,15 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           await lockCompetitors(tx, lockKeys);
 
           // 1. §5.2 REVÉRIFIÉ sous le verrou — c'est CETTE lecture qui fait autorité.
-          //    Celle de validateSide date d'avant le verrou : elle a pu voir « libre »
-          //    alors qu'un accept concurrent était en train de rendre le camp occupé.
-          if (await isLockedOut(tx, ladder, side.sideTeamId, me)) return { raced: 'locked' } as const;
+          //    Le chemin rapide date d'avant le verrou : il a pu voir « libre » alors
+          //    qu'un accept concurrent était en train d'occuper le créneau.
+          if (await hasConflictingMatch(tx, ladder, side.sideTeamId, me, kickoff, LOCKING_STATUSES, id))
+            return { raced: 'conflict' } as const;
 
           // 2. Update CONDITIONNEL : seul un match encore `pending` bascule. Si deux
           //    équipes acceptent LE MÊME match, la 2e ne touche aucune ligne → 409.
-          //    started_at = maintenant → c'est CE moment qui arme le lockout §5.2.
+          //    started_at = maintenant : historique de l'acceptation seulement.
+          //    Aucune règle ne le lit — la dispo §5.2 est pilotée par scheduled_at.
           const [updated] = await tx
             .update(matchesTable)
             .set({ status: 'in_progress', startedAt: new Date() })
@@ -683,9 +797,18 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             .insert(matchParticipantsTable)
             .values(side.participantIds.map((userId) => ({ matchSideId: createdSide.id, userId })));
 
-          // 4. Les deux camps sont maintenant ENGAGÉS : leurs autres slots ouverts
-          //    doivent tomber. Sinon une 3e équipe accepterait un slot d'un camp déjà
-          //    en match → deux matchs actifs en parallèle, lockout §5.2 contourné.
+          // 4. Les deux camps sont maintenant ENGAGÉS sur ce CRÉNEAU : leurs slots ouverts
+          //    qui CHEVAUCHENT cette fenêtre doivent tomber. Sinon une 3e équipe en
+          //    accepterait un → deux matchs qui se recouvrent, §5.2 contourné.
+          //
+          //    ⚠️ On n'annule QUE ceux qui chevauchent — surtout PAS tous les slots ouverts.
+          //    Une team qui a planifié 21h / 23h / 01h et se fait accepter celui de 21h doit
+          //    GARDER ceux de 23h et 01h : ils ne se recouvrent pas. C'est tout l'objet de B5d.
+          const overlapsWindow = [
+            gt(matchesTable.scheduledAt, windowStart),
+            lt(matchesTable.scheduledAt, windowEnd),
+          ];
+
           if (side.sideTeamId !== null && side0.teamId !== null) {
             // Team : on annule par TEAM. Indispensable — annuler par joueur raterait
             // un slot ouvert avec une lineup disjointe de celle qu'on vient d'engager.
@@ -701,11 +824,12 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                   eq(matchesTable.status, 'pending'),
                   ne(matchesTable.id, id),
                   inArray(matchesTable.id, theirSlots),
+                  ...overlapsWindow,
                 ),
               );
           } else {
-            // Solo : on annule par JOUEUR, et seulement sur CE ladder — le lockout est
-            // par ladder, mes slots ouverts ailleurs ne me concernent pas.
+            // Solo : on annule par JOUEUR, et seulement sur CE ladder — mes slots ouverts
+            // sur d'autres ladders ne me concernent pas.
             const userIds = [me, ...side0Participants.map((p) => p.userId)];
             const theirSlots = tx
               .select({ id: matchSidesTable.matchId })
@@ -724,6 +848,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                   ne(matchesTable.id, id),
                   eq(matchesTable.ladderId, match.ladderId),
                   inArray(matchesTable.id, theirSlots),
+                  ...overlapsWindow,
                 ),
               );
           }
@@ -735,11 +860,11 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         // (update conditionnel) vs « je viens de m'engager ailleurs » (verrou §5.2).
         if (accepted.raced === 'taken')
           return reply.code(409).send({ error: 'match is no longer pending' });
-        if (accepted.raced === 'locked')
+        if (accepted.raced === 'conflict')
           return reply.code(409).send({
             error: side.sideTeamId
-              ? `team is locked out for ${ladder.lockoutMinutes} min after its last match`
-              : `locked out for ${ladder.lockoutMinutes} min after your last match`,
+              ? 'your team already has a match around that time'
+              : 'you already have a match around that time',
           });
 
         return reply.code(200).send({ match: accepted.match });

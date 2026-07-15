@@ -22,6 +22,7 @@ import { laddersRoutes } from './routes/ladders.js';
 import { externalAccountsRoutes } from './routes/external-accounts.js';
 import { teamsRoutes } from './routes/teams.js';
 import { matchesRoutes } from './routes/matches.js';
+import { startJobs } from './jobs/index.js';
 
 const server = fastify({
   https: {
@@ -92,6 +93,11 @@ try {
   await ensureBucket();
   const address = await server.listen({ port: 3000, host: '0.0.0.0' });
   console.log(`Server listening at ${address}`);
+
+  // Le planificateur : la seule partie du backend qui tourne sans requête HTTP.
+  // Pour l'instant il n'annule que les slots périmés (B5d) ; B6 et B7 y ajouteront
+  // la confirmation automatique des scores et le timeout des disputes.
+  startJobs((msg) => console.log(msg));
 } catch (err) {
   console.error(err);
   process.exit(1);

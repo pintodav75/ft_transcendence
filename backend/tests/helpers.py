@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE = os.environ.get("TEST_BASE_URL", "https://localhost:3000")
@@ -96,11 +97,23 @@ def ladder_id(token, game, fmt):
 
 
 def future(hours=1):
-    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() + hours * 3600))
+    """Une heure de match VALIDE : alignée sur le quart (:00/:15/:30/:45) et dans le futur.
+
+    ⚠️ Depuis B5d, le back refuse toute heure hors quart fixe (400) et à moins de 15 min
+    du coup d'envoi. Ce helper arrondit donc AU QUART SUPÉRIEUR — sans quoi toutes les
+    suites qui créent des matchs se prendraient un 400.
+    """
+    t = datetime.now(timezone.utc) + timedelta(hours=hours)
+    t = t.replace(second=0, microsecond=0)
+    t += timedelta(minutes=(15 - t.minute % 15) % 15)  # arrondi au quart supérieur
+    return t.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def past():
-    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - 3600))
+    """Une heure passée, alignée sur le quart — pour tester le rejet des dates passées."""
+    t = datetime.now(timezone.utc) - timedelta(hours=1)
+    t = t.replace(minute=t.minute - t.minute % 15, second=0, microsecond=0)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 # ---------------------------------------------------------------- SQL (dev only)

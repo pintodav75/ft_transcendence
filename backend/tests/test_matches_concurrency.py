@@ -141,8 +141,11 @@ def run():
     s.check("un seul accept passe (200 + 409)", codes, [200, 409])
     s.check("bob n'a qu'UN match actif (lockout §5.2 tenu)", active_matches(idB), "1")
     s.check(
-        "le refusé cite bien le lockout",
-        "locked out" in (res["M1"][1] if res["M1"][0] == 409 else res["M2"][1]).get("error", ""),
+        "le refusé cite bien le conflit de créneau (§5.2)",
+        # ⚠️ Le message diffère selon le format : « you already HAVE » en solo,
+        # « your team already HAS » en team. On cherche donc la partie commune.
+        "a match around that time"
+        in (res["M1"][1] if res["M1"][0] == 409 else res["M2"][1]).get("error", ""),
         True,
     )
 
