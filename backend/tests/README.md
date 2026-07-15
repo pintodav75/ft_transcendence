@@ -4,7 +4,7 @@ Scripts Python qui tapent sur le **vrai backend** et la **vraie base de dev** �
 Ils créent leurs propres utilisateurs et **les suppriment à la fin** : les données de
 l'équipe (seed-dev, comptes perso) ne sont **jamais** touchées.
 
-**8 suites, 164 cas.** Aucune dépendance à installer : uniquement la stdlib Python 3.
+**9 suites, 206 cas.** Aucune dépendance à installer : uniquement la stdlib Python 3.
 
 ## Lancer
 
@@ -35,6 +35,7 @@ en tâche de fond plutôt que de le regarder tourner.
 | `test_matches_me.py` | B5c | `GET /matches/me` : les 2 sources (participant **et** team engagée), **le remplaçant sur le banc**, la déduplication, `[]` si aucun match |
 | `test_matches_detail.py` | B5c | `GET /matches/:id` enrichi : objet `team` + `players`, `null` en solo, sides triés, garde 403, **aucune fuite** de champ privé |
 | `test_matches_concurrency.py` | B5c (review) | **Courses réelles, avec threads** : double accept, acceptation croisée (interblocage), double création, et la fuite d'autorisation du `DELETE` |
+| `test_matches_scheduling.py` | B5d | **Le temps** : grille horaire (quart fixe + 15 min), **fenêtres de disponibilité** (chevauchement interdit mais **dos à dos autorisé**), la « soirée gaming » (plusieurs slots qui coexistent), **l'option A resserrée** (les slots non chevauchants SURVIVENT à l'accept), l'expiration, le plafond de 5, et le **job** |
 | `test_teams_linked.py` | B5c | `hasLinkedAccount` par membre dans `GET /teams/:id` + `unlinkedPlayers` dans le 400 |
 
 Il existe aussi des **tests unitaires Vitest** pour les helpers purs (sans DB ni HTTP) :
@@ -45,6 +46,10 @@ Il existe aussi des **tests unitaires Vitest** pour les helpers purs (sans DB ni
 - **`helpers.py`** contient le client HTTP, `register()` (qui **réessaie tout seul** sur le
   rate-limit de 3/min), l'accès SQL et le nettoyage. `ROOT` est déduit de `__file__` — **jamais
   de chemin en dur**, sinon les tests ne tournent que sur la machine de leur auteur.
+- ⚠️ **`future()` arrondit AU QUART SUPÉRIEUR** depuis B5d. Le back refuse toute heure hors
+  `:00`/`:15`/`:30`/`:45` (400) et à moins de 15 min du coup d'envoi. Une heure « naïve »
+  (`now + 1h`) tombe presque toujours à côté de la grille → 400. **Toujours passer par
+  `future()`** ; si tu construis une date à la main dans un test, aligne-la.
 - ⚠️ **Tester une course sans barrière ne prouve RIEN.** Deux threads lancés à la suite
   démarrent en décalé et ne se croisent jamais : le test passe alors que le bug est bien là.
   C'est un **faux négatif**, pire qu'aucun test — l'interblocage de l'acceptation croisée a été

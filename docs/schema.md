@@ -259,7 +259,7 @@ Métadonnées d'un match. C'est l'entité centrale du domaine jeu.
 | `status` | `match_status_enum` | NOT NULL DEFAULT `'pending'` | Voir state machine ci-dessous |
 | `winner_side_id` | `uuid` | NULLABLE, FK → match_sides(id) | Vérité finale, renseigné quand status = `'completed'`. Permet les queries "matches gagnés par X" sans calcul |
 | `scheduled_at` | `timestamp tz` | NULLABLE | Si le match est programmé pour plus tard (matchmaking future) |
-| `started_at` | `timestamp tz` | NULLABLE | Quand le match a vraiment commencé. **Référence pour le lockout** |
+| `started_at` | `timestamp tz` | NULLABLE | Instant de l'**acceptation** du slot. **Historique seul — aucune règle métier ne le lit** (la disponibilité est pilotée par `scheduled_at`, cf. §5.2) |
 | `completed_at` | `timestamp tz` | NULLABLE | Quand status devient `'completed'` ou `'cancelled'` |
 | `created_at` | `timestamp tz` | NOT NULL DEFAULT NOW | |
 
@@ -452,15 +452,84 @@ Ces règles vivent dans le code applicatif, pas en contraintes DB.
 
 Pour s'inscrire à un match d'un jeu `G`, le user doit avoir une ligne dans `user_external_accounts` avec `provider = G.required_provider`. Sinon → 400 "Lie ton compte X".
 
-### 5.2 Lockout entre matchs
+### 5.2 Disponibilité — fenêtres de match (RÉÉCRIT le 13/07, ticket B5d)
 
-Quand une team (ou un user en 1v1) accepte un match dans un ladder L :
-- Si elle a un match dont `started_at > NOW() - INTERVAL '1 minute' * L.lockout_minutes` et status ∈ `('in_progress', 'awaiting_confirmation', 'disputed')` → rejet "occupée".
+> ⚠️ **Cette règle disait autre chose avant.** Elle était écrite sur `started_at` (= le moment du clic sur « accepter »), et parlait d'un « lockout » de N minutes après ce clic. C'était **faux** : un slot à 21h accepté à 20h30 voyait son lockout expirer à **21h00**, soit au coup d'envoi — les deux équipes redevenaient « libres » **pendant qu'elles jouaient**. Le design était en retard sur l'UX (le choix d'une heure est arrivé après).
 
-### 5.3 Soumission de score trop tôt
+**La référence temporelle est `scheduled_at`** — l'heure du match, choisie par le créateur. La plateforme n'a **aucune source de vérité** sur le vrai coup d'envoi (elle ne voit pas la partie Valorant, les joueurs peuvent avoir 10 min de retard), donc elle ne fait pas semblant d'en avoir une.
+
+`started_at` conserve un sens honnête — « le match a été **accepté** à ce moment-là » — mais **aucune règle métier ne le lit** : c'est de l'historique.
+
+**Le modèle : la fenêtre.** Chaque match occupe `[scheduled_at, scheduled_at + L.lockout_minutes]`.
+
+> **Un CAMP ne peut pas être engagé dans deux matchs dont les fenêtres se CHEVAUCHENT.**
+
+### ⚠️ Ce qu'est un « camp » — la portée est LE LADDER (décision du 14/07)
+
+| Format | Le camp est… | Clé de verrou |
+|---|---|---|
+| **2v2+** | la **team** (elle n'appartient qu'à un seul ladder) | `team:<teamId>` |
+| **1v1** | le couple **(joueur, ladder)** | `user:<userId>:<ladderId>` |
+
+**La disponibilité est donc calculée PAR LADDER, pas par personne.** Conséquence assumée : un joueur **peut** avoir un match d'échecs à 21h **et** un match Rocket League à 21h. Un joueur aligné dans deux teams sur deux ladders différents **peut** être engagé dans deux matchs qui se chevauchent.
+
+**Pourquoi on ne l'empêche pas** (décision de David, 14/07, après une review externe qui a soulevé le point) :
+
+- **La plateforme n'observe pas les parties.** Elle ne peut pas vérifier qu'un joueur est présent. Bloquer techniquement donnerait une fausse impression de garantie.
+- **Le mécanisme de correction existe déjà** : un joueur absent → l'adversaire ouvre une **dispute** → **forfait**. Le double-booking se paie tout seul.
+- **C'est une responsabilité humaine, pas technique.** Un joueur gère son planning. **Un capitaine engage son équipe** : il doit obtenir l'accord de ses joueurs avant de les aligner, et si l'un d'eux ne se présente pas, **c'est SON équipe** — la sienne, dont il fait partie — **qui perd par forfait**. Il est le premier puni de sa négligence.
+
+→ **Ces règles doivent figurer dans les Terms of Service du site** (page `/terms`, obligatoire pour le sujet 42). Elles ne sont pas un supplément : c'est le contenu naturel d'une page qu'il faut écrire de toute façon.
+
+⚠️ **Limite connue, à traiter plus tard** : un capitaine **ne peut pas voir** qu'un de ses joueurs est déjà pris à cette heure sur un autre ladder. Le conflit est donc **invisible** au moment où il compose sa lineup. Ticket futur : exposer une **disponibilité par joueur** dans `GET /teams/:id` (comme `hasLinkedAccount` le fait déjà pour les comptes non liés) → **informer sans bloquer**.
+
+**⚠️ Ce qui compte dépend de CE QU'ON FAIT** — et cette distinction est le point le plus subtil de la règle :
+
+| Action | Ce qui bloque | Pourquoi |
+|---|---|---|
+| **Créer** un slot | mes slots `pending` **ET** mes matchs actifs | Je ne peux pas **proposer** deux créneaux qui se chevauchent : si les deux étaient acceptés, je jouerais deux matchs à la fois. |
+| **Accepter** un match | **uniquement mes matchs actifs** | Un slot `pending` n'est qu'une **proposition**. M'engager pour de bon la rend caduque : l'acceptation **retire** mes slots ouverts qui chevauchent (cf. ci-dessous). La compter comme un blocage me refuserait un match à cause d'une offre que je m'apprête moi-même à annuler. |
+
+Ne comptent jamais : `completed`, `cancelled`, et les slots **périmés** (cf. 5.2.b).
+
+**À l'acceptation**, les slots `pending` des **deux camps** qui **chevauchent** la fenêtre du match accepté passent à `cancelled`. ⚠️ **Uniquement ceux qui chevauchent** — une team qui a planifié 21h / 23h / 01h et se fait accepter celui de 21h **garde** ceux de 23h et 01h.
+
+La course « on accepte mon slot pendant que j'accepte le sien » reste couverte : un **verrou consultatif** sérialise les deux transactions, et la relecture **sous le verrou** voit le match devenu **actif**.
+
+**Chevauchement — INÉGALITÉS STRICTES** :
+
+```
+A et B se chevauchent  ⟺  A.début < B.fin  ET  B.début < A.fin
+```
+
+Avec `<`, **jamais** `<=`. Deux fenêtres qui **se touchent** ne se chevauchent pas : un match 21h–22h et un match 22h–23h sont **autorisés**. C'est ce qui permet d'**enchaîner les matchs dos à dos** — le cas d'usage central (« je planifie ma soirée : 21h, 23h, 01h »). Écrire `<=` casserait la feature.
+
+En pratique, comme les deux fenêtres ont la même durée `L` (même ladder), la condition se réécrit :
+
+> un match me gêne si **son** heure tombe strictement dans `] mon_heure − L , mon_heure + L [`
+
+ce qui donne deux simples comparaisons colonne/valeur, sans SQL brut, et utilise l'index `(status, scheduled_at)`.
+
+**Plafond anti-spam** : **5 slots `pending` maximum** par team (ou joueur) et par ladder.
+
+### 5.2.b Grille horaire et expiration des slots (B5d)
+
+- **Quart fixe** : `scheduled_at` ne peut tomber que sur `:00`, `:15`, `:30` ou `:45` (secondes et ms à 0). Validé **côté back** — le menu déroulant du front n'est qu'un confort.
+- **15 minutes d'avance minimum**, borne **incluse**, pour **créer** comme pour **accepter**. Match à 21h → dernière limite **20h45:00**. À 20h45:01 → rejet (400 à la création, 409 à l'accept).
+- **Expiration** : un slot `pending` qui passe sous cette barre est **périmé** → un job (`setInterval`, passe à la minute) le fait passer à `cancelled`.
+- ⚠️ Le job tourne à la minute : il existe une fenêtre où le slot est **mort mais encore `pending`** en base. Trois conséquences que le code doit assumer :
+  1. **l'accept refuse quand même** un slot périmé (409) ;
+  2. `GET /matches?ladderId=` **le masque** ;
+  3. les checks de disponibilité et le plafond **l'ignorent** — sinon un slot mort **bloquerait son propre créateur**.
+
+### 5.3 Soumission de score trop tôt (SIMPLIFIÉ le 13/07)
+
+> ⚠️ **Cette règle disait autre chose avant** : « rejet si `NOW() - started_at < lockout_minutes` ». Simplifiée pour deux raisons — (1) `started_at` ne veut plus rien dire (cf. 5.2), (2) une partie peut finir vite (un Valorant 13-0 en 20 min) et il n'y a aucune raison de faire poireauter les joueurs.
 
 Quand un side soumet son résultat sur un match M :
-- Si `NOW() - M.started_at < INTERVAL '1 minute' * M.ladder.lockout_minutes` → rejet "trop tôt".
+- Si `NOW() < M.scheduled_at` → rejet **« le match n'a pas encore commencé »**.
+
+C'est tout. On empêche de déclarer un vainqueur pour un match **non joué** ; on n'impose **aucune** durée minimale. La vraie protection contre la triche, c'est l'**accord des deux camps** (§5.4).
 
 ### 5.4 Match consistent vs dispute
 
@@ -483,10 +552,12 @@ Avant INSERT dans `team_members` : `count(team_members WHERE team_id = X) < L.fo
 
 Si un match chess se termine par un nul, les joueurs **rejouent** sur chess.com jusqu'à avoir un vainqueur. Seul le résultat final (le vainqueur) est soumis dans notre plateforme. Aucun cas de nul ne remonte à la DB.
 
-### 5.8 Lockout par défaut
+### 5.8 `lockout_minutes` par défaut
 
 - 5v5 → 60 min
 - Tout le reste → 30 min
+
+C'est la **durée d'une fenêtre de match** (§5.2) : la plateforme suppose qu'un 5v5 mobilise une équipe une heure, les autres formats une demi-heure. Elle ne mesure rien — elle *postule*.
 
 ---
 

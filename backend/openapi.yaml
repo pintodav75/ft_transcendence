@@ -1984,9 +1984,25 @@ paths:
         • **2v2+** : un **capitaine** engage sa team avec une **lineup** (team déduite
         du ladder).
         • **1v1** : le **créateur** s'engage **seul** (lineup ignorée, side sans team).
-        Maps BO3 tirées à la création (3 distinctes pour val/cs2 ; [] sinon). Gardes
-        §5.1 (compte externe lié) et §5.2 (slot ouvert unique + lockout temporel),
-        appliquées à la team (2v2+) ou au joueur (1v1).
+        Maps BO3 tirées à la création (3 distinctes pour val/cs2 ; [] sinon).
+
+        **Gardes** : §5.1 (compte externe lié) · **§5.2 disponibilité par FENÊTRE** ·
+        grille horaire · plafond de 5 slots ouverts.
+
+        **§5.2 — le modèle des fenêtres.** Chaque match occupe
+        `[scheduledAt, scheduledAt + lockout_minutes]` (60 min en 5v5, 30 ailleurs).
+        Un camp ne peut pas être engagé dans deux matchs dont les fenêtres se
+        **chevauchent**. **À la création**, les slots `pending` comptent autant que les
+        matchs actifs : on ne peut pas *proposer* deux créneaux qui se chevauchent.
+
+        ⚠️ **Le « camp » est PAR LADDER** : en 2v2+ c'est la **team** ; en 1v1 c'est le couple
+        **(joueur, ladder)**. Un joueur **peut donc** avoir un match d'échecs à 21h et un match
+        Rocket League à 21h — c'est **assumé**. La plateforme n'observe pas les parties ; une
+        absence se règle par **dispute → forfait**, et c'est une responsabilité humaine
+        (le capitaine engage sa team en connaissance de cause).
+        Les fenêtres qui se **touchent** ne se chevauchent PAS : on peut donc enchaîner
+        21h–22h puis 22h–23h. Une team peut ainsi ouvrir **21h, 23h et 01h** en même
+        temps et planifier sa soirée.
       security:
         - bearerAuth: []
       requestBody:
@@ -1997,7 +2013,18 @@ paths:
               type: object
               properties:
                 ladderId: { type: string, format: uuid }
-                scheduledAt: { type: string, format: date-time }
+                scheduledAt:
+                  type: string
+                  format: date-time
+                  description: >
+                    L'heure du match. **Doit tomber sur un quart fixe** (`:00`, `:15`,
+                    `:30`, `:45` — secondes et ms à 0) et être **au moins 15 minutes
+                    dans le futur** (borne incluse : à 20h45:00 on peut encore créer
+                    pour 21h ; à 20h45:01, non). C'est LA référence temporelle du
+                    match : §5.2 (disponibilité) et §5.3 (soumission de score) s'y
+                    réfèrent. `startedAt`, lui, n'enregistre que l'instant de
+                    l'acceptation — aucune règle ne le lit.
+                  example: '2026-07-14T21:00:00.000Z'
                 lineup:
                   type: array
                   items: { type: string, format: uuid }
@@ -2030,10 +2057,11 @@ paths:
                 required: [match]
         '400':
           description: >
-            Body invalide (ValidationError) ; scheduledAt dans le passé ; en 2v2+ :
-            lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors
-            team (Error) ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus
-            `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple.
+            Body invalide (ValidationError) — dont **scheduledAt hors quart fixe**
+            (ex. 21h07) ou **à moins de 15 min** ; en 2v2+ : lineup manquante/mauvaise
+            taille, pas de team sur ce ladder, joueur hors team (Error) ;
+            **§5.1 compte non lié** → en 2v2+ la réponse porte en plus `unlinkedPlayers`
+            (UnlinkedPlayersError) ; en 1v1 c'est un Error simple.
           content:
             application/json:
               schema:
@@ -2057,8 +2085,10 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            §5.2 — la team a déjà un slot ouvert (pending), ou est en lockout
-            (started_at + lockout_minutes non écoulé).
+            **§5.2** — le camp a déjà un match (slot ouvert **ou** match actif) dont la
+            fenêtre **chevauche** celle demandée (`your team already has a match around
+            that time`) ; **ou** il a atteint le **plafond de 5 slots ouverts** sur ce
+            ladder. Les slots périmés ne comptent dans aucun des deux.
           content:
             application/json:
               schema:
@@ -2071,6 +2101,10 @@ paths:
       description: >
         Slots pending d'un ladder. Team créatrice ET maps masquées (anonymat) ;
         mes propres slots exclus. Ne renvoie que id / format / jeu / heure.
+
+        ⚠️ Les slots **périmés** (à moins de 15 min de leur heure) sont **masqués** :
+        plus personne ne peut les accepter. Le job les passera à `cancelled` à sa
+        prochaine passe (à la minute) ; en attendant, ils ne sont pas listés.
       security:
         - bearerAuth: []
       parameters:
@@ -2309,10 +2343,20 @@ paths:
         garde capitaine, §5.2 lockout.
         • **2v2+** : un **capitaine d'une autre team** du même ladder, avec sa **lineup**.
         • **1v1** : le **joueur** s'engage seul (body facultatif, lineup ignorée).
-        Effets (en **transaction**) : `status → in_progress`, **`started_at = now()`**
-        (c'est ce qui **arme le lockout §5.2**), création du side 1 + ses participants, et
-        **annulation des slots `pending` restants des deux camps** (sinon une 3e équipe
-        accepterait le slot d'un camp déjà en match → deux matchs actifs, lockout contourné).
+        Effets (en **transaction**) : `status → in_progress`, `started_at = now()`
+        (historique : l'instant de l'acceptation — **aucune règle ne le lit**, cf. §5.2),
+        création du side 1 + ses participants, et **annulation des slots `pending` des deux
+        camps QUI CHEVAUCHENT la fenêtre de ce match**.
+
+        ⚠️ **Seuls les slots qui chevauchent tombent.** Une team qui a planifié 21h / 23h /
+        01h et se fait accepter celui de 21h **garde** ceux de 23h et 01h : ils ne se
+        recouvrent pas. (Annuler tous les slots ouverts, comme avant B5d, détruirait sa soirée.)
+
+        ⚠️ **À l'accept, seuls les matchs ACTIFS bloquent** — pas mes slots `pending`. Un slot
+        n'est qu'une **proposition** : m'engager pour de bon la rend caduque, et elle est
+        justement retirée ci-dessus. La compter comme un blocage me refuserait un match à
+        cause d'une offre que je m'apprête moi-même à annuler.
+
         L'update de statut est **conditionnel** : deux accepts simultanés → le second reçoit 409.
       security:
         - bearerAuth: []
@@ -2387,15 +2431,21 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            Trois causes.
+            Quatre causes.
             (1) Le match n'est plus `pending` (déjà accepté, annulé, terminé).
-            (2) **Course perdue sur CE match** : deux camps l'acceptent au même instant →
+            (2) **Slot PÉRIMÉ** : il reste moins de **15 minutes** avant l'heure du match.
+            Le job d'expiration tourne à la minute, donc un slot peut être mort mais encore
+            `pending` en base — cette garde ferme la fenêtre.
+            (3) **Course perdue sur CE match** : deux camps l'acceptent au même instant →
             l'update conditionnel n'en laisse passer qu'un, le second reçoit 409.
-            (3) **§5.2 lockout** : le camp est déjà en match récent — y compris quand il
-            vient de s'engager **ailleurs au même instant** (deux accepts simultanés du même
-            camp sur **deux matchs différents**). Ce cas est fermé par un **verrou
-            transactionnel** sur l'identité de l'accepteur + une re-vérification du lockout
-            **dans** la transaction : le second accept attend, relit, et se voit refusé.
+            (4) **§5.2 disponibilité** : la fenêtre de ce match **chevauche** un autre
+            **match actif** de l'accepteur (`LOCKING_STATUSES`) — y compris quand il vient
+            de s'engager **ailleurs au même instant**. Ses propres slots `pending` qui
+            chevauchent ne comptent PAS à l'accept (ce sont des propositions, retirées par
+            l'option A quand il s'engage) — seuls les matchs actifs bloquent. Fermé par un **verrou transactionnel**
+            sur l'identité des DEUX camps, pris dans un **ordre déterministe** (sinon deux
+            acceptations croisées provoquent un **interblocage** Postgres → 500), suivi d'une
+            re-vérification **dans** la transaction : le second accept attend, relit, est refusé.
           content:
             application/json:
               schema:
