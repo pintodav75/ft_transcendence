@@ -4,7 +4,7 @@ import { TanStackRouterDevtools } from '@tanstack/react-router-devtools';
 
 import { useAuthStore } from '@/stores/auth-store';
 
-export default function RootLayout() {
+export function RootLayout() {
   const restoreSession = useAuthStore((state) => state.restoreSession);
 
   // The root layout stays mounted across routes, so restoring here covers
