@@ -57,9 +57,8 @@ Projet final du Common Core 42, en équipe de 4. Sujet libre — on construit un
 
 ## 📦 Prérequis
 
-- Docker + Docker Compose v2
-- Node 24 LTS (recommandé via `nvm`) — pour installer les dépendances locales en dev
-- OpenSSL (pour générer le certificat auto-signé)
+- Docker + Docker Compose v2, ou Podman avec son provider Compose
+- Node 24 LTS uniquement pour lancer les applications hors des conteneurs
 
 ## 🚀 Setup
 
@@ -86,41 +85,20 @@ cp .env.example .env
   openssl rand -hex 64
   ```
 
-### 3. Générer le certificat HTTPS auto-signé pour le backend
+### 3. Lancer l'application
 
 ```bash
-mkdir -p backend/certs
-openssl req -x509 -newkey rsa:4096 -keyout backend/certs/key.pem \
-  -out backend/certs/cert.pem -days 365 -nodes -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+docker compose up -d --build
 ```
 
-### 4. Lancer toute l'infra
+Avec Podman, la commande équivalente est `podman compose up -d --build`.
 
-```bash
-docker compose up -d
-```
+Compose construit les images, attend que PostgreSQL, Redis et MinIO soient sains,
+génère le certificat HTTPS dans le volume `backend_certs`, applique les migrations
+Drizzle puis démarre le backend. Les migrations sont revérifiées automatiquement
+à chaque redémarrage du backend.
 
-Premier démarrage : Docker va build les images backend/frontend (~1-2 min). Les suivants seront instantanés.
-
-### 5. Appliquer les migrations de la base
-
-⚠️ Obligatoire au premier lancement : Postgres démarre vide. Sans migrations,
-les tables n'existent pas et les routes auth (`register`, `login`) échouent.
-
-```bash
-docker compose exec backend npx drizzle-kit migrate
-```
-
-Vérifie que les tables ont bien été créées :
-
-```bash
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
-```
-
-À refaire après un `git pull` qui ramène de nouvelles migrations dans `backend/drizzle/`.
-
-### 6. Vérifier que ça tourne
+### 4. Vérifier que ça tourne
 
 ```bash
 docker compose ps                  # tous les services en "Up"
@@ -145,7 +123,7 @@ l'exception de sécurité du certificat auto-signé avant d'utiliser le front.
 
 ```bash
 # Démarrer
-docker compose up -d
+docker compose up -d --build
 
 # Vérifier l'état
 docker compose ps
@@ -157,16 +135,17 @@ docker compose exec backend sh
 # Arrêter (sans perdre les données)
 docker compose down
 
-# Arrêter + supprimer les volumes (DANGER : perd les données)
+# Arrêter + supprimer les volumes gérés (certificat et node_modules)
+# Les données bind-mountées dans ./data ne sont pas supprimées.
 docker compose down -v
 
-# Rebuild après modif du Dockerfile (le `-V` rafraîchit les volumes anonymes)
-docker compose up -d --build -V <service>
+# Rebuild après modification d'une image ou des dépendances
+docker compose up -d --build <service>
 
 # Générer une migration après modification du schéma Drizzle
 docker compose exec backend npx drizzle-kit generate
 
-# Appliquer les migrations existantes
+# Appliquer manuellement les migrations (normalement automatique au démarrage)
 docker compose exec backend npx drizzle-kit migrate
 ```
 
@@ -185,7 +164,7 @@ transcendence/
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── drizzle/            # migrations SQL générées
-│   ├── certs/              # cert auto-signé, NON versionné
+│   ├── docker-entrypoint.sh # dépendances, certificat et migrations au démarrage
 │   └── src/
 │       ├── server.ts       # entry point Fastify HTTPS
 │       ├── routes/

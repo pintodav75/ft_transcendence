@@ -4,6 +4,9 @@ services:
   frontend:
     build: ./frontend
     restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
     ports:
       - 5173:5173
     volumes:
@@ -20,10 +23,14 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      - backend_certs:/app/certs
     depends_on:
-      - postgres
-      - redis
-      - minio
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       - CHOKIDAR_USEPOLLING=true
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -41,46 +48,65 @@ services:
       - REDIS_HOSTNAME=${REDIS_HOSTNAME}
       - REDIS_PORT=${REDIS_PORT}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1:3000/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
   minio:
     image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: always
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_DEFAULT_BUCKETS: ${MINIO_DEFAULT_BUCKETS}
     volumes:
       - ./data/minio:/data
     ports:
       - 9000:9000
       - 9001:9001
     command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   redis-commander:
     image: ghcr.io/joeferner/redis-commander:0.9.1
     user: redis
     restart: always
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
-      REDIS_HOSTS: local:redis:6379:0:${REDIS_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: 0
     ports:
       - 8081:8081
 
   redis:
     image: docker.io/library/redis:8.8.0
     restart: always
-    depends_on:
-      - postgres
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     environment:
-      REDIS_HOSTNAME: ${REDIS_HOSTNAME}
-      REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   adminer:
     image: docker.io/library/adminer:5.4.2
     restart: always
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
       - 8080:8080
 
@@ -93,3 +119,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  backend_certs:
