@@ -41,16 +41,23 @@ export function Register() {
     handleSubmit,
     setError,
     clearErrors,
-    formState: { errors, isSubmitting },
+    formState: { dirtyFields, errors, isSubmitted, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
-    mode: 'onChange',
+    mode: 'onTouched',
+    reValidateMode: 'onChange',
     defaultValues: {
       pseudo: '',
       email: '',
       password: '',
     },
   });
+
+  const pseudoError =
+    dirtyFields.pseudo || isSubmitted ? errors.pseudo?.message : undefined;
+  const emailError = dirtyFields.email || isSubmitted ? errors.email?.message : undefined;
+  const passwordError =
+    dirtyFields.password || isSubmitted ? errors.password?.message : undefined;
 
   const submitValidatedForm = handleSubmit(async (values) => {
     clearErrors('root.server');
@@ -190,43 +197,51 @@ export function Register() {
               noValidate
               onSubmit={submitValidatedForm}
             >
-              <div className="space-y-2">
+              <div className="relative space-y-2">
                 <Label htmlFor="pseudo">Nickname</Label>
                 <Input
                   id="pseudo"
                   type="text"
                   autoComplete="username"
                   placeholder="Nickname"
-                  aria-invalid={Boolean(errors.pseudo)}
-                  aria-describedby={errors.pseudo ? 'pseudo-error' : undefined}
+                  aria-invalid={Boolean(pseudoError)}
+                  aria-describedby={pseudoError ? 'pseudo-error' : undefined}
                   {...register('pseudo')}
                 />
-                {errors.pseudo ? (
-                  <p id="pseudo-error" role="alert" className="text-xs text-arena-red">
-                    {errors.pseudo.message}
+                {pseudoError ? (
+                  <p
+                    id="pseudo-error"
+                    role="alert"
+                    className="absolute left-0 top-full mt-1 text-xs text-arena-red"
+                  >
+                    {pseudoError}
                   </p>
                 ) : null}
               </div>
 
-              <div className="space-y-2">
+              <div className="relative space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   autoComplete="email"
                   placeholder="Email address"
-                  aria-invalid={Boolean(errors.email)}
-                  aria-describedby={errors.email ? 'email-error' : undefined}
+                  aria-invalid={Boolean(emailError)}
+                  aria-describedby={emailError ? 'email-error' : undefined}
                   {...register('email')}
                 />
-                {errors.email ? (
-                  <p id="email-error" role="alert" className="text-xs text-arena-red">
-                    {errors.email.message}
+                {emailError ? (
+                  <p
+                    id="email-error"
+                    role="alert"
+                    className="absolute left-0 top-full mt-1 text-xs text-arena-red"
+                  >
+                    {emailError}
                   </p>
                 ) : null}
               </div>
 
-              <div className="space-y-2">
+              <div className="relative space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
                   <Input
@@ -235,8 +250,8 @@ export function Register() {
                     autoComplete="new-password"
                     placeholder="Password"
                     className="pr-12"
-                    aria-invalid={Boolean(errors.password)}
-                    aria-describedby={errors.password ? 'password-error' : undefined}
+                    aria-invalid={Boolean(passwordError)}
+                    aria-describedby={passwordError ? 'password-error' : undefined}
                     {...register('password')}
                   />
                   <button
@@ -253,9 +268,13 @@ export function Register() {
                     )}
                   </button>
                 </div>
-                {errors.password ? (
-                  <p id="password-error" role="alert" className="text-xs text-arena-red">
-                    {errors.password.message}
+                {passwordError ? (
+                  <p
+                    id="password-error"
+                    role="alert"
+                    className="absolute left-0 top-full mt-1 text-xs text-arena-red"
+                  >
+                    {passwordError}
                   </p>
                 ) : null}
               </div>
@@ -359,7 +378,7 @@ export function Register() {
               to="/privacy"
               className="transition hover:text-text-primary focus-ring focus-visible:outline-offset-4"
             >
-              Privacy
+              Policy
             </Link>
           </div>
         </nav>
@@ -367,5 +386,3 @@ export function Register() {
     </main>
   );
 }
-
-export default Register;

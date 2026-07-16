@@ -3,12 +3,14 @@ import { z } from 'zod';
 export const registerSchema = z.object({
   pseudo: z
     .string()
-    .min(3, 'Nickname must be at least 3 characters long.')
-    .max(30, 'Nickname cannot exceed 30 characters.'),
+    .trim()
+    .min(3, 'Use at least 3 characters.')
+    .max(30, 'Use no more than 30 characters.'),
   email: z.email('Enter a valid email address.'),
   password: z
     .string()
-    .min(8, 'Password must be at least 8 characters long.')
+    .min(8, 'Use at least 8 characters.')
+    .max(72, 'Use no more than 72 characters.')
     .regex(/[A-Z]/, 'Add at least one uppercase letter.')
     .regex(/[a-z]/, 'Add at least one lowercase letter.')
     .regex(/\d/, 'Add at least one number.')

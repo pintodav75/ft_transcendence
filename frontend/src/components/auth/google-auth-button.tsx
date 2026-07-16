@@ -9,7 +9,7 @@ type GoogleAuthButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'chil
 
 export function GoogleAuthButton({
   className,
-  label = 'Continuer avec Google',
+  label = 'Google',
   type = 'button',
   ...props
 }: GoogleAuthButtonProps) {

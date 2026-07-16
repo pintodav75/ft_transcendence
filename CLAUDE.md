@@ -259,10 +259,10 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 **Register FR1 implémenté et testé (`feature/fr1-register-page`)** :
 
 - **DA Register finalisée** : carte sombre translucide, wordmark géant `V/S` Geist 900 découpé par une barre oblique responsive, teintes rouge/bleu en fondu, titre `VS MODE`, interface en anglais par défaut, layout fixe `100dvh` avec fallback de scroll interne seulement si la hauteur est insuffisante
-- **Formulaire** : `pseudo`, `email`, `password` avec toggle afficher/masquer ; React Hook Form + schéma Zod dans `lib/register-schema.ts`, validation `onChange`, erreurs accessibles sous les champs et styles `aria-invalid`
+- **Formulaire** : `pseudo`, `email`, `password` avec toggle afficher/masquer ; React Hook Form + schéma Zod dans `lib/register-schema.ts`, validation initiale `onTouched` puis interactive, erreurs visibles seulement après saisie ou submit, espaces d'erreur stables et styles accessibles `aria-invalid` ; `pseudo` trimé et mot de passe limité à 72 caractères comme le backend
 - **Inscription classique** : `POST /auth/register` via `apiFetch`, `setSession()` Zustand, état de chargement, gestion `400`/`409`/`429`/réseau, puis redirection vers `/home`
 - **Google OAuth** : composant réutilisable `GoogleAuthButton` avec logo officiel ; redirection navigateur vers `/auth/oauth/google/start` ; callback backend corrigé pour poser le refresh cookie puis rediriger vers `${FRONTEND_URL}/home` ; session restaurée par le root layout (`refresh → me`)
-- **Navigation** : `VS MODE` renvoie vers `/`, lien `/login`, sélecteur local FR/EN/ES (traduction différée), liens `/terms` et `/privacy` sous la carte
+- **Navigation** : `VS MODE` renvoie vers `/`, lien `/login`, sélecteur local FR/EN/ES (traduction différée), liens `/terms` et `/privacy` sous la carte ; `RootLayout` adapte le titre à la route TanStack (`VS MODE Connect` sur `/login` et `/register`, `VS MODE` ailleurs)
 - **Tokens** : couleur primaire globale passée à l'indigo nocturne (`#343579`) ; aucune couleur/police/radius/shadow écrite en dur dans `pages/register.tsx`
 - **Testé avec backend réel** : inscription + session, validation sans requête backend, doublon `409`, OAuth Google, retour `/home`, restauration et accès à `/dashboard`. Vérifications : build/lint frontend, type-check + 12 tests Vitest backend, `git diff --check`
 
