@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/index.js';
 import { usersTable } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import z from 'zod';
 import { minioClient, BUCKET_NAME, buildPublicUrl } from '../storage/minio.js';
 import { isBlocked } from '../utils/blocks.js';
@@ -67,7 +67,10 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const pseudo = request.params.pseudo;
-        const [user] = await db.select().from(usersTable).where(eq(usersTable.pseudo, pseudo));
+        const [user] = await db
+          .select()
+          .from(usersTable)
+          .where(sql`lower(${usersTable.pseudo}) = lower(${pseudo})`);
         if (!user) return reply.code(404).send({ error: 'Profile not found' });
         if (await isBlocked(request.user.sub, user.id)) {
           return reply.code(404).send({ error: 'Profile not found' });

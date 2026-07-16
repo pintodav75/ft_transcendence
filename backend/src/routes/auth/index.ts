@@ -7,11 +7,12 @@ import { signAccessToken, signRefreshToken, signTempToken } from '../../auth/tok
 import { eq } from 'drizzle-orm';
 
 const registerSchema = z.object({
-  pseudo: z.string().min(3).max(30),
-  email: z.email(),
+  pseudo: z.string().trim().min(3).max(30),
+  email: z.email().toLowerCase(),
   password: z
     .string()
     .min(8, 'au moins 8 caractères')
+    .max(72)
     .regex(/[A-Z]/, 'au moins une majuscule')
     .regex(/[a-z]/, 'au moins une minuscule')
     .regex(/\d/, 'au moins un chiffre')
@@ -19,7 +20,7 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  email: z.string(),
+  email: z.string().toLowerCase(),
   password: z.string(),
 });
 

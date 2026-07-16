@@ -106,6 +106,13 @@
       "when": 1783477498333,
       "tag": "0014_easy_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1784169696879,
+      "tag": "0015_normalize_auth_inputs",
+      "breakpoints": true
     }
   ]
 }
