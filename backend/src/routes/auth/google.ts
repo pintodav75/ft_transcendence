@@ -32,7 +32,7 @@ export const googleRoutes: FastifyPluginAsync = async (server) => {
         const [existingByEmail] = await db
           .select()
           .from(usersTable)
-          .where(eq(usersTable.email, data.email));
+          .where(eq(usersTable.email, data.email.toLowerCase()));
         if (existingByEmail) {
           const [linked] = await db
             .update(usersTable)
@@ -48,7 +48,7 @@ export const googleRoutes: FastifyPluginAsync = async (server) => {
             .insert(usersTable)
             .values({
               pseudo: newPseudo,
-              email: data.email,
+              email: data.email.toLowerCase(),
               oauthProvider: 'google',
               oauthId: data.id,
             })
