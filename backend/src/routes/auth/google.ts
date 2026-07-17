@@ -3,7 +3,7 @@ import z from 'zod';
 import { db } from '../../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { signAccessToken, signRefreshToken } from '../../auth/tokens.js';
+import { signRefreshToken } from '../../auth/tokens.js';
 import { usersTable } from '../../db/schema.js';
 
 const googleUserSchema = z.object({
@@ -57,7 +57,6 @@ export const googleRoutes: FastifyPluginAsync = async (server) => {
         }
       }
       if (!user) throw new Error('No user resolved');
-      const accessToken = signAccessToken(request.server, { sub: user.id });
       const refreshToken = signRefreshToken(request.server, { sub: user.id });
       reply.setCookie('refresh', refreshToken, {
         httpOnly: true,
@@ -66,8 +65,8 @@ export const googleRoutes: FastifyPluginAsync = async (server) => {
         path: '/auth',
         maxAge: 60 * 60 * 24 * 7,
       });
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return reply.code(200).send({ accessToken, user: userSafe });
+      const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+      return reply.redirect(new URL('/home', frontendUrl).toString());
     } catch (error) {
       return reply.code(500).send({ error: 'OAuth login failed' });
     }

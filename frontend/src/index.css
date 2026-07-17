@@ -1,3 +1,5 @@
+@import '@fontsource/geist/latin-600.css';
+@import '@fontsource/geist/latin-900.css';
 @import 'tailwindcss';
 
 @theme {
@@ -21,10 +23,18 @@
   --color-arena-blue: #3f7dff;
   --color-arena-red-soft: #35131f;
   --color-arena-blue-soft: #10203b;
-  --color-action-primary: #5246bc;
-  --color-action-primary-hover: #6962d2;
+  --color-action-primary: #343579;
+  --color-action-primary-border: #5053a4;
+  --color-action-primary-hover: #424596;
   --color-action-primary-foreground: #ffffff;
+  --color-focus-ring: #777ae0;
   --color-success: #25d49a;
+
+  --color-google-button: #0a0a0a;
+  --color-google-text: #ffffff;
+
+  --font-geist: Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-auth-provider: var(--font-geist);
 
   --color-rank-gold: #d9a441;
   --color-rank-silver: #c7d0d4;
@@ -32,8 +42,8 @@
 
   --radius-card: 8px;
   --radius-control: 6px;
-  --shadow-card: 0 28px 90px rgba(0, 0, 0, 0.48), 0 0 60px rgba(82, 70, 188, 0.1);
-  --shadow-action-primary: 0 18px 38px rgba(82, 70, 188, 0.3);
+  --shadow-card: 0 28px 90px rgba(0, 0, 0, 0.48), 0 0 60px rgba(52, 53, 121, 0.12);
+  --shadow-action-primary: 0 16px 34px rgba(52, 53, 121, 0.28);
 }
 
 /* Shared "panel" surface: the rounded, bordered card used by the floating nav
@@ -51,7 +61,7 @@
 /* For accessibility, interactive elements when focused with the keyboard (TAB) have a purple outline for interactive elements.
    constant here; the offset (2 or 4) stays at the call site. */
 @utility focus-ring {
-  @apply focus-visible:outline-2 focus-visible:outline-action-primary-hover;
+  @apply focus-visible:outline-2 focus-visible:outline-focus-ring;
 }
 
 @layer base {
@@ -166,6 +176,100 @@
 
   .arena-wordmark-right {
     clip-path: polygon(55.5% 0, 100% 0, 100% 100%, 48.5% 100%);
+  }
+
+  .register-page {
+    --register-slash-shift: 7.03vh;
+    --register-wordmark-overlap: calc(var(--register-slash-shift) + clamp(3rem, 4vw, 6rem));
+  }
+
+  .register-page .register-shell {
+    justify-content: safe center;
+  }
+
+  .register-page .arena-wordmark {
+    font-family: var(--font-geist);
+    font-size: clamp(28rem, 42vw, 38rem);
+    font-weight: 900;
+    -webkit-text-stroke: 1px color-mix(in srgb, var(--color-text-secondary) 14%, transparent);
+    text-shadow: 0 0 44px color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+  }
+
+  .register-page .arena-center-line {
+    background: color-mix(in srgb, var(--color-text-primary) 32%, transparent);
+    box-shadow: 0 0 30px color-mix(in srgb, var(--color-text-primary) 25%, transparent);
+  }
+
+  .register-page .arena-wordmark-v {
+    top: 8%;
+    right: calc(50% - var(--register-wordmark-overlap));
+    left: auto;
+    transform: none;
+    -webkit-text-stroke-color: color-mix(in srgb, var(--color-arena-red) 16%, transparent);
+    text-shadow: 0 0 48px color-mix(in srgb, var(--color-arena-red) 6%, transparent);
+  }
+
+  .register-page .arena-wordmark-s {
+    top: 45%;
+    right: auto;
+    left: calc(50% - var(--register-wordmark-overlap));
+    transform: none;
+    -webkit-text-stroke-color: color-mix(in srgb, var(--color-arena-blue) 16%, transparent);
+    text-shadow: 0 0 48px color-mix(in srgb, var(--color-arena-blue) 6%, transparent);
+  }
+
+  .register-page .arena-wordmark-left {
+    clip-path: polygon(
+      0 0,
+      calc(50% + var(--register-slash-shift)) 0,
+      calc(50% - var(--register-slash-shift)) 100%,
+      0 100%
+    );
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
+    mask-image: linear-gradient(to right, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
+  }
+
+  .register-page .arena-wordmark-right {
+    clip-path: polygon(
+      calc(50% + var(--register-slash-shift)) 0,
+      100% 0,
+      100% 100%,
+      calc(50% - var(--register-slash-shift)) 100%
+    );
+    -webkit-mask-image: linear-gradient(to left, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
+    mask-image: linear-gradient(to left, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
+  }
+
+  @media (max-height: 850px) {
+    .register-page {
+      padding-block: 0.75rem;
+    }
+
+    .register-page .register-shell {
+      padding-block: 1rem;
+    }
+
+    .register-page .register-card {
+      padding: 1.5rem;
+    }
+
+    .register-page .register-card-content {
+      margin-top: 1.25rem;
+    }
+
+    .register-page .register-form > :not(:last-child) {
+      margin-block-start: 0;
+      margin-block-end: 1rem;
+    }
+
+    .register-page .register-card-footer {
+      margin-top: 1.25rem;
+      padding-top: 1rem;
+    }
+
+    .register-page .register-options {
+      margin-top: 0.75rem;
+    }
   }
 
   .arena-dot-red {
