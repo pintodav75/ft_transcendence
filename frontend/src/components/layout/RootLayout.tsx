@@ -8,7 +8,9 @@ const connectRoutes = new Set(['/login', '/register']);
 
 export function RootLayout() {
   const restoreSession = useAuthStore((state) => state.restoreSession);
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const pathname = useRouterState({
+    select: (state) => state.resolvedLocation?.pathname,
+  });
 
   // The root layout stays mounted across routes, so restoring here covers
   // every entry point without repeating the request on each page.
@@ -17,6 +19,8 @@ export function RootLayout() {
   }, [restoreSession]);
 
   useEffect(() => {
+    if (!pathname) return;
+
     document.title = connectRoutes.has(pathname) ? 'VS MODE Connect' : 'VS MODE';
   }, [pathname]);
 
