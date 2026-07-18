@@ -17,6 +17,7 @@ import test_matches_me
 import test_matches_detail
 import test_matches_concurrency
 import test_matches_scheduling
+import test_matches_result
 import test_teams_linked
 
 SUITES = [
@@ -28,6 +29,7 @@ SUITES = [
     test_matches_detail,
     test_matches_concurrency,
     test_matches_scheduling,
+    test_matches_result,
     test_teams_linked,
 ]
 

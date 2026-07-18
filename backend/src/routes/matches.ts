@@ -11,9 +11,11 @@ import {
   gameMapsTable,
   userExternalAccountsTable,
   usersTable,
+  disputesTable,
 } from '../db/schema.js';
 import { eq, and, ne, or, gt, lt, gte, inArray, notInArray, sql, desc } from 'drizzle-orm';
 import z from 'zod';
+import { completeMatchWithElo } from '../utils/rankings.js';
 
 // §5.2 — seuls les matchs ACTIFS verrouillent : un match terminé ou annulé libère aussitôt.
 const LOCKING_STATUSES: ('in_progress' | 'awaiting_confirmation' | 'disputed')[] = [
@@ -348,6 +350,7 @@ const acceptMatchSchema = createMatchSchema.pick({ lineup: true });
 
 const listQuerySchema = z.object({ ladderId: z.uuid() });
 const idParamSchema = z.object({ id: z.uuid() });
+const winnerIdSchema = z.object({ winnerSideId: z.uuid() });
 
 export const matchesRoutes: FastifyPluginAsync = async (server) => {
   // POST /matches — ouvrir un slot (team pour 2v2+, solo pour 1v1).
@@ -380,7 +383,9 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       // il valide le CRÉNEAU → il ne peut pas vivre dans validateSide.)
       // ⚠️ Chemin RAPIDE : la vérification qui fait autorité est refaite dans la
       // transaction, sous verrou (sinon 2 POST simultanés passent tous les deux — TOCTOU).
-      if (await hasConflictingMatch(db, ladder, sideTeamId, me, data.scheduledAt, ENGAGING_STATUSES))
+      if (
+        await hasConflictingMatch(db, ladder, sideTeamId, me, data.scheduledAt, ENGAGING_STATUSES)
+      )
         return reply.code(409).send({
           error: sideTeamId
             ? 'your team already has a match around that time'
@@ -411,7 +416,9 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
 
         // Relectures SOUS le verrou — ce sont CELLES-CI qui font autorité. Un POST ou un
         // accept concurrent a pu m'engager sur ce créneau entre-temps.
-        if (await hasConflictingMatch(tx, ladder, sideTeamId, me, data.scheduledAt, ENGAGING_STATUSES))
+        if (
+          await hasConflictingMatch(tx, ladder, sideTeamId, me, data.scheduledAt, ENGAGING_STATUSES)
+        )
           return { raced: 'conflict' } as const;
         if ((await countOpenSlots(tx, ladder, sideTeamId, me)) >= MAX_OPEN_SLOTS)
           return { raced: 'too_many' } as const;
@@ -581,7 +588,13 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         const shapedSides = sides
           .sort((a, b) => a.sideIndex - b.sideIndex)
           .map((s) => ({
+            // id du side : c'est ce que le front renvoie comme `winnerSideId` à POST /result.
+            id: s.id,
             sideIndex: s.sideIndex,
+            // état de soumission (B6) : le front affiche « en attente de l'adversaire… »
+            // et calcule le temps restant (submittedAt + 24 h) côté client.
+            submittedAt: s.submittedAt,
+            submittedWinnerSideId: s.submittedWinnerSideId,
             // solo : pas de team → null. Le front distingue les deux cas là-dessus.
             team: s.teamId ? (teamById.get(s.teamId) ?? null) : null,
             players: participants
@@ -597,6 +610,8 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             status: match.status,
             scheduledAt: match.scheduledAt,
             startedAt: match.startedAt,
+            completedAt: match.completedAt,
+            winnerSideId: match.winnerSideId,
             maps: match.maps,
             createdAt: match.createdAt,
           },
@@ -688,9 +703,9 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           !match.scheduledAt ||
           match.scheduledAt.getTime() - Date.now() < MIN_LEAD_MINUTES * 60 * 1000
         )
-          return reply
-            .code(409)
-            .send({ error: `slot is no longer acceptable (less than ${MIN_LEAD_MINUTES} min before kickoff)` });
+          return reply.code(409).send({
+            error: `slot is no longer acceptable (less than ${MIN_LEAD_MINUTES} min before kickoff)`,
+          });
 
         // L'heure du match, capturée dans une const : le narrowing de `match.scheduledAt`
         // (Date | null → Date) ne survit pas à l'intérieur du callback de la transaction.
@@ -740,7 +755,9 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         // fait autorité est refaite sous verrou dans la transaction). On EXCLUT le match
         // lui-même : il est déjà en base à cette heure exacte, il se déclarerait en
         // conflit avec lui-même.
-        if (await hasConflictingMatch(db, ladder, side.sideTeamId, me, kickoff, LOCKING_STATUSES, id))
+        if (
+          await hasConflictingMatch(db, ladder, side.sideTeamId, me, kickoff, LOCKING_STATUSES, id)
+        )
           return reply.code(409).send({
             error: side.sideTeamId
               ? 'your team already has a match around that time'
@@ -773,7 +790,17 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           // 1. §5.2 REVÉRIFIÉ sous le verrou — c'est CETTE lecture qui fait autorité.
           //    Le chemin rapide date d'avant le verrou : il a pu voir « libre » alors
           //    qu'un accept concurrent était en train d'occuper le créneau.
-          if (await hasConflictingMatch(tx, ladder, side.sideTeamId, me, kickoff, LOCKING_STATUSES, id))
+          if (
+            await hasConflictingMatch(
+              tx,
+              ladder,
+              side.sideTeamId,
+              me,
+              kickoff,
+              LOCKING_STATUSES,
+              id,
+            )
+          )
             return { raced: 'conflict' } as const;
 
           // 2. Update CONDITIONNEL : seul un match encore `pending` bascule. Si deux
@@ -919,4 +946,134 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       return reply.code(500).send({ error: 'Internal error' });
     }
   });
+  // ===== B6 — Soumission de résultat & confirmation =====
+  server.post<{ Params: { id: string } }>(
+    '/:id/result',
+    { onRequest: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const { id } = idParamSchema.parse(request.params);
+        const { winnerSideId } = winnerIdSchema.parse(request.body);
+        const me = request.user.sub;
+
+        const [match] = await db.select().from(matchesTable).where(eq(matchesTable.id, id));
+        if (!match) return reply.code(404).send({ error: 'match not found' });
+        const sides = await db
+          .select()
+          .from(matchSidesTable)
+          .where(eq(matchSidesTable.matchId, id));
+        // On identifie le side de CELUI QUI SOUMET (capitaine en 2v2+, joueur en 1v1).
+        // L'autorisation passe AVANT les gardes de statut : répondre 409/400 à un
+        // non-participant lui donnerait un oracle sur l'état du match (même logique que
+        // DELETE /:id). D'où le 403 d'abord, le reste ensuite.
+        let mySide = null;
+        for (const side of sides) {
+          let owned = false;
+          if (side.teamId !== null) {
+            const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, side.teamId));
+            owned = team?.captainId === me;
+          } else {
+            const [participant] = await db
+              .select()
+              .from(matchParticipantsTable)
+              .where(
+                and(
+                  eq(matchParticipantsTable.matchSideId, side.id),
+                  eq(matchParticipantsTable.userId, me),
+                ),
+              );
+            owned = !!participant;
+          }
+          if (owned) {
+            mySide = side;
+            break;
+          }
+        }
+        if (!mySide) return reply.code(403).send({ error: 'not a participant of this match' });
+        if (match.status !== 'in_progress' && match.status !== 'awaiting_confirmation')
+          return reply.code(409).send({ error: 'match is not awaiting a result' });
+        // Le vainqueur déclaré doit être l'un des DEUX sides de CE match. Sans ce garde,
+        // un uuid quelconque partirait en base sur submitted_winner_side_id (FK vers
+        // match_sides.id) -> violation de contrainte -> 500 au lieu d'un 400 propre.
+        if (!sides.some((s) => s.id === winnerSideId))
+          return reply.code(400).send({ error: 'winnerSideId is not a side of this match' });
+        if (!match.scheduledAt) return reply.code(500).send({ error: 'Internal error' });
+        if (new Date() < match.scheduledAt)
+          return reply.code(400).send({ error: 'match not started yet' });
+
+        // Toutes les écritures sous verrou + re-lecture : deux camps qui soumettent en
+        // même temps courent sur la même ligne match (TOCTOU, piège #14). Le verrou
+        // sérialise, la re-lecture ci-dessous fait autorité (pas la lecture d'avant tx).
+        const result = await db.transaction(
+          async (
+            tx,
+          ): Promise<{ ok: true; status: string } | { ok: false; code: number; error: string }> => {
+            await lockCompetitors(tx, [id]);
+            const [currentMatch] = await tx
+              .select({ status: matchesTable.status })
+              .from(matchesTable)
+              .where(eq(matchesTable.id, id));
+            if (!currentMatch) return { ok: false, code: 500, error: 'Internal error' };
+            if (
+              currentMatch.status !== 'in_progress' &&
+              currentMatch.status !== 'awaiting_confirmation'
+            )
+              // Course : le job ou une autre requête a complété/annulé le match entre le 1er
+              // check (hors tx) et le verrou. C'est un CONFLIT (409), pas une erreur interne.
+              return { ok: false, code: 409, error: 'match is no longer awaiting a result' };
+            // Re-soumission = ÉCRASEMENT (choix assumé) : un camp peut corriger son verdict
+            // tant que le match n'est pas résolu ; submitted_at est remis à maintenant, ce qui
+            // relance sa propre fenêtre de 24 h. Le job d'auto-confirmation relit cette valeur
+            // sous verrou, il ne peut donc pas valider un ancien vainqueur (cf. jobs/index.ts).
+            await tx
+              .update(matchSidesTable)
+              .set({ submittedAt: new Date(), submittedWinnerSideId: winnerSideId })
+              .where(eq(matchSidesTable.id, mySide.id));
+            // L'AUTRE side est le point de bascule premier/deuxième soumetteur :
+            //   - il n'a pas soumis (submittedAt null) -> je suis le 1er -> awaiting_confirmation
+            //   - il a soumis                          -> je suis le 2e  -> on compare les vainqueurs
+            // On regarde l'AUTRE side (pas le statut du match) pour ne pas confondre
+            // « quelqu'un a soumis » avec « l'autre a soumis » (cas de ma re-soumission).
+            const [otherSide] = await tx
+              .select({
+                submittedAt: matchSidesTable.submittedAt,
+                submittedWinnerSideId: matchSidesTable.submittedWinnerSideId,
+              })
+              .from(matchSidesTable)
+              .where(and(eq(matchSidesTable.matchId, id), ne(matchSidesTable.id, mySide.id)));
+            if (!otherSide) return { ok: false, code: 500, error: 'Internal error' };
+            if (otherSide.submittedAt === null) {
+              await tx
+                .update(matchesTable)
+                .set({ status: 'awaiting_confirmation' })
+                .where(and(eq(matchesTable.id, id), eq(matchesTable.status, 'in_progress')));
+              return { ok: true, status: 'awaiting_confirmation' };
+            } else {
+              if (otherSide.submittedWinnerSideId === winnerSideId) {
+                // ACCORD : les deux camps ont désigné le même vainqueur -> match clos + ELO,
+                // dans la MÊME transaction. Helper partagé avec le job d'auto-confirmation (B6)
+                // et l'arbitrage admin (B7) — la logique de clôture + ELO vit à un seul endroit.
+                await completeMatchWithElo(tx, id, match.ladderId, winnerSideId);
+                return { ok: true, status: 'completed' };
+              } else {
+                // DÉSACCORD : vainqueurs différents -> le match part en litige, on ouvre une
+                // dispute et B7 (arbitrage admin / timeout 24 h) prend le relais. Aucun ELO ici.
+                await tx
+                  .update(matchesTable)
+                  .set({ status: 'disputed' })
+                  .where(eq(matchesTable.id, id));
+                await tx.insert(disputesTable).values({ matchId: id });
+                return { ok: true, status: 'disputed' };
+              }
+            }
+          },
+        );
+        if (!result.ok) return reply.code(result.code).send({ error: result.error });
+        return reply.code(200).send({ status: result.status });
+      } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
+        return reply.code(500).send({ error: 'Internal error' });
+      }
+    },
+  );
 };

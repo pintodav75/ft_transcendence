@@ -2197,7 +2197,8 @@ paths:
       tags: [Matchmaking]
       summary: Détail enrichi d'un match (participants only)
       description: >
-        Détail complet, prêt à afficher : pour chaque side, l'**objet team**
+        Détail complet, prêt à afficher : pour chaque side, son **id**, son **état de
+        soumission** (`submittedAt`, `submittedWinnerSideId` — B6), l'**objet team**
         (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar),
         plus les maps. Sides **triés** (0 = créateur, 1 = accepteur).
         Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**)
@@ -2225,6 +2226,12 @@ paths:
                       status: { type: string }
                       scheduledAt: { type: string, format: date-time, nullable: true }
                       startedAt: { type: string, format: date-time, nullable: true }
+                      completedAt: { type: string, format: date-time, nullable: true }
+                      winnerSideId:
+                        type: string
+                        format: uuid
+                        nullable: true
+                        description: 'Side vainqueur une fois le match `completed` ; `null` sinon.'
                       maps:
                         type: array
                         items: { type: string }
@@ -2234,7 +2241,21 @@ paths:
                     items:
                       type: object
                       properties:
+                        id:
+                          type: string
+                          format: uuid
+                          description: 'Id du side — à renvoyer comme `winnerSideId` dans POST /matches/:id/result.'
                         sideIndex: { type: integer, example: 0 }
+                        submittedAt:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: 'Instant où ce camp a soumis un résultat (B6) ; `null` sans soumission.'
+                        submittedWinnerSideId:
+                          type: string
+                          format: uuid
+                          nullable: true
+                          description: 'Vainqueur déclaré par CE camp ; `null` sans soumission.'
                         team:
                           nullable: true
                           description: '`null` en 1v1 (le côté est un joueur, pas une team).'
@@ -2446,6 +2467,112 @@ paths:
             sur l'identité des DEUX camps, pris dans un **ordre déterministe** (sinon deux
             acceptations croisées provoquent un **interblocage** Postgres → 500), suivi d'une
             re-vérification **dans** la transaction : le second accept attend, relit, est refusé.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /matches/{id}/result:
+    post:
+      tags: [Matchmaking]
+      summary: Soumettre le résultat d'un match (déclarer le vainqueur)
+      description: >
+        Un camp déclare le **side gagnant** (`winnerSideId` = l'id d'un `match_sides`, PAS
+        l'id du match). Qui peut soumettre : **capitaine** en 2v2+, **le joueur** en 1v1
+        (même règle que créer/accepter). Le match doit être `in_progress` ou
+        `awaiting_confirmation`.
+
+        **§5.3** : impossible de soumettre **avant** l'heure prévue (`now() < scheduled_at`
+        → 400) — la partie doit avoir commencé.
+
+        **Machine à états (§5.4)**, selon la soumission de l'AUTRE camp :
+        • l'autre n'a pas encore soumis → **1re soumission** : `status → awaiting_confirmation`.
+        • l'autre a soumis le **même** vainqueur → **accord** : `status → completed`,
+        `winner_side_id` + `completed_at` posés, et **ELO appliqué** (K=32 ; la ligne
+        `rankings` du compétiteur est créée à 1000 à son 1er match). Tout dans la même transaction.
+        • l'autre a soumis un vainqueur **différent** → **désaccord** : `status → disputed`
+        et une ligne `disputes` est ouverte (B7 prend le relais). Aucun ELO.
+
+        **Re-soumission** : tant que le match n'est pas résolu (`in_progress` ou
+        `awaiting_confirmation`), un camp peut re-soumettre — sa précédente déclaration est
+        **écrasée** et `submitted_at` est remis à maintenant, ce qui **redémarre sa fenêtre
+        d'auto-confirmation de 24 h**.
+
+        Écritures sous **verrou consultatif** (clé = matchId) + re-lecture du statut **dans**
+        la transaction : deux soumissions simultanées sont sérialisées.
+
+        ⏰ **Jobs 24 h liés** (planificateur) : un match `in_progress` sans aucune soumission
+        24 h après `scheduled_at` passe à `cancelled` ; un match `awaiting_confirmation` dont
+        l'unique soumission date de +24 h (horloge sur `submitted_at`) est auto-confirmé
+        (`completed` + ELO) sur ce score.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [winnerSideId]
+              properties:
+                winnerSideId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Id du **side** déclaré vainqueur — doit être l'un des deux sides de CE
+                    match. « Mon side » et le side vainqueur sont indépendants (on peut
+                    déclarer la victoire de l'adversaire).
+      responses:
+        '200':
+          description: Soumission enregistrée — renvoie le nouveau statut du match
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [awaiting_confirmation, completed, disputed]
+                required: [status]
+        '400':
+          description: >
+            Body/param invalide (ValidationError) ; **§5.3** le match n'a pas encore commencé
+            (`match not started yet`) ; ou `winnerSideId` n'est **pas un side de ce match**.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            L'appelant n'est pas habilité à soumettre (ni capitaine d'une team engagée, ni
+            joueur solo du match). Vérifié **avant** l'état du match, pour ne pas donner
+            d'oracle sur son statut à un non-participant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Match inconnu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Le match n'attend pas de résultat : il n'est ni `in_progress` ni
+            `awaiting_confirmation` (déjà `completed` / `cancelled` / `disputed`, ou encore
+            `pending`).
           content:
             application/json:
               schema:
