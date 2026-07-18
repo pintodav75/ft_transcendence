@@ -118,7 +118,7 @@
         transparent 28%
       ),
       /* opaque base — must stay last */
-      linear-gradient(180deg, var(--color-background-app) 0%, var(--color-surface-input) 100%);
+        linear-gradient(180deg, var(--color-background-app) 0%, var(--color-surface-input) 100%);
   }
 
   .arena-center-line {
@@ -178,16 +178,16 @@
     clip-path: polygon(55.5% 0, 100% 0, 100% 100%, 48.5% 100%);
   }
 
-  .register-page {
-    --register-slash-shift: 7.03vh;
-    --register-wordmark-overlap: calc(var(--register-slash-shift) + clamp(3rem, 4vw, 6rem));
+  .auth-page {
+    --auth-slash-shift: 7.03vh;
+    --auth-wordmark-overlap: calc(var(--auth-slash-shift) + clamp(3rem, 4vw, 6rem));
   }
 
-  .register-page .register-shell {
+  .auth-page .auth-shell {
     justify-content: safe center;
   }
 
-  .register-page .arena-wordmark {
+  .auth-page .arena-wordmark {
     font-family: var(--font-geist);
     font-size: clamp(28rem, 42vw, 38rem);
     font-weight: 900;
@@ -195,79 +195,79 @@
     text-shadow: 0 0 44px color-mix(in srgb, var(--color-text-primary) 5%, transparent);
   }
 
-  .register-page .arena-center-line {
+  .auth-page .arena-center-line {
     background: color-mix(in srgb, var(--color-text-primary) 32%, transparent);
     box-shadow: 0 0 30px color-mix(in srgb, var(--color-text-primary) 25%, transparent);
   }
 
-  .register-page .arena-wordmark-v {
+  .auth-page .arena-wordmark-v {
     top: 8%;
-    right: calc(50% - var(--register-wordmark-overlap));
+    right: calc(50% - var(--auth-wordmark-overlap));
     left: auto;
     transform: none;
     -webkit-text-stroke-color: color-mix(in srgb, var(--color-arena-red) 16%, transparent);
     text-shadow: 0 0 48px color-mix(in srgb, var(--color-arena-red) 6%, transparent);
   }
 
-  .register-page .arena-wordmark-s {
+  .auth-page .arena-wordmark-s {
     top: 45%;
     right: auto;
-    left: calc(50% - var(--register-wordmark-overlap));
+    left: calc(50% - var(--auth-wordmark-overlap));
     transform: none;
     -webkit-text-stroke-color: color-mix(in srgb, var(--color-arena-blue) 16%, transparent);
     text-shadow: 0 0 48px color-mix(in srgb, var(--color-arena-blue) 6%, transparent);
   }
 
-  .register-page .arena-wordmark-left {
+  .auth-page .arena-wordmark-left {
     clip-path: polygon(
       0 0,
-      calc(50% + var(--register-slash-shift)) 0,
-      calc(50% - var(--register-slash-shift)) 100%,
+      calc(50% + var(--auth-slash-shift)) 0,
+      calc(50% - var(--auth-slash-shift)) 100%,
       0 100%
     );
     -webkit-mask-image: linear-gradient(to right, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
     mask-image: linear-gradient(to right, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
   }
 
-  .register-page .arena-wordmark-right {
+  .auth-page .arena-wordmark-right {
     clip-path: polygon(
-      calc(50% + var(--register-slash-shift)) 0,
+      calc(50% + var(--auth-slash-shift)) 0,
       100% 0,
       100% 100%,
-      calc(50% - var(--register-slash-shift)) 100%
+      calc(50% - var(--auth-slash-shift)) 100%
     );
     -webkit-mask-image: linear-gradient(to left, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
     mask-image: linear-gradient(to left, transparent 0%, rgb(0 0 0 / 35%) 16%, #000 34%);
   }
 
   @media (max-height: 850px) {
-    .register-page {
+    .auth-page {
       padding-block: 0.75rem;
     }
 
-    .register-page .register-shell {
+    .auth-page .auth-shell {
       padding-block: 1rem;
     }
 
-    .register-page .register-card {
+    .auth-page .auth-card {
       padding: 1.5rem;
     }
 
-    .register-page .register-card-content {
+    .auth-page .auth-card-content {
       margin-top: 1.25rem;
     }
 
-    .register-page .register-form > :not(:last-child) {
+    .auth-page .auth-form > :not(:last-child) {
       margin-block-start: 0;
       margin-block-end: 1rem;
     }
 
-    .register-page .register-card-footer {
+    .auth-page .auth-card-footer {
       margin-top: 1.25rem;
       padding-top: 1rem;
     }
 
-    .register-page .register-options {
+    .auth-page .auth-options {
       margin-top: 0.75rem;
     }
   }
