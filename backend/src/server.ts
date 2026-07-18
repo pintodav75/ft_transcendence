@@ -58,6 +58,7 @@ server.decorate('authenticate', async function (request, reply) {
 
 await server.register(fastifyCors, {
   origin: ['http://localhost:5173'],
+  methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
   credentials: true,
 });
 
