@@ -59,7 +59,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 ## 🛠️ Stack technique
 
-**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4 — _fondation F0 + F0-A + F0-B et page Register FR1 en place_
+**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4 — _fondation F0 + F0-A + F0-B et page Register FR1 mergées ; révision de la fondation DA F0-D intégrée_
 
 - ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
 - ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
@@ -151,8 +151,8 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 │       ├── types/            # auth.ts
 │       ├── assets/images/    # bg.webp (hero), google-g.png (logo Google officiel)
 │       └── components/
-│           ├── ui/           # button, input, label, card, avatar, menu-item, icon-menu-item
-│           ├── auth/         # google-auth-button.tsx
+│           ├── ui/           # button, input, label, card, form-message, password-input, avatar, menu-item, icon-menu-item
+│           ├── auth/         # composants partagés Register/Login : layout, carte, formulaire, divider, options, langue, Google
 │           ├── layout/       # RootLayout, LeftNav, RightNav, AuthNav, SiteFooter
 │           └── home/         # HeroBanner, GameRail
 │
@@ -161,7 +161,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 ---
 
-## ✅ État d'avancement (au 17 juillet 2026)
+## ✅ État d'avancement (au 18 juillet 2026)
 
 ### Infrastructure — I2 + I3 mergés
 
@@ -226,13 +226,13 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
   - **Unitaires (Vitest)** — `npm test` (`tests/unit/` : `elo`, `leaderboard`, `password`). Réservés aux **helpers purs**, sans DB ni HTTP.
   - **End-to-end (Python, stdlib seule)** — `cd backend/tests && python3 run_all.py` : **10 suites, 246 cas** (+ 6 cas jobs via `B6_JOBS=1`) qui tapent sur le **vrai** backend et la **vraie** base de dev, sans mocks. Les users de test sont créés puis **supprimés** (motif `^(alice|bob|carol|dave|erin)[0-9a-f]{8}$`) → les données de l'équipe ne sont jamais touchées. `helpers.py` gère le rate-limit de `register` (3/min) et l'accès SQL direct (pour forcer des états que l'API ne permet pas encore d'atteindre). Voir `backend/tests/README.md`.
 
-### Frontend — F0 + F0-A + F0-B + FR1 Register en place
+### Frontend — F0 + F0-A + F0-B + FR1 et révision DA F0-D mergés
 
 **Fondation design F0 mergée** :
 
 - `frontend/src/index.css` est la **source de vérité visuelle** : tokens Tailwind v4 couleurs, polices, radius, shadows, styles globaux et utilitaires DA
 - DA retenue : fond sombre compétitif et sobre ; rappels rouge/bleu ; action principale **indigo nocturne** `action-primary` ; pas de texte courant en gradient
-- Composants UI de base : `Button` (`primary`, `secondary`, `ghost`), `Input`, `Label`, `Card` + `CardHeader`/`CardContent`/`CardFooter`
+- Composants UI de base : `Button` (`primary`, `secondary`, `ghost` ; le variant primaire porte son style complet), `Input`, `Label`, `Card` translucide à 84 % + `CardHeader`/`CardContent`/`CardFooter`, `FormMessage` et `PasswordInput`
 - Setup shadcn-like : `frontend/components.json`, alias `@/*`, `src/lib/utils.ts` avec `cn()`
 - ⚠️ `App.tsx` (ex-écran de validation DA) a été **supprimé** en F0-B : le bootstrap se fait via le routeur (`main.tsx` → `RouterProvider`) et `pages/login.tsx`
 
@@ -256,15 +256,25 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 - **Nouveaux composants UI** : `avatar` (sans dépendance radix), `menu-item` (rend un `<Link>` TanStack si prop `to`, sinon `<button>`), `icon-menu-item` (bouton icône + tooltip)
 - **Nouveaux `@utility` dans `index.css`** : `panel` (surface carte des rails flottants), `label-caps` (gras/majuscules/tracking), `focus-ring` (outline violet clavier, a11y). Utilitaires arène (`arena-background`, `text-arena-gradient`, `arena-wordmark`…) déjà présents
 
-**Register FR1 implémenté et testé (`feature/fr1-register-page`)** :
+**Register FR1 implémenté, testé et mergé** :
 
 - **DA Register finalisée** : carte sombre translucide, wordmark géant `V/S` Geist 900 découpé par une barre oblique responsive, teintes rouge/bleu en fondu, titre `VS MODE`, interface en anglais par défaut, layout fixe `100dvh` avec fallback de scroll interne seulement si la hauteur est insuffisante
 - **Formulaire** : `pseudo`, `email`, `password` avec toggle afficher/masquer ; React Hook Form + schéma Zod dans `lib/register-schema.ts`, validation initiale `onTouched` puis interactive, erreurs visibles seulement après saisie ou submit, espaces d'erreur stables et styles accessibles `aria-invalid` ; `pseudo` trimé et mot de passe limité à 72 caractères comme le backend
 - **Inscription classique** : `POST /auth/register` via `apiFetch`, `setSession()` Zustand, état de chargement, gestion `400`/`409`/`429`/réseau, puis redirection vers `/home`
 - **Google OAuth** : composant réutilisable `GoogleAuthButton` avec logo officiel ; redirection navigateur vers `/auth/oauth/google/start` ; callback backend corrigé pour poser le refresh cookie puis rediriger vers `${FRONTEND_URL}/home` ; session restaurée par le root layout (`refresh → me`)
-- **Navigation** : `VS MODE` renvoie vers `/`, lien `/login`, sélecteur local FR/EN/ES (traduction différée), liens `/terms` et `/privacy` sous la carte ; `RootLayout` adapte le titre à la route TanStack (`VS MODE Connect` sur `/login` et `/register`, `VS MODE` ailleurs)
+- **Navigation** : `VS MODE` renvoie vers `/`, lien `/login`, sélecteur EN/FR/ES (traduction différée), liens `/terms` et `/privacy` sous la carte ; `RootLayout` adapte le titre à la route TanStack résolue (`VS MODE Connect` sur `/login` et `/register`, `VS MODE` ailleurs), sans flash de titre lors d'une redirection ; un utilisateur déjà connecté qui demande `/register` est redirigé vers `/`
 - **Tokens** : couleur primaire globale passée à l'indigo nocturne (`#343579`) ; aucune couleur/police/radius/shadow écrite en dur dans `pages/register.tsx`
 - **Testé avec backend réel** : inscription + session, validation sans requête backend, doublon `409`, OAuth Google, retour `/home`, restauration et accès à `/dashboard`. Vérifications : build/lint frontend, type-check + 12 tests Vitest backend, `git diff --check`
+
+**Révision de la fondation DA F0 pour Register/Login — F0-D (`feature/f0d-register-design-system`)** :
+
+- F0-D réinjecte dans la fondation visuelle du projet les décisions de DA affinées et validées pendant FR1 Register. Il ne constitue pas une nouvelle DA indépendante : il fait évoluer les tokens, variantes et composants partagés issus de F0 afin qu'ils puissent servir aux autres pages, en commençant par Login dans FR2.
+
+- Le style complet du bouton primaire (fond, bordure, graisse et interactions) vit dans `Button` ; la largeur `w-full` reste un choix local du formulaire. L'opacité `bg-surface-card/84` devient le défaut de `Card`.
+- `FormMessage` centralise le rendu accessible des erreurs et `PasswordInput` centralise le champ mot de passe avec affichage/masquage, sans embarquer de logique React Hook Form ou Zod.
+- Les briques visuelles et interactives communes à **Register et Login** sont extraites dans `components/auth` : `AuthPageLayout` (décor V/S et barre responsive), `AuthCard`, `AuthCardContent`, `AuthCardFooter`, `AuthForm`, `AuthDivider`, `AuthLanguageSelector` et `AuthPageOptions`. Les sélecteurs CSS portent désormais des noms génériques `auth-*`, plus liés à une page précise.
+- Register consomme déjà ces composants sans changement de contrat API, de validation, de session ou de redirection. **La majorité de cette structure devra être réutilisée dans Login pendant FR2** afin que les deux pages partagent la même DA et les mêmes comportements. F0-D ne raccorde pas encore le formulaire Login au backend.
+- Vérifié en desktop, mobile, faible hauteur et zoom : la page elle-même ne scrolle pas, le fallback de scroll reste interne au shell, la barre continue de découper V/S et les interactions clavier/souris du sélecteur et du mot de passe fonctionnent. `npm run lint`, `npm run build` et `git diff --check` passent.
 
 - ⚠️ **Login (`pages/login.tsx`) pas encore câblé** : UI complète (fond arène, wordmark VS, champ password avec toggle œil `lucide`) mais **aucun handler de soumission**, pas d'appel `login` — lit juste `ready`/`user` du store pour l'affichage
 
@@ -413,14 +423,14 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 - **Ticket backend suivant : B7 — disputes** (preuves upload MinIO, arbitrage admin `is_admin`, timeout 24 h). C'est B6 qui met les matchs en `disputed` ; B7 est **la seule sortie** de cet état (sinon les 2 camps restent verrouillés §5.2 à vie). Porte potentiellement le module **Advanced permissions/roles** (2 pts).
 - ⚠️ **Notifications** deviennent structurellement nécessaires avec B6 : sans elles, la confirmation auto à 24 h est un piège (un perdant déclare une fausse victoire, l'adversaire absent perd « gratuitement »). À faire juste après B7.
 
-**Frontend — F0-B et correctif Fast Refresh mergés ; FR1 Register terminé** sur `feature/fr1-register-page`.
+**Frontend — F0-B, correctif Fast Refresh, FR1 Register et révision DA F0-D mergés.**
 
-- Register complet : validation, inscription classique, erreurs backend, Google OAuth, session et redirection `/home` testés avec le backend réel.
-- La branche FR1 est poussée et en review ; après validation, merge sur `master` puis Trello → Done.
+- Register est complet et mergé : validation, inscription classique, erreurs backend, Google OAuth, session et redirection `/home` testés avec le backend réel.
+- F0-D révise la fondation DA de F0 en généralisant les éléments visuels et interactifs communs à Register/Login dans les composants UI/auth partagés, puis refactore Register pour les consommer. La majorité de ces briques devra être appliquée à Login pendant FR2.
 - Ticket frontend suivant : **FR2 Login + flux 2FA** (`login` → session directe ou `tempToken` → `/auth/2fa/verify`).
 - Les stubs `/home`, `/privacy`, `/terms` et `/dashboard` restent à remplir ; `/login` conserve son UI mais doit être raccordé dans FR2.
 - ⚠️ **Types d'API côté front** : le front **écrit ses propres types à la main**, dans un fichier de contrat unique (`frontend/src/types/api.ts`). **Ne jamais importer les types du backend** : ils décrivent la DB, pas le JSON (`scheduledAt` est un `Date` côté back mais arrive en **`string` ISO** au front — le type partagé mentirait). Une codegen depuis `openapi.yaml` (`openapi-typescript`) est un **ticket futur back+front**, à faire seulement **après** avoir passé les réponses du YAML en `components/schemas` réutilisables.
 
 ---
 
-_Dernière mise à jour : 18 juillet 2026 — B6 (soumission de résultats + ELO + jobs 24 h) codé, review Walid (2 passes) traitée et testé (246 ✅ ; 46 avec les jobs), prêt à re-relire/merger ; prochain back = B7_
+_Dernière mise à jour : 18 juillet 2026 — B6, FR1 et F0-D mergés ; prochain ticket frontend = FR2, prochain ticket backend = B7_
