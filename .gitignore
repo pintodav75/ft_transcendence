@@ -36,3 +36,7 @@ certs/
 
 # Tests
 coverage/
+
+# ignoring it in dev, it's generated all the time anyway and it prevents me from switching
+# between branches -william
+frontend/src/routeTree.gen.ts
