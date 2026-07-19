@@ -603,6 +603,17 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               .filter((p): p is NonNullable<typeof p> => p !== undefined),
           }));
 
+        // Quand le match est en dispute, exposer l'id de la dispute pour que le front
+        // puisse naviguer vers GET /disputes/:id. null dans tous les autres états.
+        let disputeId: string | null = null;
+        if (match.status === 'disputed') {
+          const [dispute] = await db
+            .select({ id: disputesTable.id })
+            .from(disputesTable)
+            .where(eq(disputesTable.matchId, match.id));
+          disputeId = dispute?.id ?? null;
+        }
+
         return reply.code(200).send({
           match: {
             id: match.id,
@@ -614,6 +625,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             winnerSideId: match.winnerSideId,
             maps: match.maps,
             createdAt: match.createdAt,
+            disputeId,
           },
           sides: shapedSides,
         });

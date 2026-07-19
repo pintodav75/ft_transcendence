@@ -16,7 +16,7 @@ const patchProfileSchema = z
   })
   .partial();
 
-const MIME_TO_EXT = {
+export const MIME_TO_EXT = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
@@ -96,38 +96,38 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
-    if (!request.isMultipart())
-      return reply.code(400).send({ error: 'expected multipart/form-data' });
-    try {
-      const file = await request.file();
-      if (!file) return reply.code(400).send({ error: 'no file uploaded' });
-      if (!(file.mimetype in MIME_TO_EXT))
-        return reply.code(400).send({ error: 'unsupported file type' });
-      const id = randomUUID();
-      const ext = MIME_TO_EXT[file.mimetype as keyof typeof MIME_TO_EXT];
-      const filename = `${id}.${ext}`;
-      await minioClient.putObject(BUCKET_NAME, filename, file.file, undefined, {
-        'Content-Type': file.mimetype,
-      });
-      const [user] = await db
-        .update(usersTable)
-        .set({ avatarUrl: buildPublicUrl(filename) })
-        .where(eq(usersTable.id, request.user.sub))
-        .returning();
-      if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return { user: userSafe };
-    } catch (error) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'FST_REQ_FILE_TOO_LARGE'
-      )
-        reply.code(413).send({ error: 'File too large' });
-      else reply.code(500).send({ error: 'Internal error' });
-    }
-  },
+      if (!request.isMultipart())
+        return reply.code(400).send({ error: 'expected multipart/form-data' });
+      try {
+        const file = await request.file();
+        if (!file) return reply.code(400).send({ error: 'no file uploaded' });
+        if (!(file.mimetype in MIME_TO_EXT))
+          return reply.code(400).send({ error: 'unsupported file type' });
+        const id = randomUUID();
+        const ext = MIME_TO_EXT[file.mimetype as keyof typeof MIME_TO_EXT];
+        const filename = `${id}.${ext}`;
+        await minioClient.putObject(BUCKET_NAME, filename, file.file, undefined, {
+          'Content-Type': file.mimetype,
+        });
+        const [user] = await db
+          .update(usersTable)
+          .set({ avatarUrl: buildPublicUrl(filename) })
+          .where(eq(usersTable.id, request.user.sub))
+          .returning();
+        if (!user) return reply.code(401).send({ error: 'Unauthorized' });
+        const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
+        return { user: userSafe };
+      } catch (error) {
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'FST_REQ_FILE_TOO_LARGE'
+        )
+          reply.code(413).send({ error: 'File too large' });
+        else reply.code(500).send({ error: 'Internal error' });
+      }
+    },
   );
   server.delete('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
