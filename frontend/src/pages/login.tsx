@@ -6,6 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuthStore } from '@/stores/auth-store';
+import { Logo } from '@/components/layout/Logo';
 
 export function Login() {
   const [showPassword, setShowPassword] = useState(false);
@@ -53,10 +54,7 @@ export function Login() {
             </p>
 
             <div>
-              <h1 className="font-display text-5xl font-black uppercase leading-none">
-                <span className="text-arena-gradient">VS</span>
-                <span className="ml-3 text-text-secondary">Mode</span>
-              </h1>
+              <Logo />
               <p className="mt-3 max-w-[300px] text-sm leading-6 text-text-secondary">
                 Identifie-toi pour rejoindre l&apos;ar&egrave;ne, trouver des adversaires et suivre
                 ton classement.

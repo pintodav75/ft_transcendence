@@ -59,7 +59,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 ## 🛠️ Stack technique
 
-**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4 — _fondation F0 + F0-A + F0-B et page Register FR1 mergées ; révision de la fondation DA F0-D intégrée_
+**Frontend** : Vite 8 + React 19 + TypeScript + Tailwind v4 — _fondation F0 + F0-A + F0-B, Register FR1, révision DA F0-D, et coquille **F-Nav** + pages Teams/Ranking (codegen OpenAPI `api-types.gen.ts`) mergés_
 
 - ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
 - ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
@@ -226,7 +226,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
   - **Unitaires (Vitest)** — `npm test` (`tests/unit/` : `elo`, `leaderboard`, `password`). Réservés aux **helpers purs**, sans DB ni HTTP.
   - **End-to-end (Python, stdlib seule)** — `cd backend/tests && python3 run_all.py` : **10 suites, 246 cas** (+ 6 cas jobs via `B6_JOBS=1`) qui tapent sur le **vrai** backend et la **vraie** base de dev, sans mocks. Les users de test sont créés puis **supprimés** (motif `^(alice|bob|carol|dave|erin)[0-9a-f]{8}$`) → les données de l'équipe ne sont jamais touchées. `helpers.py` gère le rate-limit de `register` (3/min) et l'accès SQL direct (pour forcer des états que l'API ne permet pas encore d'atteindre). Voir `backend/tests/README.md`.
 
-### Frontend — F0 + F0-A + F0-B + FR1 et révision DA F0-D mergés
+### Frontend — F0 + F0-A + F0-B + FR1 + F0-D + F-Nav (nav, teams, ranking) mergés
 
 **Fondation design F0 mergée** :
 
@@ -277,6 +277,21 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 - Vérifié en desktop, mobile, faible hauteur et zoom : la page elle-même ne scrolle pas, le fallback de scroll reste interne au shell, la barre continue de découper V/S et les interactions clavier/souris du sélecteur et du mot de passe fonctionnent. `npm run lint`, `npm run build` et `git diff --check` passent.
 
 - ⚠️ **Login (`pages/login.tsx`) pas encore câblé** : UI complète (fond arène, wordmark VS, champ password avec toggle œil `lucide`) mais **aucun handler de soumission**, pas d'appel `login` — lit juste `ready`/`user` du store pour l'affichage
+
+**F-Nav — coquille de navigation + pages Teams & Ranking (commit `feat(frontend): partial F-nav`, sur `master` via `test/search-bar-ranking`)** :
+
+- 🧭 **Coquille de navigation (F-Nav)** : rail gauche flottant `LeftNav` (`Logo` + menu `MenuItem` : play [stub], my teams → `/teams`, ranking → `/ranking`, find party [stub], games → `/games`) avec `AuthNav` épinglé en bas — sélecteur de langue EN/FR/ES **non câblé** + actions auth **réelles** (login/sign up hors session, profile/logout en session ; `logout` du store puis redirect `/`). Rail droit `RightNav` réutilisé de F0-B.
+- 🗂️ **Layout de section `/teams`** (`pages/teams/route.tsx`) : porte les rails + `SiteFooter` et rend un `<Outlet/>`, pour que liste et détail ne répètent pas la coquille. Wrappers file-based : `routes/teams/route.tsx` (layout), `routes/teams/index.tsx`, `routes/teams/$teamId.tsx`.
+- 👥 **Mes équipes (`pages/teams/index.tsx`)** : `GET /teams` puis **un `GET /teams/:id` par équipe en parallèle** (`Promise.all`) pour les visages du roster (un échec isolé → roster vide, jamais de page blanche). Filtre par jeu via `LadderSelect` mode `game`, bouton **Créer une équipe** → `TeamCreation`. Chaque `TeamCard` est un `<Link to="/teams/$teamId">`.
+- 🛡️ **Détail équipe (`pages/teams/team-detail.tsx`)** : rôle spectateur (`Guest`/`Stranger`/`Member`/`Captain`), roster + couronne capitaine, **kick / quitter / dissoudre** (`leaveTeam` : dissolution `DELETE /teams/:id` capitaine → redirect `/teams` ; `DELETE /teams/:id/members/:userId` pour kick/quit — quitter soi-même → redirect, kick → maj optimiste du roster), bouton **Upload Avatar** (stub `alert` — pas d'endpoint logo team), retour `/teams`. ⚠️ **Ajout de membre via `SearchBar` COMMENTÉ** (dépend d'une recherche partielle de pseudo côté back non mergée — cf. bloc « tenu à l'écart »).
+- ➕ **Création d'équipe (`TeamCreation`)** : `LadderSelect excludeSolo` + nom, `POST /teams`, erreurs mappées (409 nom pris / déjà dans une équipe sur ce ladder ; 400 Zod).
+- 🎛️ **`LadderSelect`** : sélecteur jeu+format contrôlé, deux modes (`ladder` défaut → émet un ladderId ; `game` → émet un gameId), options `excludeSolo` et `all`. Charge `/games` + `/ladders` **une fois** et filtre en mémoire.
+- 🏆 **Ranking (`pages/ranking.tsx`, routes `/ranking` ET `/games`)** : `LadderSelect` + `RankingTable` (consomme **B2** : `GET /ladders/:id/rankings`, tri ELO, avatar/pseudo ou nom/logo team, médailles top 3, états loading/erreur/vide). ⚠️ **Lignes non cliquables** : le leaderboard ne renvoie **pas d'id** de compétiteur (`shapeRankings` le jette) → pas de lien `/teams/:id` sans changement back.
+- 🔤 **Codegen OpenAPI EN PLACE** : `frontend/src/lib/api-types.gen.ts` (généré via `openapi-typescript` depuis `openapi.yaml`) ; les pages importent `components['schemas']['TeamDetail' | 'TeamListItem' | 'Ladder' | 'Game' | …]`. **Remplace le contrat manuel** pour tout ce qui vient du YAML. ⚠️ La mise en garde `Date`→`string` ISO **reste vraie** (un `scheduledAt` arrive en string, ne pas le traiter comme un `Date`).
+- ⚠️ **Stubs / non câblé** : `/profile` (« a faire mdr »), `LinkAccountBanner` (composant §5.1 prêt mais monté nulle part), sélecteur de langue, boutons `play` / `find party`, Upload Avatar team. **Login (FR2) toujours pas câblé.**
+- ✅ `npm run build`, `tsc --noEmit` et `npm run lint` passent (1 **warning** Fast Refresh non bloquant sur `routes/profile.tsx`).
+
+**Tenu à l'écart de ce commit (local uniquement, PAS sur origin)** : `SearchBar` (recherche partielle de pseudo, `components/home/SearchBar.tsx` untracked), l'endpoint back `GET /users?search=` (`ilike`, dans un `git stash`) et le type manuel `types/api.ts`. À reprendre quand le back de recherche sera prêt : décommenter l'import + le bloc « Add member » + la fonction `addMember` dans `team-detail.tsx`, puis committer les fichiers tenus à l'écart.
 
 **Règles front à respecter dès F0-A et les pages suivantes** :
 
@@ -423,13 +438,16 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 - **Ticket backend B7 — disputes : CODÉ + TESTÉ + REVIEW WALID TRAITÉE** (branche `feature/b7-disputes`, part de master). Livré : `disputes.ts` (**4 routes** : file admin `GET /`, dépôt preuve+message multipart, détail avec déclarations des camps, arbitrage admin), extension `GET /matches/:id` (`disputeId`), job 24 h `autoCancelDisputes` (annulation neutre), `openapi.yaml` + `test_disputes.py` (**80 ✅ / 84 avec `B7_JOBS=1`** ; suite complète **326 ✅**), commit **`7c244bb`**. **Correctifs review Walid (2 passes)** : 1ʳᵉ = #1 sides/déclarations, #2 `GET /disputes` file admin, #4 bucket privé + URL présignée, #5 validation avant upload, #6 insert sous verrou, #8 413 ; 2ᵉ = bornes multipart strictes (bloquant : `files:1/fields:1/parts:2`, erreurs → 400), bucket privé idempotent, refus anonyme automatisé (403), chemin 2v2 testé, POST n'expose plus la clé ; 3ᵉ = bucket privé **fail-closed** (démarrage échoue si la privatisation échoue). **Décidé** : #3 timeout neutre conservé, #7 dépôt capitaine-seul conservé, #9 MIME = limite connue → **à répercuter sur la carte Trello + la ToS ([FT])**. **Pas** de chat live/websocket, **pas** le module roles (reste sur `is_admin`). Prochaine étape : squash en un commit `feat(disputes): …`, re-review, merge (l'auteur David merge).
 - ⚠️ **Notifications** deviennent structurellement nécessaires avec B6 : sans elles, la confirmation auto à 24 h est un piège (un perdant déclare une fausse victoire, l'adversaire absent perd « gratuitement »). À faire juste après B7.
 
-**Frontend — F0-B, correctif Fast Refresh, FR1 Register et révision DA F0-D mergés.**
+**Frontend — F0-B, Fast Refresh, FR1 Register, F0-D, et F-Nav (nav + pages Teams/Ranking) mergés.**
 
-- Register est complet et mergé : validation, inscription classique, erreurs backend, Google OAuth, session et redirection `/home` testés avec le backend réel.
-- F0-D révise la fondation DA de F0 en généralisant les éléments visuels et interactifs communs à Register/Login dans les composants UI/auth partagés, puis refactore Register pour les consommer. La majorité de ces briques devra être appliquée à Login pendant FR2.
-- Ticket frontend suivant : **FR2 Login + flux 2FA** (`login` → session directe ou `tempToken` → `/auth/2fa/verify`).
-- Les stubs `/home`, `/privacy`, `/terms` et `/dashboard` restent à remplir ; `/login` conserve son UI mais doit être raccordé dans FR2.
-- ⚠️ **Types d'API côté front** : le front **écrit ses propres types à la main**, dans un fichier de contrat unique (`frontend/src/types/api.ts`). **Ne jamais importer les types du backend** : ils décrivent la DB, pas le JSON (`scheduledAt` est un `Date` côté back mais arrive en **`string` ISO** au front — le type partagé mentirait). Une codegen depuis `openapi.yaml` (`openapi-typescript`) est un **ticket futur back+front**, à faire seulement **après** avoir passé les réponses du YAML en `components/schemas` réutilisables.
+- Register complet et mergé : validation, inscription classique, erreurs backend, Google OAuth, session et redirection `/home` testés avec le backend réel.
+- **F-Nav mergé** (commit `feat(frontend): partial F-nav`) : coquille de navigation (rails `LeftNav`/`RightNav`, `AuthNav`, `Logo`), pages **Mes équipes** + **Détail équipe** (création, roster, kick/quit/dissolve — consomme B5a), page **Ranking** (`RankingTable` consomme B2), sélecteur `LadderSelect`, et **codegen OpenAPI** (`api-types.gen.ts`). Détail dans la section Frontend plus haut.
+- **Tickets frontend suivants** :
+  - **Recherche + ajout de membre** : câbler `SearchBar` (tenu à l'écart, local) une fois l'endpoint back `GET /users?search=` (`ilike`) mergé → décommenter le bloc « Add member » + `addMember` de `team-detail.tsx`.
+  - **FR2 Login + flux 2FA** (`login` → session directe ou `tempToken` → `/auth/2fa/verify`) — toujours pas câblé.
+  - **Page `/profile`** (stub « a faire mdr »), **flux de liaison de compte** (`LinkAccountBanner` → external-accounts), rendre les lignes de ranking cliquables (**bloqué** : le back ne renvoie pas d'id de compétiteur), Upload Avatar (user : back prêt ; team : endpoint à créer).
+- Les stubs `/home`, `/privacy`, `/terms`, `/dashboard`, `/profile` restent à remplir.
+- ⚠️ **Types d'API côté front** : **codegen en place** — `frontend/src/lib/api-types.gen.ts` généré via `openapi-typescript` depuis `openapi.yaml` ; importer `components['schemas'][...]`, **ne jamais importer les types du backend** (ils décrivent la DB, pas le JSON). ⚠️ La codegen **ne corrige pas** le piège `Date`→`string` : `scheduledAt` est un `Date` côté back mais arrive en **`string` ISO** — ne pas le traiter comme un `Date`. **Régénérer `api-types.gen.ts` après toute modif de `openapi.yaml`.**
 
 ---
 

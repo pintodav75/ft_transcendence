@@ -58,6 +58,14 @@
   @apply font-bold uppercase tracking-wide;
 }
 
+/* Heaviest heading treatment: heavy weight, uppercase, tight leading.
+   Colour-agnostic on purpose — text inherits text-primary from <html>, so
+   only add a text-* class when a heading sits on a differently coloured
+   surface (e.g. text-white on an image card). Pair with a text-* size. */
+@utility label-caps-black {
+  @apply font-black uppercase leading-none;
+}
+
 /* For accessibility, interactive elements when focused with the keyboard (TAB) have a purple outline for interactive elements.
    constant here; the offset (2 or 4) stays at the call site. */
 @utility focus-ring {

@@ -9,5 +9,7 @@
   },
   "[json]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
-  }
+  },
+  "files.watcherExclude": { "**/data/**": true, "**/node_modules/**": true },
+  "search.exclude":        { "**/data/**": true }
 }

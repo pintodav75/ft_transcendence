@@ -67,7 +67,7 @@ export function GameRail() {
     <section className="min-w-0">
       <div className="mb-4">
         <p className="text-xs label-caps text-success">Swipe the arenas</p>
-        <h2 className="mt-1 text-2xl font-black uppercase leading-none text-text-primary">
+        <h2 className="mt-1 text-2xl label-caps-black">
           Choose your game
         </h2>
       </div>
