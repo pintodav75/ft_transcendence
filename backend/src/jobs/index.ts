@@ -2,6 +2,7 @@ import { db } from '../db/index.js';
 import { matchesTable, matchSidesTable, disputesTable } from '../db/schema.js';
 import { and, eq, lt, sql, isNotNull } from 'drizzle-orm';
 import { completeMatchWithElo } from '../utils/rankings.js';
+import { notify, pushNotifications, getMatchParticipantIds } from '../utils/notifications.js';
 
 /**
  * Le planificateur du backend : du code qui tourne TOUT SEUL, sans requête HTTP.
@@ -65,13 +66,15 @@ export async function cancelStaleMatches(): Promise<number> {
   const cutoff = new Date(Date.now() - CONFIRM_TIMEOUT_MS);
 
   const candidates = await db
-    .select({ matchId: matchesTable.id })
+    .select({ matchId: matchesTable.id, ladderId: matchesTable.ladderId })
     .from(matchesTable)
     .where(and(eq(matchesTable.status, 'in_progress'), lt(matchesTable.scheduledAt, cutoff)));
 
   let cancelled = 0;
   for (const c of candidates) {
-    const done = await db.transaction(async (tx) => {
+    // B9 : la tx rend les notifs créées (null = candidat écarté sous verrou). Le push WS
+    // se fait APRÈS le commit — même règle que les routes, un rollback ne notifie pas.
+    const notifs = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${c.matchId}))`);
       // Re-lecture sous verrou : une soumission a pu faire passer le match en
       // `awaiting_confirmation` (ou il a pu être re-planifié) entre la sélection et le verrou.
@@ -79,15 +82,23 @@ export async function cancelStaleMatches(): Promise<number> {
         .select({ status: matchesTable.status, scheduledAt: matchesTable.scheduledAt })
         .from(matchesTable)
         .where(eq(matchesTable.id, c.matchId));
-      if (!m || m.status !== 'in_progress') return false;
-      if (!m.scheduledAt || m.scheduledAt >= cutoff) return false;
+      if (!m || m.status !== 'in_progress') return null;
+      if (!m.scheduledAt || m.scheduledAt >= cutoff) return null;
       await tx
         .update(matchesTable)
         .set({ status: 'cancelled' })
         .where(eq(matchesTable.id, c.matchId));
-      return true;
+      // B9 — « match abandonné » : les joueurs alignés des DEUX camps. Pas d'acteur à
+      // exclure, c'est le robot qui agit.
+      return notify(tx, await getMatchParticipantIds(tx, c.matchId), 'match_ghost_cancelled', {
+        matchId: c.matchId,
+        ladderId: c.ladderId,
+      });
     });
-    if (done) cancelled++;
+    if (notifs) {
+      cancelled++;
+      pushNotifications(notifs);
+    }
   }
   return cancelled;
 }
@@ -123,14 +134,14 @@ export async function autoConfirmMatches(): Promise<number> {
 
   let confirmed = 0;
   for (const c of candidates) {
-    const done = await db.transaction(async (tx) => {
+    const notifs = await db.transaction(async (tx) => {
       // Même verrou que la route -> sérialise avec une soumission concurrente du camp.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${c.matchId}))`);
       const [m] = await tx
         .select({ status: matchesTable.status })
         .from(matchesTable)
         .where(eq(matchesTable.id, c.matchId));
-      if (!m || m.status !== 'awaiting_confirmation') return false;
+      if (!m || m.status !== 'awaiting_confirmation') return null;
 
       // ⚠️ On RELIT la soumission sous verrou et on n'utilise PAS une valeur capturée hors
       // verrou : la route autorise la re-soumission (nouveau vainqueur + nouveau
@@ -143,15 +154,24 @@ export async function autoConfirmMatches(): Promise<number> {
         })
         .from(matchSidesTable)
         .where(and(eq(matchSidesTable.matchId, c.matchId), isNotNull(matchSidesTable.submittedAt)));
-      if (!sub || !sub.submittedAt || !sub.submittedWinnerSideId) return false;
+      if (!sub || !sub.submittedAt || !sub.submittedWinnerSideId) return null;
       // Re-soumission récente -> la soumission n'est plus expirée : on laisse sa propre
       // fenêtre de 24 h courir, on ne confirme pas ce tick-ci.
-      if (sub.submittedAt >= cutoff) return false;
+      if (sub.submittedAt >= cutoff) return null;
 
       await completeMatchWithElo(tx, c.matchId, c.ladderId, sub.submittedWinnerSideId);
-      return true;
+      // B9 — « score entériné » : les DEUX camps. Le soumetteur d'origine aussi — 24 h ont
+      // passé, pour lui c'est la confirmation que son score est acté (pas d'acteur : robot).
+      return notify(tx, await getMatchParticipantIds(tx, c.matchId), 'result_confirmed', {
+        matchId: c.matchId,
+        ladderId: c.ladderId,
+        winnerSideId: sub.submittedWinnerSideId,
+      });
     });
-    if (done) confirmed++;
+    if (notifs) {
+      confirmed++;
+      pushNotifications(notifs);
+    }
   }
   return confirmed;
 }
@@ -184,18 +204,18 @@ export async function autoCancelDisputes(): Promise<number> {
 
   let cancelled = 0;
   for (const c of candidates) {
-    const done = await db.transaction(async (tx) => {
+    const notifs = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${c.matchId}))`);
       const [d] = await tx
         .select({ status: disputesTable.status })
         .from(disputesTable)
         .where(eq(disputesTable.id, c.disputeId));
-      if (!d || d.status !== 'open') return false;
+      if (!d || d.status !== 'open') return null;
       const [m] = await tx
-        .select({ status: matchesTable.status })
+        .select({ status: matchesTable.status, ladderId: matchesTable.ladderId })
         .from(matchesTable)
         .where(eq(matchesTable.id, c.matchId));
-      if (!m || m.status !== 'disputed') return false;
+      if (!m || m.status !== 'disputed') return null;
 
       await tx
         .update(matchesTable)
@@ -210,9 +230,17 @@ export async function autoCancelDisputes(): Promise<number> {
           resolvedAt: new Date(),
         })
         .where(eq(disputesTable.id, c.disputeId));
-      return true;
+      // B9 — « litige auto-annulé » : les DEUX camps apprennent l'issue neutre.
+      return notify(tx, await getMatchParticipantIds(tx, c.matchId), 'dispute_auto_cancelled', {
+        matchId: c.matchId,
+        ladderId: m.ladderId,
+        disputeId: c.disputeId,
+      });
     });
-    if (done) cancelled++;
+    if (notifs) {
+      cancelled++;
+      pushNotifications(notifs);
+    }
   }
   return cancelled;
 }

@@ -151,8 +151,18 @@ CREATE TEMP TABLE mym AS
   SELECT DISTINCT s.match_id FROM match_sides s
   JOIN match_participants p ON p.match_side_id = s.id
   WHERE p.user_id IN (SELECT id FROM myu);
+-- B9 : les notifs des users de test tombent par cascade (users), MAIS dispute_needs_admin
+-- notifie TOUS les is_admin — y compris de vrais comptes de la base dev. On purge donc
+-- par matchId de test (toutes les notifs B9 en portent un dans leur payload jsonb).
+DELETE FROM notifications WHERE (data->>'matchId')::uuid IN (SELECT match_id FROM mym);
 DELETE FROM match_participants WHERE match_side_id IN
   (SELECT id FROM match_sides WHERE match_id IN (SELECT match_id FROM mym));
+-- matches.winner_side_id -> match_sides.id ET match_sides.match_id -> matches.id : référence
+-- circulaire. Un match `completed` pointe sur un de ses propres sides -> supprimer match_sides
+-- avant de casser ce lien fait échouer TOUTE la transaction (violation FK), qui ROLLBACK EN
+-- SILENCE (subprocess.run n'inspecte pas returncode) -> plus RIEN n'était jamais nettoyé.
+-- Trouvé le 20/07 : 270 users et 325 matchs de test accumulés depuis le 17/07.
+UPDATE matches SET winner_side_id = NULL WHERE id IN (SELECT match_id FROM mym);
 DELETE FROM match_sides WHERE match_id IN (SELECT match_id FROM mym);
 DELETE FROM matches     WHERE id       IN (SELECT match_id FROM mym);
 DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE captain_id IN (SELECT id FROM myu));
@@ -162,13 +172,18 @@ DELETE FROM user_external_accounts WHERE user_id IN (SELECT id FROM myu);
 DELETE FROM users        WHERE id IN (SELECT id FROM myu);
 COMMIT;
 """
-    subprocess.run(
+    out = subprocess.run(
         ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", user, "-d", dbname, "-q", "-v", "ON_ERROR_STOP=1"],
         cwd=ROOT,
         input=script,
         capture_output=True,
         text=True,
     )
+    # Ne JAMAIS avaler un échec en silence (piège du 20/07) : un ROLLBACK sur violation FK
+    # ne lève aucune exception Python -> la suite continue comme si de rien n'était pendant
+    # que la base accumule des jours de débris. On préfère planter fort, tout de suite.
+    if out.returncode != 0:
+        raise RuntimeError(f"cleanup() a échoué (SQL rollback probable) :\n{out.stderr}")
 
 
 # ---------------------------------------------------------------- assertions
