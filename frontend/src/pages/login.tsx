@@ -1,124 +1,340 @@
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 
+import { AuthCard, AuthCardContent, AuthCardFooter, AuthForm } from '@/components/auth/auth-card';
+import { AuthDivider } from '@/components/auth/auth-divider';
+import { AuthPageLayout } from '@/components/auth/auth-page-layout';
+import { AuthPageOptions } from '@/components/auth/auth-page-options';
+import { GoogleAuthButton } from '@/components/auth/google-auth-button';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
+import { CardHeader } from '@/components/ui/card';
+import { FormMessage } from '@/components/ui/form-message';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PasswordInput } from '@/components/ui/password-input';
+import { ApiError, apiFetch } from '@/lib/api';
+import { API_BASE_URL } from '@/lib/api-config';
+import {
+  loginSchema,
+  twoFactorSchema,
+  type LoginFormValues,
+  type TwoFactorFormValues,
+} from '@/lib/login-schema';
 import { useAuthStore } from '@/stores/auth-store';
-import { Logo } from '@/components/layout/Logo';
+import type { AuthSessionResponse, LoginResponse } from '@/types/auth';
 
 export function Login() {
-  const [showPassword, setShowPassword] = useState(false);
-  const ready = useAuthStore((state) => state.ready);
-  const user = useAuthStore((state) => state.user);
+  const navigate = useNavigate();
+  const setSession = useAuthStore((state) => state.setSession);
+  const [tempToken, setTempToken] = useState<string | null>(null);
+  const {
+    register: registerLoginField,
+    handleSubmit: handleLoginSubmit,
+    clearErrors: clearLoginErrors,
+    setError: setLoginError,
+    formState: {
+      dirtyFields: loginDirtyFields,
+      errors: loginErrors,
+      isSubmitted: loginIsSubmitted,
+      isSubmitting: loginIsSubmitting,
+    },
+  } = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    mode: 'onTouched',
+    reValidateMode: 'onChange',
+    defaultValues: {
+      email: '',
+      password: '',
+    },
+  });
+  const {
+    register: registerTwoFactorField,
+    handleSubmit: handleTwoFactorSubmit,
+    clearErrors: clearTwoFactorErrors,
+    reset: resetTwoFactorForm,
+    setError: setTwoFactorError,
+    formState: {
+      dirtyFields: twoFactorDirtyFields,
+      errors: twoFactorErrors,
+      isSubmitted: twoFactorIsSubmitted,
+      isSubmitting: twoFactorIsSubmitting,
+    },
+  } = useForm<TwoFactorFormValues>({
+    resolver: zodResolver(twoFactorSchema),
+    mode: 'onTouched',
+    reValidateMode: 'onChange',
+    defaultValues: {
+      code: '',
+    },
+  });
+
+  const emailError =
+    loginDirtyFields.email || loginIsSubmitted ? loginErrors.email?.message : undefined;
+  const passwordError =
+    loginDirtyFields.password || loginIsSubmitted ? loginErrors.password?.message : undefined;
+  const codeError =
+    twoFactorDirtyFields.code || twoFactorIsSubmitted
+      ? twoFactorErrors.code?.message
+      : undefined;
+
+  const submitLogin = handleLoginSubmit(async (values) => {
+    clearLoginErrors('root.server');
+
+    try {
+      const response = await apiFetch<LoginResponse>('/auth/login', {
+        method: 'POST',
+        body: values,
+        skipAuth: true,
+        skipAuthRefresh: true,
+      });
+
+      if ('requires2FA' in response) {
+        resetTwoFactorForm();
+        setTempToken(response.tempToken);
+        return;
+      }
+
+      setSession(response);
+      await navigate({ to: '/home' });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setLoginError('root.server', {
+          type: 'server',
+          message: 'Invalid email or password.',
+        });
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 400) {
+        setLoginError('root.server', {
+          type: 'server',
+          message: 'The submitted information is invalid.',
+        });
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 429) {
+        setLoginError('root.server', {
+          type: 'server',
+          message: 'Too many attempts. Please try again in a moment.',
+        });
+        return;
+      }
+
+      setLoginError('root.server', {
+        type: 'server',
+        message: 'Unable to sign in right now. Please try again later.',
+      });
+    }
+  });
+
+  const submitTwoFactorCode = handleTwoFactorSubmit(async ({ code }) => {
+    if (!tempToken) return;
+
+    clearTwoFactorErrors('root.server');
+
+    try {
+      const session = await apiFetch<AuthSessionResponse>('/auth/2fa/verify', {
+        method: 'POST',
+        body: { tempToken, code },
+        skipAuth: true,
+        skipAuthRefresh: true,
+      });
+
+      setSession(session);
+      await navigate({ to: '/home' });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 400) {
+        setTwoFactorError('root.server', {
+          type: 'server',
+          message: 'The verification code is invalid.',
+        });
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 401) {
+        setTwoFactorError('root.server', {
+          type: 'server',
+          message: 'This verification session has expired. Sign in again.',
+        });
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 429) {
+        setTwoFactorError('root.server', {
+          type: 'server',
+          message: 'Too many attempts. Please try again in a moment.',
+        });
+        return;
+      }
+
+      setTwoFactorError('root.server', {
+        type: 'server',
+        message: 'Unable to verify the code right now. Please try again later.',
+      });
+    }
+  });
+
+  const startGoogleLogin = () => {
+    window.location.assign(`${API_BASE_URL}/auth/oauth/google/start`);
+  };
+
+  const returnToLogin = () => {
+    resetTwoFactorForm();
+    setTempToken(null);
+  };
+
+  const isTwoFactorStep = tempToken !== null;
 
   return (
-    <main className="relative min-h-screen overflow-hidden px-5 py-5 sm:px-8">
-      <div className="arena-center-line pointer-events-none absolute left-1/2 top-[-8%] h-[116%] w-px rotate-[8deg]" />
+    <AuthPageLayout>
+      <AuthCard>
+        <CardHeader>
+          <p className="flex items-center gap-3 text-xs label-caps text-text-muted">
+            <span className="arena-dot-success size-2 rounded-full" />
+            {isTwoFactorStep ? 'Two-factor verification' : 'Sign in'}
+          </p>
 
-      <div className="pointer-events-none absolute inset-0 hidden lg:block">
-        <div className="arena-wordmark-left absolute inset-0">
-          <div className="arena-wordmark-v arena-wordmark">V</div>
-        </div>
-        <div className="arena-wordmark-right absolute inset-0">
-          <div className="arena-wordmark-s arena-wordmark">S</div>
-        </div>
-      </div>
-
-      <header className="relative z-10 flex items-center justify-between text-xs label-caps text-text-muted">
-        <div className="flex items-center gap-2">
-          <span className="arena-dot-red size-2 rounded-full" />
-          <span>Rouge</span>
-          <span className="text-text-primary">1 284</span>
-          <span>en file</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span>en file</span>
-          <span className="text-text-primary">1 251</span>
-          <span>Bleu</span>
-          <span className="arena-dot-blue size-2 rounded-full" />
-        </div>
-      </header>
-
-      <section className="relative z-10 flex min-h-[calc(100vh-72px)] items-center justify-center py-10">
-        <Card className="w-full max-w-[420px] p-8">
-          <CardHeader>
-            <p className="flex items-center gap-3 text-xs label-caps text-text-muted">
-              <span className="arena-dot-success size-2 rounded-full" />
-              Terminal de match / Connexion
-              <span className="ml-auto max-w-[120px] truncate text-[10px]">
-                {ready ? (user?.pseudo ?? 'invite') : 'session...'}
-              </span>
-            </p>
-
-            <div>
-              <Logo />
-              <p className="mt-3 max-w-[300px] text-sm leading-6 text-text-secondary">
-                Identifie-toi pour rejoindre l&apos;ar&egrave;ne, trouver des adversaires et suivre
-                ton classement.
-              </p>
-            </div>
-          </CardHeader>
-
-          <CardContent className="mt-7">
-            <div className="space-y-2">
-              <Label htmlFor="email">E-mail</Label>
-              <Input id="email" type="email" placeholder="toi@vsmode.gg" />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Mot de passe</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  className="pr-12"
-                />
-                <button
-                  type="button"
-                  className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-control text-text-secondary transition hover:text-text-primary focus-ring focus-visible:outline-offset-2"
-                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
-                  title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
-                  onClick={() => setShowPassword((visible) => !visible)}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" aria-hidden="true" />
-                  ) : (
-                    <Eye className="h-4 w-4" aria-hidden="true" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center text-sm text-text-secondary">
-              <label className="flex items-center gap-3">
-                <span className="flex h-6 w-11 items-center rounded-full border border-border-strong bg-surface-input p-1">
-                  <span className="h-4 w-4 rounded-full bg-text-secondary" />
-                </span>
-                Rester connect&eacute;
-              </label>
-            </div>
-
-            <Button className="w-full">Entrer dans l&apos;ar&egrave;ne</Button>
-          </CardContent>
-
-          <CardFooter className="mt-7 border-t border-border-subtle pt-6 text-center text-sm text-text-secondary">
-            <div className="flex flex-col items-center gap-2">
-              <p>Pas encore de compte ?</p>
-              <a
-                className="font-bold text-text-secondary transition hover:text-text-primary focus-ring focus-visible:outline-offset-4"
-                href="/"
+          <div>
+            <h1 className="font-display text-5xl font-black italic uppercase leading-none">
+              <Link
+                to="/"
+                aria-label="Back to home"
+                className="inline-block transition hover:opacity-90 focus-ring focus-visible:outline-offset-4"
               >
-                Cr&eacute;er ton profil
-              </a>
+                <span className="-mr-[0.12em] inline-block pr-[0.12em] text-arena-gradient tracking-[-0.06em]">
+                  VS
+                </span>
+                <span className="ml-3 text-text-secondary">Mode</span>
+              </Link>
+            </h1>
+            <p className="mt-3 max-w-80 text-sm leading-6 text-text-secondary">
+              {isTwoFactorStep
+                ? 'Enter the code from your authenticator app.'
+                : 'Switch to competitive mode.'}
+            </p>
+          </div>
+        </CardHeader>
+
+        <AuthCardContent>
+          {isTwoFactorStep ? (
+            <AuthForm noValidate onSubmit={submitTwoFactorCode}>
+              <div className="relative space-y-2">
+                <Label htmlFor="code">Authentication code</Label>
+                <Input
+                  id="code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder="000000"
+                  autoFocus
+                  aria-invalid={Boolean(codeError)}
+                  aria-describedby={codeError ? 'code-error' : 'code-help'}
+                  {...registerTwoFactorField('code')}
+                />
+                <p id="code-help" className="text-xs text-text-muted">
+                  The temporary sign-in session expires after 5 minutes.
+                </p>
+                {codeError ? (
+                  <FormMessage id="code-error" className="absolute left-0 top-full mt-1">
+                    {codeError}
+                  </FormMessage>
+                ) : null}
+              </div>
+
+              {twoFactorErrors.root?.server ? (
+                <FormMessage className="text-center">
+                  {twoFactorErrors.root.server.message}
+                </FormMessage>
+              ) : null}
+
+              <Button type="submit" className="w-full" disabled={twoFactorIsSubmitting}>
+                {twoFactorIsSubmitting ? 'Verifying…' : 'Verify code'}
+              </Button>
+            </AuthForm>
+          ) : (
+            <AuthForm noValidate onSubmit={submitLogin}>
+              <div className="relative space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="Email address"
+                  aria-invalid={Boolean(emailError)}
+                  aria-describedby={emailError ? 'email-error' : undefined}
+                  {...registerLoginField('email')}
+                />
+                {emailError ? (
+                  <FormMessage id="email-error" className="absolute left-0 top-full mt-1">
+                    {emailError}
+                  </FormMessage>
+                ) : null}
+              </div>
+
+              <div className="relative space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <PasswordInput
+                  id="password"
+                  autoComplete="current-password"
+                  placeholder="Password"
+                  aria-invalid={Boolean(passwordError)}
+                  aria-describedby={passwordError ? 'password-error' : undefined}
+                  {...registerLoginField('password')}
+                />
+                {passwordError ? (
+                  <FormMessage id="password-error" className="absolute left-0 top-full mt-1">
+                    {passwordError}
+                  </FormMessage>
+                ) : null}
+              </div>
+
+              {loginErrors.root?.server ? (
+                <FormMessage className="text-center">
+                  {loginErrors.root.server.message}
+                </FormMessage>
+              ) : null}
+
+              <Button type="submit" className="w-full" disabled={loginIsSubmitting}>
+                {loginIsSubmitting ? 'Signing in…' : 'Sign in'}
+              </Button>
+
+              <AuthDivider />
+
+              <GoogleAuthButton
+                label="Google"
+                onClick={startGoogleLogin}
+                disabled={loginIsSubmitting}
+              />
+            </AuthForm>
+          )}
+        </AuthCardContent>
+
+        <AuthCardFooter>
+          {isTwoFactorStep ? (
+            <Button variant="ghost" onClick={returnToLogin}>
+              Back to sign in
+            </Button>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <p>Don&apos;t have an account yet?</p>
+              <Link
+                className="font-bold text-text-secondary transition hover:text-text-primary focus-ring focus-visible:outline-offset-4"
+                to="/register"
+              >
+                Create account
+              </Link>
             </div>
-          </CardFooter>
-        </Card>
-      </section>
-    </main>
+          )}
+        </AuthCardFooter>
+      </AuthCard>
+
+      <AuthPageOptions />
+    </AuthPageLayout>
   );
 }
 

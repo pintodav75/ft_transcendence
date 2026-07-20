@@ -63,10 +63,10 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 - ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
 - ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
-- ✅ **F0-B routing + home mergé / Trello Done** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, root layout global (restore session au mount), garde de route sur `/dashboard`, page home/landing arène complète + page login (UI seule, pas encore câblée au back)
+- ✅ **F0-B routing + home mergé / Trello Done** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, root layout global (restore session au mount), garde de route sur `/dashboard`, page home/landing arène complète + base visuelle de Login
 - ✅ **FR1 Register implémenté et testé** : formulaire RHF + Zod, inscription classique, session Zustand, erreurs API, Google OAuth complet et redirection `/home`
 - Libs front : **TanStack Router branché** + TanStack Query (installé), Zustand, React Hook Form, Zod + `@hookform/resolvers`, `@fontsource/geist`, `lucide-react`, `clsx`, `tailwind-merge`
-- ⚠️ **Pages restantes** : `/` (home/landing), `/register` et `/login` ont une vraie UI, mais Login **n'est pas encore câblé**. `/home`, `/privacy`, `/terms` et `/dashboard` restent des stubs. `App.tsx` supprimé (renommé `pages/login.tsx`)
+- ⚠️ **Pages restantes** : `/`, `/register` et `/login` ont une vraie UI ; **FR2 câble désormais Login + 2FA sur `feature/fr2-login-2fa`**. `/home`, `/privacy`, `/terms` et `/dashboard` restent des stubs. `App.tsx` supprimé (renommé `pages/login.tsx`)
 - ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
 
 **Backend** : Fastify v5 sur Node 24 LTS (TypeScript strict, ESM) — _en place et bien avancé_
@@ -136,7 +136,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 │       ├── storage/          # minio.ts, redis.ts
 │       └── types/            # env.d.ts, fastify-jwt.d.ts, fastify-oauth2.d.ts
 │
-├── frontend/                # F0 + F0-A + F0-B + FR1 en place (routing, home, register, login UI)
+├── frontend/                # F0 + F0-A + F0-B + FR1 + FR2 en place (routing, home, register, login + 2FA)
 │   ├── Dockerfile, docker-entrypoint.sh
 │   ├── components.json       # config shadcn-like
 │   ├── package.json          # TanStack Router + Query, Zustand, RHF, Zod/resolvers, Geist, lucide, clsx...
@@ -145,9 +145,9 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 │       ├── routeTree.gen.ts  # généré par le plugin TanStack (VERSIONNÉ, ne pas éditer à la main)
 │       ├── index.css         # source de vérité visuelle : tokens Tailwind + @utility (panel/label-caps/focus-ring) + utilitaires arène
 │       ├── routes/           # wrappers file-based createFileRoute : __root, index, home, login, register, privacy, terms, dashboard (gardé)
-│       ├── pages/            # composants : index (landing), register (FR1), login (UI), home/privacy/terms (stubs)
+│       ├── pages/            # composants : index (landing), register (FR1), login (FR2 + 2FA), home/privacy/terms (stubs)
 │       ├── stores/           # auth-store.ts (Zustand session — F0-A)
-│       ├── lib/              # api.ts (fetch+refresh), api-config.ts, register-schema.ts (Zod), utils.ts (cn())
+│       ├── lib/              # api.ts, api-config.ts, schémas Zod register/login, utils.ts (cn())
 │       ├── types/            # auth.ts
 │       ├── assets/images/    # bg.webp (hero), google-g.png (logo Google officiel)
 │       └── components/
@@ -226,7 +226,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
   - **Unitaires (Vitest)** — `npm test` (`tests/unit/` : `elo`, `leaderboard`, `password`). Réservés aux **helpers purs**, sans DB ni HTTP.
   - **End-to-end (Python, stdlib seule)** — `cd backend/tests && python3 run_all.py` : **10 suites, 246 cas** (+ 6 cas jobs via `B6_JOBS=1`) qui tapent sur le **vrai** backend et la **vraie** base de dev, sans mocks. Les users de test sont créés puis **supprimés** (motif `^(alice|bob|carol|dave|erin)[0-9a-f]{8}$`) → les données de l'équipe ne sont jamais touchées. `helpers.py` gère le rate-limit de `register` (3/min) et l'accès SQL direct (pour forcer des états que l'API ne permet pas encore d'atteindre). Voir `backend/tests/README.md`.
 
-### Frontend — F0 + F0-A + F0-B + FR1 + F0-D + F-Nav (nav, teams, ranking) mergés
+### Frontend — F0 + F0-A + F0-B + FR1 + F0-D + F-Nav mergés ; FR2 sur `feature/fr2-login-2fa`
 
 **Fondation design F0 mergée** :
 
@@ -273,10 +273,18 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 - Le style complet du bouton primaire (fond, bordure, graisse et interactions) vit dans `Button` ; la largeur `w-full` reste un choix local du formulaire. L'opacité `bg-surface-card/84` devient le défaut de `Card`.
 - `FormMessage` centralise le rendu accessible des erreurs et `PasswordInput` centralise le champ mot de passe avec affichage/masquage, sans embarquer de logique React Hook Form ou Zod.
 - Les briques visuelles et interactives communes à **Register et Login** sont extraites dans `components/auth` : `AuthPageLayout` (décor V/S et barre responsive), `AuthCard`, `AuthCardContent`, `AuthCardFooter`, `AuthForm`, `AuthDivider`, `AuthLanguageSelector` et `AuthPageOptions`. Les sélecteurs CSS portent désormais des noms génériques `auth-*`, plus liés à une page précise.
-- Register consomme déjà ces composants sans changement de contrat API, de validation, de session ou de redirection. **La majorité de cette structure devra être réutilisée dans Login pendant FR2** afin que les deux pages partagent la même DA et les mêmes comportements. F0-D ne raccorde pas encore le formulaire Login au backend.
+- Register consomme ces composants sans changement de contrat API, de validation, de session ou de redirection. **FR2 réutilise désormais la même structure dans Login** afin que les deux pages partagent la même DA et les mêmes comportements.
 - Vérifié en desktop, mobile, faible hauteur et zoom : la page elle-même ne scrolle pas, le fallback de scroll reste interne au shell, la barre continue de découper V/S et les interactions clavier/souris du sélecteur et du mot de passe fonctionnent. `npm run lint`, `npm run build` et `git diff --check` passent.
 
-- ⚠️ **Login (`pages/login.tsx`) pas encore câblé** : UI complète (fond arène, wordmark VS, champ password avec toggle œil `lucide`) mais **aucun handler de soumission**, pas d'appel `login` — lit juste `ready`/`user` du store pour l'affichage
+**Login FR2 implémenté (`feature/fr2-login-2fa`)** :
+
+- `pages/login.tsx` consomme `AuthPageLayout`, `AuthCard*`, `AuthForm`, `PasswordInput`, `FormMessage`, `AuthDivider`, `GoogleAuthButton` et `AuthPageOptions` issus de F0-D ; l'ancienne duplication du décor et du toggle password est supprimée.
+- Formulaire RHF + Zod (`lib/login-schema.ts`) : email uniquement, password, validation accessible et erreurs `400`/`401`/`429`/réseau. **Pas de « Forgot password » ni de « Stay signed in » cosmétique** : la récupération par email est hors périmètre et le backend pose actuellement le même refresh cookie 7 jours dans tous les cas.
+- `POST /auth/login` est appelé sans Bearer ni refresh automatique. Réponse directe → `setSession()` + `/home` ; réponse `{ requires2FA, tempToken }` → écran code 6 chiffres dans la même route.
+- L'écran 2FA appelle `POST /auth/2fa/verify` sans authentification Bearer ; le `tempToken` reste en mémoire et aucune session n'est écrite avant validation du code. Code invalide, token expiré et rate-limit ont des messages distincts ; retour au formulaire possible.
+- Google OAuth reprend le même bouton et la même redirection que Register. `/login` reprend aussi la garde visiteur de `/register` et redirige un user déjà restauré vers `/`.
+- Testé avec le backend réel et Chromium headless : mauvais password → message générique ; branche session directe → `/home` ; branche 2FA réelle (setup + TOTP) → vérification puis `/home`. `npm run lint`, `npm run build` et `git diff --check` passent.
+- ⚠️ **Observation dev à traiter hors FR2** : dans Chromium headless, le cookie refresh `Secure; SameSite=Strict` posé par `https://localhost:3000` n'est pas conservé lorsque la page vient de `http://localhost:5173` (contexte cross-scheme). La session Zustand fonctionne jusqu'au reload, mais la garde après rechargement ne peut alors pas restaurer l'user. À décider transversalement : frontend HTTPS/proxy same-origin de dev, ou politique de cookie adaptée après revue sécurité. Ne pas corriger uniquement dans Login : Register/OAuth/refresh sont concernés aussi.
 
 **F-Nav — coquille de navigation + pages Teams & Ranking (commit `feat(frontend): partial F-nav`, sur `master` via `test/search-bar-ranking`)** :
 
@@ -288,8 +296,8 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 - 🎛️ **`LadderSelect`** : sélecteur jeu+format contrôlé, deux modes (`ladder` défaut → émet un ladderId ; `game` → émet un gameId), options `excludeSolo` et `all`. Charge `/games` + `/ladders` **une fois** et filtre en mémoire.
 - 🏆 **Ranking (`pages/ranking.tsx`, routes `/ranking` ET `/games`)** : `LadderSelect` + `RankingTable` (consomme **B2** : `GET /ladders/:id/rankings`, tri ELO, avatar/pseudo ou nom/logo team, médailles top 3, états loading/erreur/vide). ⚠️ **Lignes non cliquables** : le leaderboard ne renvoie **pas d'id** de compétiteur (`shapeRankings` le jette) → pas de lien `/teams/:id` sans changement back.
 - 🔤 **Codegen OpenAPI EN PLACE** : `frontend/src/lib/api-types.gen.ts` (généré via `openapi-typescript` depuis `openapi.yaml`) ; les pages importent `components['schemas']['TeamDetail' | 'TeamListItem' | 'Ladder' | 'Game' | …]`. **Remplace le contrat manuel** pour tout ce qui vient du YAML. ⚠️ La mise en garde `Date`→`string` ISO **reste vraie** (un `scheduledAt` arrive en string, ne pas le traiter comme un `Date`).
-- ⚠️ **Stubs / non câblé** : `/profile` (« a faire mdr »), `LinkAccountBanner` (composant §5.1 prêt mais monté nulle part), sélecteur de langue, boutons `play` / `find party`, Upload Avatar team. **Login (FR2) toujours pas câblé.**
-- ✅ `npm run build`, `tsc --noEmit` et `npm run lint` passent (1 **warning** Fast Refresh non bloquant sur `routes/profile.tsx`).
+- ⚠️ **Stubs / non câblé** : `/profile` (« a faire mdr »), `LinkAccountBanner` (composant §5.1 prêt mais monté nulle part), sélecteur de langue, boutons `play` / `find party`, Upload Avatar team.
+- ✅ `npm run build`, `tsc --noEmit` et `npm run lint` passent (2 **warnings** Fast Refresh non bloquants, préexistants à FR2, sur `routes/games.tsx` et `routes/profile.tsx`).
 
 **Tenu à l'écart de ce commit (local uniquement, PAS sur origin)** : `SearchBar` (recherche partielle de pseudo, `components/home/SearchBar.tsx` untracked), l'endpoint back `GET /users?search=` (`ilike`, dans un `git stash`) et le type manuel `types/api.ts`. À reprendre quand le back de recherche sera prêt : décommenter l'import + le bloc « Add member » + la fonction `addMember` dans `team-detail.tsx`, puis committer les fichiers tenus à l'écart.
 
@@ -438,17 +446,17 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 - **Ticket backend B7 — disputes : CODÉ + TESTÉ + REVIEW WALID TRAITÉE** (branche `feature/b7-disputes`, part de master). Livré : `disputes.ts` (**4 routes** : file admin `GET /`, dépôt preuve+message multipart, détail avec déclarations des camps, arbitrage admin), extension `GET /matches/:id` (`disputeId`), job 24 h `autoCancelDisputes` (annulation neutre), `openapi.yaml` + `test_disputes.py` (**80 ✅ / 84 avec `B7_JOBS=1`** ; suite complète **326 ✅**), commit **`7c244bb`**. **Correctifs review Walid (2 passes)** : 1ʳᵉ = #1 sides/déclarations, #2 `GET /disputes` file admin, #4 bucket privé + URL présignée, #5 validation avant upload, #6 insert sous verrou, #8 413 ; 2ᵉ = bornes multipart strictes (bloquant : `files:1/fields:1/parts:2`, erreurs → 400), bucket privé idempotent, refus anonyme automatisé (403), chemin 2v2 testé, POST n'expose plus la clé ; 3ᵉ = bucket privé **fail-closed** (démarrage échoue si la privatisation échoue). **Décidé** : #3 timeout neutre conservé, #7 dépôt capitaine-seul conservé, #9 MIME = limite connue → **à répercuter sur la carte Trello + la ToS ([FT])**. **Pas** de chat live/websocket, **pas** le module roles (reste sur `is_admin`). Prochaine étape : squash en un commit `feat(disputes): …`, re-review, merge (l'auteur David merge).
 - ⚠️ **Notifications** deviennent structurellement nécessaires avec B6 : sans elles, la confirmation auto à 24 h est un piège (un perdant déclare une fausse victoire, l'adversaire absent perd « gratuitement »). À faire juste après B7.
 
-**Frontend — F0-B, Fast Refresh, FR1 Register, F0-D, et F-Nav (nav + pages Teams/Ranking) mergés.**
+**Frontend — F0-B, Fast Refresh, FR1 Register, F0-D et F-Nav mergés ; FR2 Login + 2FA implémenté sur `feature/fr2-login-2fa`.**
 
 - Register complet et mergé : validation, inscription classique, erreurs backend, Google OAuth, session et redirection `/home` testés avec le backend réel.
 - **F-Nav mergé** (commit `feat(frontend): partial F-nav`) : coquille de navigation (rails `LeftNav`/`RightNav`, `AuthNav`, `Logo`), pages **Mes équipes** + **Détail équipe** (création, roster, kick/quit/dissolve — consomme B5a), page **Ranking** (`RankingTable` consomme B2), sélecteur `LadderSelect`, et **codegen OpenAPI** (`api-types.gen.ts`). Détail dans la section Frontend plus haut.
 - **Tickets frontend suivants** :
   - **Recherche + ajout de membre** : câbler `SearchBar` (tenu à l'écart, local) une fois l'endpoint back `GET /users?search=` (`ilike`) mergé → décommenter le bloc « Add member » + `addMember` de `team-detail.tsx`.
-  - **FR2 Login + flux 2FA** (`login` → session directe ou `tempToken` → `/auth/2fa/verify`) — toujours pas câblé.
   - **Page `/profile`** (stub « a faire mdr »), **flux de liaison de compte** (`LinkAccountBanner` → external-accounts), rendre les lignes de ranking cliquables (**bloqué** : le back ne renvoie pas d'id de compétiteur), Upload Avatar (user : back prêt ; team : endpoint à créer).
+  - **Après FR2** : pages match et notifications.
 - Les stubs `/home`, `/privacy`, `/terms`, `/dashboard`, `/profile` restent à remplir.
 - ⚠️ **Types d'API côté front** : **codegen en place** — `frontend/src/lib/api-types.gen.ts` généré via `openapi-typescript` depuis `openapi.yaml` ; importer `components['schemas'][...]`, **ne jamais importer les types du backend** (ils décrivent la DB, pas le JSON). ⚠️ La codegen **ne corrige pas** le piège `Date`→`string` : `scheduledAt` est un `Date` côté back mais arrive en **`string` ISO** — ne pas le traiter comme un `Date`. **Régénérer `api-types.gen.ts` après toute modif de `openapi.yaml`.**
 
 ---
 
-_Dernière mise à jour : 20 juillet 2026 — B6, `fix/cors-methods`, FR1 et F0-D mergés sur master ; **B7 (disputes) codé + testé + review Walid traitée** sur `feature/b7-disputes` (4 routes dont file admin `GET /disputes`, sides/déclarations, bucket privé + URL présignée, validation avant upload, insert sous verrou, 413, job 24 h neutre ; `test_disputes.py` 80/84, suite complète 326 ✅ ; 2 passes de review Walid traitées — bornes multipart, bucket privé idempotent, 2v2, refus anonyme ; commit `7c244bb` ; openapi + CLAUDE + carte Trello à jour), reste : re-review Walid → merge (David), + la ToS ([FT]) ; prochain ticket frontend = FR2_
+_Dernière mise à jour : 20 juillet 2026 — B6, `fix/cors-methods`, FR1 et F0-D mergés sur master ; **B7 (disputes) codé + testé + review Walid traitée** sur `feature/b7-disputes` ; **FR2 Login + 2FA implémenté et testé avec le backend réel** sur `feature/fr2-login-2fa` (reste review/merge ; observation cookie cross-scheme dev documentée ci-dessus)._
