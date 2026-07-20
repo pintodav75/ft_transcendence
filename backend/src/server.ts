@@ -22,6 +22,7 @@ import { laddersRoutes } from './routes/ladders.js';
 import { externalAccountsRoutes } from './routes/external-accounts.js';
 import { teamsRoutes } from './routes/teams.js';
 import { matchesRoutes } from './routes/matches.js';
+import { disputesRoutes } from './routes/disputes.js';
 import { startJobs } from './jobs/index.js';
 
 const server = fastify({
@@ -82,6 +83,7 @@ await server.register(laddersRoutes, { prefix: '/ladders' });
 await server.register(externalAccountsRoutes, { prefix: '/users/me/external-accounts' });
 await server.register(teamsRoutes, { prefix: '/teams' });
 await server.register(matchesRoutes, { prefix: '/matches' });
+await server.register(disputesRoutes, { prefix: '/disputes' });
 
 server.get('/ping', async (request, reply) => {
   return 'pong-from-docker\n';

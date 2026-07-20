@@ -39,6 +39,11 @@ tags:
     description: Équipes par ladder (CRUD, membres, capitaine) — socle du matchmaking
   - name: Matchmaking
     description: Slots de match (créer / lister / détail) — §5.1 lineup, §5.2 lockout, tirage maps BO3
+  - name: Disputes
+    description: >
+      Litiges de score (B7). Une dispute naît d'un désaccord de score (B6 met le match en
+      `disputed`) — pas d'endpoint « ouvrir une dispute ». B7 en est la seule sortie : dépôt
+      de preuve+message, arbitrage admin, ou auto-annulation par le job 24 h.
   - name: System
     description: Endpoints utilitaires
 
@@ -2236,6 +2241,13 @@ paths:
                         type: array
                         items: { type: string }
                       createdAt: { type: string, format: date-time }
+                      disputeId:
+                        type: string
+                        format: uuid
+                        nullable: true
+                        description: >
+                          Id de la dispute quand le match est `disputed` — le front l'utilise
+                          pour naviguer vers `GET /disputes/:id`. `null` dans tous les autres états.
                   sides:
                     type: array
                     items:
@@ -2573,6 +2585,350 @@ paths:
             Le match n'attend pas de résultat : il n'est ni `in_progress` ni
             `awaiting_confirmation` (déjà `completed` / `cancelled` / `disputed`, ou encore
             `pending`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /disputes:
+    get:
+      tags: [Disputes]
+      summary: File d'arbitrage — disputes ouvertes (admin)
+      description: >
+        **Admin only** (`is_admin`) — liste les disputes encore `open`, **triées de la plus
+        ancienne à la plus récente** (ordre de traitement). Chaque entrée porte le match, son
+        ladder, l'heure prévue, la date d'ouverture et le **nombre de preuves déjà déposées**.
+        C'est le point d'entrée de l'arbitre : sans lui, impossible de **découvrir** les litiges
+        en attente sans connaître leur UUID.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Les disputes ouvertes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disputes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        matchId: { type: string, format: uuid }
+                        ladderId: { type: string, format: uuid }
+                        scheduledAt: { type: string, format: date-time, nullable: true }
+                        createdAt: { type: string, format: date-time }
+                        evidenceCount: { type: integer, example: 2 }
+                required: [disputes]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Réservé aux admins (`is_admin`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /disputes/{id}/evidence:
+    post:
+      tags: [Disputes]
+      summary: Déposer une preuve (image + message) sur une dispute
+      description: >
+        Un camp dépose une **preuve** dans le fil : une **image obligatoire**
+        (image/png, image/jpeg, image/webp — ≤ 5 Mo, stockée dans un **bucket MinIO privé**)
+        **+ un message** d'explication. Réservé au **capitaine** (2v2+) / **joueur** (1v1) d'un
+        des deux camps. Plusieurs posts par camp autorisés (le fil est un dialogue asynchrone).
+        La dispute doit être encore `open`. Le fichier est **entièrement validé en mémoire avant
+        tout upload** (message présent, type supporté) → aucun objet orphelin ; l'insert en base
+        se fait sous **verrou** (clé = matchId) avec re-vérification `open` → aucune preuve
+        n'atterrit sur une dispute close entre-temps. La garde de camp est vérifiée **avant** de
+        révéler si la dispute est résolue (pas d'oracle d'état pour un inconnu).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [evidence, message]
+              properties:
+                evidence:
+                  type: string
+                  format: binary
+                  description: Image de preuve (image/png, image/jpeg, image/webp), ≤ 5 Mo.
+                message:
+                  type: string
+                  minLength: 1
+                  description: Explication accompagnant la preuve.
+      responses:
+        '201':
+          description: >
+            Preuve enregistrée. La réponse **n'expose pas** l'URL de la preuve (la colonne
+            interne stocke une clé d'objet privée) : recharger `GET /disputes/{id}` pour obtenir
+            l'URL présignée.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  evidence:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      disputeId: { type: string, format: uuid }
+                      matchSideId: { type: string, format: uuid }
+                      submittedByUserId: { type: string, format: uuid, nullable: true }
+                      message: { type: string }
+                      submittedAt: { type: string, format: date-time }
+                required: [evidence]
+        '400':
+          description: >
+            Param :id non-uuid (ValidationError) ; body pas en `multipart/form-data` ;
+            image manquante, type non supporté ou champ fichier ≠ `evidence` ; message
+            manquant/vide ; **structure hors bornes** (plus d'un fichier, plus d'un champ, ou
+            plus de deux parties — une preuve = 1 image + 1 message).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Ni capitaine (2v2+) ni joueur (1v1) d'un des deux camps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Dispute inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: La dispute n'est plus `open` (déjà résolue)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Fichier trop volumineux (> 5 Mo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /disputes/{id}:
+    get:
+      tags: [Disputes]
+      summary: Détail d'une dispute + déclarations des camps + fil de preuves
+      description: >
+        Rend l'état de la dispute (statut, résolution, note d'arbitrage, date), **ce que chaque
+        camp a déclaré** (les `sides` : index, identité de la team ou du joueur, et
+        `submittedWinnerSideId` = le vainqueur annoncé par ce camp) et le **fil de preuves trié
+        par date** — chaque post avec son image, son message, son camp (`matchSideId`) et son
+        auteur (pseudo/avatar). Ce sont les `sides` qui rendent l'arbitrage possible : l'admin
+        voit qui est le side 0/1 et ce que chacun a annoncé, puis choisit `side_0_wins` /
+        `side_1_wins`. Lecture ouverte à tout **participant du match** (banc compris, même garde
+        que `GET /matches/:id`) **OU à un admin**. Projection explicite — aucun champ privé.
+        Chaque `evidenceUrl` est une **URL présignée courte durée** (bucket privé), générée
+        seulement après la garde. Reste consultable après résolution (historique).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Détail de la dispute
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dispute:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      matchId: { type: string, format: uuid }
+                      status: { type: string, enum: [open, resolved] }
+                      resolution:
+                        type: string
+                        enum: [side_0_wins, side_1_wins, cancelled]
+                        nullable: true
+                        description: '`null` tant que la dispute est `open`.'
+                      resolutionNotes: { type: string, nullable: true }
+                      resolvedAt: { type: string, format: date-time, nullable: true }
+                  sides:
+                    type: array
+                    description: >
+                      Les deux camps, triés par `sideIndex` (0 = créateur, 1 = accepteur).
+                      `submittedWinnerSideId` = le side que CE camp a déclaré vainqueur (B6).
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        sideIndex: { type: integer, enum: [0, 1] }
+                        submittedWinnerSideId:
+                          type: string
+                          format: uuid
+                          nullable: true
+                          description: Vainqueur annoncé par ce camp ; `null` si pas de soumission.
+                        team:
+                          nullable: true
+                          description: '`null` en 1v1 (pas de team).'
+                          type: object
+                          properties:
+                            id: { type: string, format: uuid }
+                            name: { type: string }
+                            logoUrl: { type: string, nullable: true }
+                            captainId: { type: string, format: uuid }
+                        players:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id: { type: string, format: uuid }
+                              pseudo: { type: string, example: alice }
+                              displayName: { type: string, nullable: true }
+                              avatarUrl: { type: string, nullable: true }
+                  evidence:
+                    type: array
+                    description: Le fil, trié par `submittedAt` croissant.
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        matchSideId: { type: string, format: uuid }
+                        evidenceUrl:
+                          type: string
+                          description: URL présignée courte durée (bucket privé), valable ~5 min.
+                        message: { type: string, nullable: true }
+                        submittedAt: { type: string, format: date-time }
+                        author:
+                          nullable: true
+                          description: '`null` si l''auteur a supprimé son compte.'
+                          type: object
+                          properties:
+                            id: { type: string, format: uuid }
+                            pseudo: { type: string, example: alice }
+                            displayName: { type: string, nullable: true }
+                            avatarUrl: { type: string, nullable: true }
+                required: [dispute, sides, evidence]
+        '400':
+          description: Param :id non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Ni participant du match (banc compris) ni admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Dispute inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /disputes/{id}/resolve:
+    post:
+      tags: [Disputes]
+      summary: Arbitrer une dispute (admin)
+      description: >
+        **Admin only** (`is_admin`) — c'est LA sortie de l'état `disputed`. L'admin tranche :
+        • `side_0_wins` / `side_1_wins` → match `completed` + **ELO** appliqué (helper partagé
+        avec B6, K=32) ; • `cancelled` → match `cancelled`, **ELO inchangé** (cas où l'admin ne
+        peut pas départager). La dispute passe `resolved` (résolution + note + arbitre + date),
+        le match sort de `disputed` → **les deux camps sont libérés** (§5.2).
+        **Définitif** : ré-arbitrer une dispute close → 409. Écrit sous **verrou consultatif**
+        (clé = matchId, le même que `/matches/:id/result` et les jobs) + re-lecture sous verrou.
+        Le **job 24 h** applique l'issue `cancelled` automatiquement si aucun admin ne passe.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution:
+                  type: string
+                  enum: [side_0_wins, side_1_wins, cancelled]
+                  description: L'issue choisie par l'arbitre.
+                notes:
+                  type: string
+                  maxLength: 1000
+                  description: Note de résolution (facultative), visible par les deux camps.
+      responses:
+        '200':
+          description: Dispute résolue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: resolved }
+                  resolution:
+                    type: string
+                    enum: [side_0_wins, side_1_wins, cancelled]
+                required: [status, resolution]
+        '400':
+          description: Param :id non-uuid ou `resolution` hors enum (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Réservé aux admins (`is_admin`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Dispute inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            La dispute est déjà résolue (ou le match n'est plus `disputed`) — course avec un
+            autre arbitrage ou le job 24 h, rattrapée par la re-lecture sous verrou.
           content:
             application/json:
               schema:
