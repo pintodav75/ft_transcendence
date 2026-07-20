@@ -53,6 +53,11 @@ export function RankingTable({ ladderId }: RankingProps) {
   const [error, setError] = useState<string>();
 
   useEffect(() => {
+    // LadderSelect starts with ladderId === undefined until its own fetch picks a
+    // default — firing early would hit /ladders/undefined/rankings (500). Bail out
+    // and stay in the loading state until a real id comes through.
+    if (!ladderId) return;
+
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount reset, no Query lib in use yet
     setLoading(true);
     setError(undefined);
