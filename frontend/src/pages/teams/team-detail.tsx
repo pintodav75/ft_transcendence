@@ -1,16 +1,18 @@
 // this is the page to view a single team
+// the Search to add user to the team feature is not yet installed
+// same for the upload avatar for the team
 
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, Crown } from 'lucide-react';
 import type { components } from '@/lib/api-types.gen';
-import { apiFetch } from '@/lib/api'; //ApiError
+import { apiFetch, ApiError } from '@/lib/api';
 type TeamDetail = components['schemas']['TeamDetail'];
 type TeamMember = components['schemas']['TeamMember'];
 import { useAuthStore } from '@/stores/auth-store';
 
 import { Avatar } from '@/components/ui/avatar';
-// import SearchBar from '@/components/home/SearchBar';
+import SearchBar from '@/components/home/SearchBar';
 import { Button } from '@/components/ui/button';
 
 const ViewerRole = {
@@ -46,7 +48,7 @@ export function TeamDetail() {
         setMembers(res.members);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Could not load team');
+        console.log(err instanceof Error ? err.message : 'Could not load team');
         navigate({ to: '/teams' }); // load failed → bounce back to the teams list
       })
       .finally();
@@ -87,22 +89,22 @@ export function TeamDetail() {
     }
   }
 
-  // async function addMember(newUserId: string) {
-  //   if (!team) return;
-  //   setError(undefined);
-  //   try {
-  //     await apiFetch<{ ok: true }>(`/teams/${team.id}/members`, {
-  //       method: 'POST',
-  //       body: { userId: newUserId },
-  //     });
-  //     // Refresh the roster so the new member shows up and drops out of the search.
-  //     const res = await apiFetch<{ team: TeamDetail; members: TeamMember[] }>('/teams/' + teamId);
-  //     setTeam(res.team);
-  //     setMembers(res.members);
-  //   } catch (err) {
-  //     setError(err instanceof ApiError ? err.message : 'Could not add member.');
-  //   }
-  // }
+  async function addMember(newUserId: string) {
+    if (!team) return;
+    setError(undefined);
+    try {
+      await apiFetch<{ ok: true }>(`/teams/${team.id}/members`, {
+        method: 'POST',
+        body: { userId: newUserId },
+      });
+      // Refresh the roster so the new member shows up and drops out of the search.
+      const res = await apiFetch<{ team: TeamDetail; members: TeamMember[] }>('/teams/' + teamId);
+      setTeam(res.team);
+      setMembers(res.members);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not add member.');
+    }
+  }
 
   if (!team || !members) {
     return <p>Loading…</p>;
@@ -177,13 +179,10 @@ export function TeamDetail() {
 
           <div className="flex">
             {members.map((member) => (
-              <div
-                key={member.id}
-                className="panel flex flex-col items-center w-50 h-50 m-2 pt-5 pb-5"
-              >
+              <div key={member.id} className="panel flex flex-col items-center w-50 h-50 m-2 p-2">
                 <Avatar src={member.avatarUrl} className="m-2 size-18" />
-                <div className="flex gap-1 p-2">
-                  {member.displayName ?? member.pseudo}
+                <div className="flex label-caps">
+                  <p>{member.displayName ?? member.pseudo}</p>
                   {member.id === team.captainId && (
                     <Crown
                       className="size-4 shrink-0 text-rank-gold"
@@ -191,24 +190,31 @@ export function TeamDetail() {
                     />
                   )}
                 </div>
+                <p className="text-text-muted">@{member.pseudo}</p>
 
                 {priviledges >= ViewerRole.Captain && member.id !== userId && (
                   <Button
                     variant="secondary"
-                    className="h-8 px-3 text-xs text-arena-red"
+                    className="h-8 px-3 text-xs text-arena-red mt-2"
                     onClick={() => {
-                      leaveTeam(member.id);
+                      if (
+                        window.confirm(
+                          `Kick "${member.displayName ?? member.pseudo}" out of "${team.name}"?`,
+                        )
+                      )
+                        leaveTeam(member.id);
                     }}
                   >
                     Kick
                   </Button>
                 )}
-                {member.id === userId && (
+                {member.id === userId && priviledges !== ViewerRole.Captain && (
                   <Button
                     variant="secondary"
-                    className="h-8 px-3 text-xs text-arena-red"
+                    className="h-8 px-3 text-xs text-arena-red mt-2"
                     onClick={() => {
-                      leaveTeam(member.id);
+                      if (window.confirm(`Are you sure to leave "${team.name}"?`))
+                        leaveTeam(member.id);
                     }}
                   >
                     Leave team
@@ -218,17 +224,17 @@ export function TeamDetail() {
             ))}
           </div>
 
-          {/* {priviledges >= ViewerRole.Captain && (
+          {priviledges >= ViewerRole.Captain && (
             <>
               <hr className="text-action-primary m-5" />
               <h2 className="text-2xl label-caps m-5">Add member</h2>
               <SearchBar
                 onSelect={(user) => addMember(user.id)}
                 excludeIds={members.map((m) => m.id)} // remove players already in our team
-                placeholder="Add a player by pseudo..."
+                placeholder="Enter a player's pseudo"
               />
             </>
-          )} */}
+          )}
         </div>
       </div>
     </div>

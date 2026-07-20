@@ -11,20 +11,25 @@ type RankingProps = {
   ladderId: string | undefined;
 };
 
-// Literally the same types as in backend/src/utils/leaderboard.ts
-// but since there's no shared types, we do it this way
-type Competitor =
-  | { type: 'user'; pseudo: string | null; displayName: string | null; avatarUrl: string | null }
-  | { type: 'team'; name: string | null; logoUrl: string | null };
+import type { paths } from '@/lib/api-types.gen';
 
-type RankingEntry = {
-  rank: number;
-  elo: number;
-  wins: number;
-  losses: number;
-  competitor: Competitor;
-};
-// end dumb copy
+type RankingEntry =
+  paths['/ladders/{id}/rankings']['get']['responses'][200]['content']['application/json']['rankings'][number];
+type Competitor = RankingEntry['competitor'];
+
+// // Literally the same types as in backend/src/utils/leaderboard.ts
+// // but since there's no shared types, we do it this way
+// type Competitor =
+//   | { type: 'user'; pseudo: string | null; displayName: string | null; avatarUrl: string | null }
+//   | { type: 'team'; name: string | null; logoUrl: string | null };
+
+// type RankingEntry = {
+//   rank: number;
+//   elo: number;
+//   wins: number;
+//   losses: number;
+//   competitor: Competitor;
+// };
 
 function competitorName(competitor: Competitor) {
   return competitor.type === 'user'

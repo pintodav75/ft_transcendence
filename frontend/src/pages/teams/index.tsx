@@ -107,14 +107,16 @@ export function Teams() {
 type TeamCardProps = {
   team: TeamListItem;
   members: TeamMember[];
-  // onLeave: (team: TeamListItem) => void;
 };
 
 function TeamCard({ team, members }: TeamCardProps) {
   return (
-    <Link to="/teams/$teamId" params={{ teamId: team.id }}>
-      <li className="flex items-center gap-4 rounded-control border border-border-subtle bg-surface-card-strong/40 p-4 transition hover:bg-surface-card-strong">
-        {/* Team picture */}
+    <li>
+      <Link
+        className="flex items-center gap-4 rounded-control border border-border-subtle bg-surface-card-strong/40 p-4 transition hover:bg-surface-card-strong"
+        to="/teams/$teamId"
+        params={{ teamId: team.id }}
+      >
         <Avatar
           src={team.logoUrl ?? undefined}
           alt={team.name}
@@ -151,7 +153,7 @@ function TeamCard({ team, members }: TeamCardProps) {
             </div>
           ))}
         </div>
-      </li>
-    </Link>
+      </Link>
+    </li>
   );
 }

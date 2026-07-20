@@ -5,5 +5,5 @@ export const Route = createFileRoute('/profile')({
 });
 
 function RouteComponent() {
-  return <div>a faire mdr</div>;
+  return <div>a faire</div>;
 }

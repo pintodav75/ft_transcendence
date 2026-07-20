@@ -8,7 +8,7 @@ import { SiteFooter } from '@/components/layout/SiteFooter';
 import { LadderSelect } from '@/components/home/LadderSelect';
 import { RankingTable } from '@/components/home/RankingTable';
 
-export function Games() {
+export function Ranking() {
   const [ladderId, setLadderId] = useState<string>();
 
   return (
@@ -36,4 +36,4 @@ export function Games() {
   );
 }
 
-export default Games;
+export default Ranking;
