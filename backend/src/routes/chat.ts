@@ -29,7 +29,9 @@ function removeSocket(userId: string, socket: WebSocket) {
   }
 }
 
-function sendToUser(userId: string, payload: string) {
+// Exporté depuis B9 : le système de notifications pousse ses events sur les MÊMES sockets
+// que le chat (un seul WebSocket par client, pas deux). Multi-socket déjà géré (Set).
+export function sendToUser(userId: string, payload: string) {
   const sockets = userSockets.get(userId);
   if (!sockets) return;
   for (const s of sockets) {
@@ -71,7 +73,15 @@ export const chatRoutes: FastifyPluginAsync = async (server) => {
       const token = req.query.token;
       let userId: string;
       try {
-        const payload = server.jwt.verify<{ sub: string }>(token);
+        const payload = server.jwt.verify<{ sub: string; pending?: 'totp' }>(token);
+        // Même garde que `server.authenticate` (server.ts) : un tempToken 2FA (émis après
+        // mot de passe correct, AVANT le code TOTP) est un JWT valide — sans ce contrôle,
+        // il ouvrirait le socket comme un vrai accessToken (chat + notifications live)
+        // pour quiconque possède juste le mot de passe. Review B9 (Walid, 20/07).
+        if (payload.pending) {
+          socket.close(1008, 'Invalid token');
+          return;
+        }
         userId = payload.sub;
       } catch (err) {
         socket.close(1008, 'Invalid token');

@@ -12,6 +12,7 @@ import {
   check,
   integer,
   uniqueIndex,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -322,6 +323,41 @@ export const rankingsTable = pgTable(
       .on(table.ladderId, table.teamId)
       .where(sql`${table.teamId} IS NOT NULL`),
     index('rankings_ladder_elo_idx').on(table.ladderId, table.elo.desc()),
+  ],
+);
+
+// ⚠️ `export` obligatoire (piège #8) : un enum non exporté n'est pas vu par drizzle-kit
+// → migration cassée. Les 8 valeurs = les 8 déclencheurs de B9 (cf. carte Trello).
+export const notificationTypeEnum = pgEnum('notification_type', [
+  'match_accepted',
+  'result_submitted',
+  'result_confirmed',
+  'dispute_opened',
+  'dispute_resolved',
+  'dispute_auto_cancelled',
+  'match_ghost_cancelled',
+  'dispute_needs_admin',
+]);
+
+export const notificationsTable = pgTable(
+  'notifications',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    type: notificationTypeEnum('type').notNull(),
+    // Payload DISPLAY-SAFE uniquement (ids, pseudo, heure) — jamais d'email ni de hash.
+    // jsonb et pas de FK vers matches/disputes : une notif est un fait passé, elle doit
+    // survivre à la disparition de ce qu'elle raconte.
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    readAt: timestamp('read_at', { withTimezone: true }), // null = non lue
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Index composite : couvre la requête de la cloche (mes notifs, plus récentes d'abord)
+    // ET les lookups par user_id seul (préfixe gauche) — un seul index suffit.
+    index('notifications_user_created_at_idx').on(table.userId, table.createdAt.desc()),
   ],
 );
 

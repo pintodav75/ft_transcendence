@@ -6,7 +6,7 @@ info:
     Auth JWT (access token Bearer 15 min) + refresh token en cookie httpOnly
     (SameSite=Strict, Path=/auth). Chat temps réel hors-OpenAPI via WebSocket
     `/ws/chat` (documenté en fin de fichier pour mémoire).
-  version: 0.7.0
+  version: 0.8.0
   contact:
     name: ft_transcendence team
 
@@ -44,6 +44,12 @@ tags:
       Litiges de score (B7). Une dispute naît d'un désaccord de score (B6 met le match en
       `disputed`) — pas d'endpoint « ouvrir une dispute ». B7 en est la seule sortie : dépôt
       de preuve+message, arbitrage admin, ou auto-annulation par le job 24 h.
+  - name: Notifications
+    description: >
+      Notifications système (B9). Écrites EXCLUSIVEMENT par le backend (accept, score,
+      disputes, jobs 24 h) — aucune route de création. Source de vérité en base ; push
+      temps réel best-effort par-dessus via l'event `notification` de `/ws/chat`
+      (documenté en fin de fichier).
   - name: System
     description: Endpoints utilitaires
 
@@ -2936,6 +2942,151 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Mes notifications (paginées) + compteur non-lu
+      description: >
+        Les notifications de l'utilisateur courant, **plus récentes d'abord**, paginées par
+        **curseur** (keyset sur `(createdAt, id)` — un offset sauterait des lignes, la liste
+        bouge en permanence). `unreadCount` compte TOUTES mes non-lues (pas seulement la
+        page) : c'est le badge de la cloche. `nextCursor` = l'id à repasser en `cursor`
+        pour la page suivante ; `null` quand on est au bout. Les 8 types possibles :
+        `match_accepted`, `result_submitted`, `result_confirmed`, `dispute_opened`,
+        `dispute_resolved`, `dispute_auto_cancelled`, `match_ghost_cancelled`,
+        `dispute_needs_admin` (admins seulement). `data` est un payload **display-safe**
+        (ids, heure — jamais d'email/hash) : `matchId` + `ladderId` toujours, `disputeId`
+        (types dispute), `winnerSideId` (result_confirmed), `scheduledAt` (match_accepted),
+        `resolution` (dispute_resolved).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          description: Id de la dernière notification de la page précédente (`nextCursor`).
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Mes notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type:
+                          type: string
+                          enum:
+                            [
+                              match_accepted,
+                              result_submitted,
+                              result_confirmed,
+                              dispute_opened,
+                              dispute_resolved,
+                              dispute_auto_cancelled,
+                              match_ghost_cancelled,
+                              dispute_needs_admin,
+                            ]
+                        data:
+                          type: object
+                          description: Payload display-safe (matchId, ladderId, …selon le type).
+                        readAt: { type: string, format: date-time, nullable: true }
+                        createdAt: { type: string, format: date-time }
+                  unreadCount: { type: integer, example: 3 }
+                  nextCursor: { type: string, format: uuid, nullable: true }
+                required: [notifications, unreadCount, nextCursor]
+        '400':
+          description: >
+            `limit`/`cursor` invalides (ValidationError, schéma Zod), ou curseur inconnu —
+            un curseur appartenant à un AUTRE user renvoie le même 400 (pas d'oracle).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Marquer une notification comme lue
+      description: >
+        **Idempotente** : re-marquer une notification déjà lue → 200 sans toucher `readAt`
+        (on garde l'horodatage de la première lecture). N'agit que sur MES notifications :
+        l'id d'un autre user → le **même 404** qu'un id inexistant (pas d'oracle).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Notification marquée lue (ou déjà lue)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                required: [ok]
+        '400':
+          description: Param :id non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Notification inconnue OU appartenant à un autre utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Marquer toutes mes notifications comme lues
+      description: >
+        Marque lues TOUTES mes notifications non-lues. **Idempotente** (deuxième appel :
+        `updated: 0`). `updated` = nombre de notifications effectivement marquées.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Fait
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  updated: { type: integer, example: 4 }
+                required: [ok, updated]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /ping:
     get:
       tags: [System]
@@ -2960,3 +3111,12 @@ paths:
 #       * persiste en DB puis push au destinataire si connecté
 #   - Message sortant au destinataire : { "type": "message", "message": <Message> }
 #   - Accusé à l'expéditeur     : { "type": "message_sent", "message": <Message> }
+#
+# Event `notification` (B9) — poussé sur CE MÊME socket (un seul WS par client) :
+#   { "type": "notification",
+#     "notification": { "id": "<uuid>", "type": "<notification_type>",
+#                       "data": { ...display-safe, cf. GET /notifications },
+#                       "readAt": null, "createdAt": "<ISO>" } }
+#   - Best-effort : émis APRÈS le commit de la transaction métier ; un destinataire hors
+#     ligne ne reçoit rien en live et récupère tout au prochain GET /notifications.
+#   - Aucun message ENTRANT associé : les notifs se lisent/marquent via l'API REST.

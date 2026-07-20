@@ -16,6 +16,12 @@ import {
 import { eq, and, ne, or, gt, lt, gte, inArray, notInArray, sql, desc } from 'drizzle-orm';
 import z from 'zod';
 import { completeMatchWithElo } from '../utils/rankings.js';
+import {
+  notify,
+  pushNotifications,
+  getAdminIds,
+  type CreatedNotification,
+} from '../utils/notifications.js';
 
 // §5.2 — seuls les matchs ACTIFS verrouillent : un match terminé ou annulé libère aussitôt.
 const LOCKING_STATUSES: ('in_progress' | 'awaiting_confirmation' | 'disputed')[] = [
@@ -836,6 +842,16 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             .insert(matchParticipantsTable)
             .values(side.participantIds.map((userId) => ({ matchSideId: createdSide.id, userId })));
 
+          // B9 — « ton défi a été accepté » : les joueurs ALIGNÉS du camp créateur (side 0).
+          // L'accepteur (l'acteur) n'y est jamais — la garde anti-auto-accept l'exclut du
+          // side 0. Insert DANS la tx (un rollback ne doit pas notifier) ; push après commit.
+          const notifs = await notify(
+            tx,
+            side0Participants.map((p) => p.userId),
+            'match_accepted',
+            { matchId: id, ladderId: match.ladderId, scheduledAt: kickoff.toISOString() },
+          );
+
           // 4. Les deux camps sont maintenant ENGAGÉS sur ce CRÉNEAU : leurs slots ouverts
           //    qui CHEVAUCHENT cette fenêtre doivent tomber. Sinon une 3e équipe en
           //    accepterait un → deux matchs qui se recouvrent, §5.2 contourné.
@@ -892,7 +908,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               );
           }
 
-          return { raced: null, match: updated } as const;
+          return { raced: null, match: updated, notifs } as const;
         });
 
         // Deux courses distinctes, deux messages : « on m'a doublé sur CE match »
@@ -906,6 +922,8 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               : 'you already have a match around that time',
           });
 
+        // Push WS APRÈS le commit — best-effort, ne peut pas faire échouer l'accept.
+        pushNotifications(accepted.notifs);
         return reply.code(200).send({ match: accepted.match });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
@@ -1019,7 +1037,10 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         const result = await db.transaction(
           async (
             tx,
-          ): Promise<{ ok: true; status: string } | { ok: false; code: number; error: string }> => {
+          ): Promise<
+            | { ok: true; status: string; notifs: CreatedNotification[] }
+            | { ok: false; code: number; error: string }
+          > => {
             await lockCompetitors(tx, [id]);
             const [currentMatch] = await tx
               .select({ status: matchesTable.status })
@@ -1048,25 +1069,70 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             // « quelqu'un a soumis » avec « l'autre a soumis » (cas de ma re-soumission).
             const [otherSide] = await tx
               .select({
+                id: matchSidesTable.id,
                 submittedAt: matchSidesTable.submittedAt,
                 submittedWinnerSideId: matchSidesTable.submittedWinnerSideId,
               })
               .from(matchSidesTable)
               .where(and(eq(matchSidesTable.matchId, id), ne(matchSidesTable.id, mySide.id)));
             if (!otherSide) return { ok: false, code: 500, error: 'Internal error' };
+
+            // B9 — destinataires : les joueurs alignés, JAMAIS l'acteur (`me`). En équipe,
+            // les coéquipiers de l'acteur restent notifiés (seul l'auteur du clic est exclu).
+            // Une seule requête pour les deux sides — le filtrage se fait en mémoire.
+            const participants = await tx
+              .select({
+                matchSideId: matchParticipantsTable.matchSideId,
+                userId: matchParticipantsTable.userId,
+              })
+              .from(matchParticipantsTable)
+              .where(
+                inArray(
+                  matchParticipantsTable.matchSideId,
+                  sides.map((s) => s.id),
+                ),
+              );
+            const bothSidesButMe = participants.map((p) => p.userId).filter((u) => u !== me);
+
             if (otherSide.submittedAt === null) {
               await tx
                 .update(matchesTable)
                 .set({ status: 'awaiting_confirmation' })
                 .where(and(eq(matchesTable.id, id), eq(matchesTable.status, 'in_progress')));
-              return { ok: true, status: 'awaiting_confirmation' };
+              // Notifier UNIQUEMENT sur la VRAIE première soumission (transition
+              // in_progress -> awaiting_confirmation), pas sur une re-soumission du même
+              // camp pendant qu'il attend toujours l'autre : `otherSide.submittedAt===null`
+              // reste vrai à CHAQUE re-soumission tant que l'adversaire n'a pas répondu,
+              // ce qui spammait l'adversaire d'une notif par clic. `currentMatch.status` a
+              // été lu SOUS VERROU avant toute écriture de cette transaction : il ne vaut
+              // 'in_progress' que la toute première fois — une re-soumission le trouve déjà
+              // à 'awaiting_confirmation' (posé par le 1er appel) et n'entre pas ici.
+              // SEUL l'autre camp est prévenu (« l'adversaire a soumis un score, tu as
+              // 24 h ») — mes coéquipiers n'ont rien à confirmer, eux.
+              const notifs =
+                currentMatch.status === 'in_progress'
+                  ? await notify(
+                      tx,
+                      participants
+                        .filter((p) => p.matchSideId === otherSide.id)
+                        .map((p) => p.userId),
+                      'result_submitted',
+                      { matchId: id, ladderId: match.ladderId },
+                    )
+                  : [];
+              return { ok: true, status: 'awaiting_confirmation', notifs };
             } else {
               if (otherSide.submittedWinnerSideId === winnerSideId) {
                 // ACCORD : les deux camps ont désigné le même vainqueur -> match clos + ELO,
                 // dans la MÊME transaction. Helper partagé avec le job d'auto-confirmation (B6)
                 // et l'arbitrage admin (B7) — la logique de clôture + ELO vit à un seul endroit.
                 await completeMatchWithElo(tx, id, match.ladderId, winnerSideId);
-                return { ok: true, status: 'completed' };
+                const notifs = await notify(tx, bothSidesButMe, 'result_confirmed', {
+                  matchId: id,
+                  ladderId: match.ladderId,
+                  winnerSideId,
+                });
+                return { ok: true, status: 'completed', notifs };
               } else {
                 // DÉSACCORD : vainqueurs différents -> le match part en litige, on ouvre une
                 // dispute et B7 (arbitrage admin / timeout 24 h) prend le relais. Aucun ELO ici.
@@ -1074,13 +1140,35 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                   .update(matchesTable)
                   .set({ status: 'disputed' })
                   .where(eq(matchesTable.id, id));
-                await tx.insert(disputesTable).values({ matchId: id });
-                return { ok: true, status: 'disputed' };
+                const [dispute] = await tx
+                  .insert(disputesTable)
+                  .values({ matchId: id })
+                  .returning({ id: disputesTable.id });
+                if (!dispute) return { ok: false, code: 500, error: 'Internal error' };
+                // Deux fan-outs : les joueurs (« litige ouvert ») + TOUS les admins (« un
+                // litige attend ton arbitrage » — c'est ce qui rend B7 push, pas pull).
+                // Un admin qui serait aussi l'acteur n'est pas notifié (règle : jamais l'acteur).
+                const admins = (await getAdminIds(tx)).filter((u) => u !== me);
+                const notifs = [
+                  ...(await notify(tx, bothSidesButMe, 'dispute_opened', {
+                    matchId: id,
+                    ladderId: match.ladderId,
+                    disputeId: dispute.id,
+                  })),
+                  ...(await notify(tx, admins, 'dispute_needs_admin', {
+                    matchId: id,
+                    ladderId: match.ladderId,
+                    disputeId: dispute.id,
+                  })),
+                ];
+                return { ok: true, status: 'disputed', notifs };
               }
             }
           },
         );
         if (!result.ok) return reply.code(result.code).send({ error: result.error });
+        // Push WS APRÈS le commit — un rollback ne notifie jamais.
+        pushNotifications(result.notifs);
         return reply.code(200).send({ status: result.status });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });

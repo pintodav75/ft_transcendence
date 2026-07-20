@@ -20,6 +20,7 @@ import test_matches_scheduling
 import test_matches_result
 import test_teams_linked
 import test_disputes
+import test_notifications
 
 SUITES = [
     test_matches_create,
@@ -33,6 +34,7 @@ SUITES = [
     test_matches_result,
     test_teams_linked,
     test_disputes,
+    test_notifications,
 ]
 
 

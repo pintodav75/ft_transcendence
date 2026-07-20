@@ -15,6 +15,12 @@ import { eq, and, inArray, sql } from 'drizzle-orm';
 import { minioClient, EVIDENCE_BUCKET, presignEvidenceUrl } from '../storage/minio.js';
 import { MIME_TO_EXT } from './users.js';
 import { completeMatchWithElo } from '../utils/rankings.js';
+import {
+  notify,
+  pushNotifications,
+  getMatchParticipantIds,
+  type CreatedNotification,
+} from '../utils/notifications.js';
 import { randomUUID } from 'node:crypto';
 
 const idParamSchema = z.object({ id: z.uuid() });
@@ -428,7 +434,12 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
         return reply.code(409).send({ error: 'dispute is already resolved' });
 
       const result = await db.transaction(
-        async (tx): Promise<{ ok: true } | { ok: false; code: number; error: string }> => {
+        async (
+          tx,
+        ): Promise<
+          | { ok: true; notifs: CreatedNotification[] }
+          | { ok: false; code: number; error: string }
+        > => {
           // Même verrou consultatif que la route /result et les jobs (clé = matchId) → aucune
           // course avec une auto-confirmation, un autre arbitrage ou le job 24 h.
           await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${dispute.matchId}))`);
@@ -481,11 +492,25 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
             })
             .where(eq(disputesTable.id, id));
 
-          return { ok: true };
+          // B9 — « la dispute a été tranchée » : les joueurs alignés des DEUX camps.
+          // L'acteur (l'admin) est exclu — cas limite : un admin qui arbitrerait son
+          // propre match ne se notifie pas lui-même. Insert dans la tx, push après commit.
+          const recipients = (await getMatchParticipantIds(tx, dispute.matchId)).filter(
+            (u) => u !== me,
+          );
+          const notifs = await notify(tx, recipients, 'dispute_resolved', {
+            matchId: dispute.matchId,
+            ladderId: m.ladderId,
+            disputeId: id,
+            resolution,
+          });
+
+          return { ok: true, notifs };
         },
       );
 
       if (!result.ok) return reply.code(result.code).send({ error: result.error });
+      pushNotifications(result.notifs);
       return reply.code(200).send({ status: 'resolved', resolution });
     } catch (error) {
       if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
