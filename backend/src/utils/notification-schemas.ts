@@ -57,6 +57,20 @@ export const notificationPayloadSchemas = {
     ladderId: uuidField,
     disputeId: uuidField,
   }),
+  // Social — `friendshipId` permet au front d'accepter/refuser DEPUIS la notification ;
+  // le pseudo est display-safe (info publique) et évite une requête de plus pour
+  // afficher « X t'a envoyé une demande ». C'est un instantané : si le pseudo change
+  // plus tard, la notif garde l'ancien — normal, elle raconte un fait passé.
+  friend_request_received: z.strictObject({
+    friendshipId: uuidField,
+    fromUserId: uuidField,
+    fromPseudo: z.string(),
+  }),
+  friend_request_accepted: z.strictObject({
+    friendshipId: uuidField,
+    byUserId: uuidField,
+    byPseudo: z.string(),
+  }),
 } as const satisfies Record<NotificationType, z.ZodType>;
 
 export type NotificationPayload<T extends NotificationType> = z.infer<

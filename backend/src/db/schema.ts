@@ -337,6 +337,10 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'dispute_auto_cancelled',
   'match_ghost_cancelled',
   'dispute_needs_admin',
+  // Social : rend le module « notification system » complet (le sujet demande des
+  // notifs pour TOUTES les actions, pas seulement le cœur match/dispute).
+  'friend_request_received',
+  'friend_request_accepted',
 ]);
 
 export const notificationsTable = pgTable(
