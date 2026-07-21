@@ -2,7 +2,7 @@
 node_modules/
 
 # Données persistantes Docker
-data/
+/data/
 
 # Build outputs
 dist/

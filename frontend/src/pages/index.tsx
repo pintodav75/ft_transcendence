@@ -1,30 +1,26 @@
-import { LeftNav } from '@/components/layout/LeftNav'
-import { RightNav } from '@/components/layout/RightNav'
 import { SiteFooter } from '@/components/layout/SiteFooter'
-import { HeroBanner } from '@/components/home/HeroBanner'
-import { GameRail } from '@/components/home/GameRail'
+import { HeroBanner } from '@/components/landing/HeroBanner'
+import { GamesCards } from '@/components/games/GamesCards'
+import { LandingNav } from '@/components/landing/LandingNav'
 
-// Home / landing layout. LeftNav and RightNav are fixed, full-height floating
-// rails; everything else lives in a single vertically-scrollable viewport
-// between them (padded so content never slides under the rails).
+// Home / landing layout. Two flex columns: the LandingNav rail and the page body
+// (which scrolls on its own). Landmarks stay distinct: nav rail, <main> content,
+// and the legal <footer> are siblings — <main> wraps only the primary content.
 export function Index() {
   return (
-    <main className="relative h-screen overflow-hidden">
-      <LeftNav />
-      <RightNav />
+    <div className="flex h-dvh gap-4 overflow-hidden p-4">
+      <LandingNav />
 
-      {/* Scrollable center viewport between the two floating rails.
-          pl-80 clears the w-72 left rail (+ margins); pr-28 clears the w-20 right rail. */}
-      <div className="relative z-10 h-screen overflow-y-auto">
-        <div className="flex min-h-screen flex-col pl-80 pr-28 pt-4">
-          <div className="flex-1 space-y-8">
+      <div className="flex-1 overflow-y-auto">
+        <div className="flex min-h-full flex-col">
+          <main className="flex-1 space-y-6">
             <HeroBanner />
-            <GameRail />
-          </div>
+            <GamesCards />
+          </main>
           <SiteFooter />
         </div>
       </div>
-    </main>
+    </div>
   )
 }
 
