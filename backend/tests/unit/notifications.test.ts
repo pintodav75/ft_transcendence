@@ -79,7 +79,7 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
     expect(typeof parsed.scheduledAt).toBe('string')
   })
 
-  it('les 8 types de notification ont bien un schéma', () => {
+  it('les 10 types de notification ont bien un schéma', () => {
     const expectedTypes = [
       'match_accepted',
       'result_submitted',
@@ -89,7 +89,37 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
       'dispute_auto_cancelled',
       'match_ghost_cancelled',
       'dispute_needs_admin',
+      // social
+      'friend_request_received',
+      'friend_request_accepted',
     ]
     expect(Object.keys(notificationPayloadSchemas).sort()).toEqual(expectedTypes.sort())
+  })
+
+  it('les payloads social sont stricts (champ en trop rejeté, pseudo requis)', () => {
+    const ok = notificationPayloadSchemas.friend_request_received.parse({
+      friendshipId: uuid1,
+      fromUserId: uuid2,
+      fromPseudo: 'bob',
+    })
+    expect(ok.fromPseudo).toBe('bob')
+
+    // champ en trop (ex. un email glissé par erreur) -> rejeté
+    expect(() =>
+      notificationPayloadSchemas.friend_request_accepted.parse({
+        friendshipId: uuid1,
+        byUserId: uuid2,
+        byPseudo: 'bob',
+        email: 'leak@example.com',
+      }),
+    ).toThrow()
+
+    // pseudo manquant -> rejeté
+    expect(() =>
+      notificationPayloadSchemas.friend_request_accepted.parse({
+        friendshipId: uuid1,
+        byUserId: uuid2,
+      }),
+    ).toThrow()
   })
 })

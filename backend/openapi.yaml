@@ -2951,13 +2951,16 @@ paths:
         **curseur** (keyset sur `(createdAt, id)` — un offset sauterait des lignes, la liste
         bouge en permanence). `unreadCount` compte TOUTES mes non-lues (pas seulement la
         page) : c'est le badge de la cloche. `nextCursor` = l'id à repasser en `cursor`
-        pour la page suivante ; `null` quand on est au bout. Les 8 types possibles :
+        pour la page suivante ; `null` quand on est au bout. Les 10 types possibles :
         `match_accepted`, `result_submitted`, `result_confirmed`, `dispute_opened`,
         `dispute_resolved`, `dispute_auto_cancelled`, `match_ghost_cancelled`,
-        `dispute_needs_admin` (admins seulement). `data` est un payload **display-safe**
-        (ids, heure — jamais d'email/hash) : `matchId` + `ladderId` toujours, `disputeId`
-        (types dispute), `winnerSideId` (result_confirmed), `scheduledAt` (match_accepted),
-        `resolution` (dispute_resolved).
+        `dispute_needs_admin` (admins seulement), `friend_request_received`,
+        `friend_request_accepted` (social). `data` est un payload **display-safe**
+        (ids, heure, pseudo — jamais d'email/hash) : pour les types **match/dispute**,
+        `matchId` + `ladderId` toujours, plus `disputeId` (types dispute), `winnerSideId`
+        (result_confirmed), `scheduledAt` (match_accepted) et `resolution`
+        (dispute_resolved) ; pour les types **social**, `friendshipId` + l'auteur
+        (`fromUserId`/`fromPseudo` pour reçue, `byUserId`/`byPseudo` pour acceptée).
       security:
         - bearerAuth: []
       parameters:
@@ -2996,6 +2999,8 @@ paths:
                               dispute_auto_cancelled,
                               match_ghost_cancelled,
                               dispute_needs_admin,
+                              friend_request_received,
+                              friend_request_accepted,
                             ]
                         data:
                           type: object

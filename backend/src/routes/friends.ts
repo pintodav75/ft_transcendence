@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { usersTable, friendshipsTable } from '../db/schema.js';
 import { eq, and, or } from 'drizzle-orm';
 import { isBlocked } from '../utils/blocks.js';
+import { notify, pushNotifications } from '../utils/notifications.js';
 const friendsSchema = z.object({
   addresseeId: z.uuid(),
 });
@@ -20,6 +21,13 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
         .from(usersTable)
         .where(eq(usersTable.id, addresseeId));
       if (!addresseeUser) return reply.code(404).send({ error: 'user not found' });
+      // Mon pseudo : le token ne porte que mon id, or les notifications l'embarquent
+      // pour que le front affiche « X t'a envoyé une demande » sans requête de plus.
+      const [requesterUser] = await db
+        .select({ pseudo: usersTable.pseudo })
+        .from(usersTable)
+        .where(eq(usersTable.id, requesterId));
+      if (!requesterUser) return reply.code(401).send({ error: 'Unauthorized' });
       if (await isBlocked(requesterId, addresseeId)) {
         return reply.code(404).send({ error: 'user not found' });
       }
@@ -39,19 +47,45 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
           ),
         );
       if (!existing) {
-        const [created] = await db
-          .insert(friendshipsTable)
-          .values({ requesterId, addresseeId })
-          .returning();
+        // B9 — la notif est INSÉRÉE DANS la transaction métier (atomique avec la
+        // demande d'ami) ; le push WS se fait APRÈS le commit. Un rollback ne doit
+        // jamais notifier un événement qui n'a pas eu lieu.
+        const { created, notifs } = await db.transaction(async (tx) => {
+          const [created] = await tx
+            .insert(friendshipsTable)
+            .values({ requesterId, addresseeId })
+            .returning();
+          if (!created) throw new Error('friendship insert returned no row');
+          const notifs = await notify(tx, [addresseeId], 'friend_request_received', {
+            friendshipId: created.id,
+            fromUserId: requesterId,
+            fromPseudo: requesterUser.pseudo,
+          });
+          return { created, notifs };
+        });
+        pushNotifications(notifs);
         return reply.code(201).send({ friendship: created });
       } else if (existing.status === 'accepted')
         return reply.code(400).send({ error: 'already friends' });
       else if (existing.status === 'pending' && existing.requesterId === addresseeId) {
-        const [updated] = await db
-          .update(friendshipsTable)
-          .set({ status: 'accepted' })
-          .where(eq(friendshipsTable.id, existing.id))
-          .returning();
+        // AUTO-ACCEPT : l'autre m'avait déjà envoyé une demande, la mienne en retour
+        // vaut acceptation. C'est donc LUI (le demandeur d'origine) qu'on prévient —
+        // jamais l'acteur, c'est-à-dire moi (règle B9).
+        const { updated, notifs } = await db.transaction(async (tx) => {
+          const [updated] = await tx
+            .update(friendshipsTable)
+            .set({ status: 'accepted' })
+            .where(eq(friendshipsTable.id, existing.id))
+            .returning();
+          if (!updated) throw new Error('friendship update returned no row');
+          const notifs = await notify(tx, [addresseeId], 'friend_request_accepted', {
+            friendshipId: updated.id,
+            byUserId: requesterId,
+            byPseudo: requesterUser.pseudo,
+          });
+          return { updated, notifs };
+        });
+        pushNotifications(notifs);
         return reply.code(200).send({ friendship: updated });
       } else if (existing.status === 'pending' && existing.requesterId === requesterId)
         return reply.code(400).send({ error: 'already requested' });
@@ -131,11 +165,29 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
           return reply.code(403).send({ error: 'not authorized' });
         if (friendship.status !== 'pending')
           return reply.code(400).send({ error: 'already friends' });
-        const [updated] = await db
-          .update(friendshipsTable)
-          .set({ status: 'accepted' })
-          .where(eq(friendshipsTable.id, friendshipId))
-          .returning();
+        // Mon pseudo pour le payload de la notif (le token ne porte que mon id).
+        const [accepterUser] = await db
+          .select({ pseudo: usersTable.pseudo })
+          .from(usersTable)
+          .where(eq(usersTable.id, userId));
+        if (!accepterUser) return reply.code(401).send({ error: 'Unauthorized' });
+
+        const { updated, notifs } = await db.transaction(async (tx) => {
+          const [updated] = await tx
+            .update(friendshipsTable)
+            .set({ status: 'accepted' })
+            .where(eq(friendshipsTable.id, friendshipId))
+            .returning();
+          if (!updated) throw new Error('friendship update returned no row');
+          // On prévient le DEMANDEUR que sa demande est acceptée — pas l'acteur (moi).
+          const notifs = await notify(tx, [friendship.requesterId], 'friend_request_accepted', {
+            friendshipId: updated.id,
+            byUserId: userId,
+            byPseudo: accepterUser.pseudo,
+          });
+          return { updated, notifs };
+        });
+        pushNotifications(notifs);
         return reply.code(200).send({ friendship: updated });
       } catch (error) {
         reply.code(500).send({ error: 'Internal error' });
