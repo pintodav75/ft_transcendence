@@ -1904,6 +1904,96 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Teams]
+      summary: Éditer une équipe (nom et/ou logo)
+      description: >
+        **Capitaine only.** Modifie le **nom** et/ou le **logo** de l'équipe. Les deux
+        champs sont optionnels mais **au moins un** est requis (corps vide → 400).
+        `logoUrl` accepte `null` pour **retirer** le logo, et n'accepte que les URL
+        **http/https**. C'est une **URL**, pas un upload de fichier (un envoi de logo
+        vers MinIO, comme l'avatar utilisateur, serait un endpoint séparé). Renommer
+        vers un nom déjà pris sur le même ladder viole `unique(ladder_id, name)` →
+        **409**.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              # Seuls `name` et `logoUrl` sont éditables. Le runtime Zod retire déjà les
+              # champs inconnus (une tentative de mass assignment sur `captainId` est
+              # neutralisée) ; `additionalProperties: false` aligne le contrat publié sur
+              # ce comportement au lieu d'annoncer l'inverse par défaut.
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+                  description: Nouveau nom (trimé), même règle qu'à la création.
+                logoUrl:
+                  type: string
+                  format: uri
+                  pattern: '^https?://'
+                  maxLength: 2048
+                  nullable: true
+                  description: >
+                    URL **http/https** du logo, ou `null` pour le retirer. Les autres
+                    schémas d'URI (`javascript:`, `ftp:`…) sont **refusés** (400) : la
+                    valeur est persistée et pourrait plus tard atterrir dans un `<a href>`
+                    ou du CSS.
+      responses:
+        '200':
+          description: Équipe mise à jour
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    $ref: '#/components/schemas/Team'
+                required: [team]
+        '400':
+          description: >
+            Param `:id` non-uuid, corps vide (aucun champ à modifier), `name` vide ou
+            > 50, `logoUrl` non conforme à une URL **http/https**.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Réservé au capitaine de l'équipe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Équipe inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Nom déjà pris par une autre équipe du même ladder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       tags: [Teams]
       summary: Dissoudre une équipe

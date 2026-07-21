@@ -736,6 +736,81 @@ export interface paths {
         };
         trace?: never;
     };
+    "/users/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Changer son mot de passe
+         * @description Change le mot de passe de l'utilisateur courant. `currentPassword` est vérifié contre le hash existant (**401** si faux) ; `newPassword` doit respecter la **même règle que l'inscription** (≥ 8 car., 1 majuscule, 1 minuscule, 1 chiffre, 1 spécial — **400** sinon). Un compte **OAuth-only** (jamais de mot de passe local) → **400** (définir un premier mot de passe serait un flux séparé). Rate-limit **5/min** par route. Les sessions/refresh tokens existants ne sont PAS invalidés (pas d'infra de révocation dans le stack).
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        currentPassword: string;
+                        /** @description ≥ 8 car., 1 majuscule, 1 minuscule, 1 chiffre, 1 spécial. */
+                        newPassword: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Mot de passe changé */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Ok"];
+                    };
+                };
+                /** @description `newPassword` non conforme (ValidationError) ou compte OAuth-only sans mot de passe local (Error). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"] | components["schemas"]["ValidationError"];
+                    };
+                };
+                /** @description Non authentifié, ou `currentPassword` incorrect */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rate limit dépassé (5/min) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        trace?: never;
+    };
     "/users/me/avatar": {
         parameters: {
             query?: never;
@@ -2020,7 +2095,84 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Éditer une équipe (nom et/ou logo)
+         * @description **Capitaine only.** Modifie le **nom** et/ou le **logo** de l'équipe. Les deux champs sont optionnels mais **au moins un** est requis (corps vide → 400). `logoUrl` accepte `null` pour **retirer** le logo, et n'accepte que les URL **http/https**. C'est une **URL**, pas un upload de fichier (un envoi de logo vers MinIO, comme l'avatar utilisateur, serait un endpoint séparé). Renommer vers un nom déjà pris sur le même ladder viole `unique(ladder_id, name)` → **409**.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Nouveau nom (trimé), même règle qu'à la création. */
+                        name?: string;
+                        /**
+                         * Format: uri
+                         * @description URL **http/https** du logo, ou `null` pour le retirer. Les autres schémas d'URI (`javascript:`, `ftp:`…) sont **refusés** (400) : la valeur est persistée et pourrait plus tard atterrir dans un `<a href>` ou du CSS.
+                         */
+                        logoUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Équipe mise à jour */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            team: components["schemas"]["Team"];
+                        };
+                    };
+                };
+                /** @description Param `:id` non-uuid, corps vide (aucun champ à modifier), `name` vide ou > 50, `logoUrl` non conforme à une URL **http/https**. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"] | components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Réservé au capitaine de l'équipe */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Équipe inconnue */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Nom déjà pris par une autre équipe du même ladder */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
         trace?: never;
     };
     "/teams/{id}/members": {
@@ -3241,7 +3393,7 @@ export interface paths {
         };
         /**
          * Mes notifications (paginées) + compteur non-lu
-         * @description Les notifications de l'utilisateur courant, **plus récentes d'abord**, paginées par **curseur** (keyset sur `(createdAt, id)` — un offset sauterait des lignes, la liste bouge en permanence). `unreadCount` compte TOUTES mes non-lues (pas seulement la page) : c'est le badge de la cloche. `nextCursor` = l'id à repasser en `cursor` pour la page suivante ; `null` quand on est au bout. Les 8 types possibles : `match_accepted`, `result_submitted`, `result_confirmed`, `dispute_opened`, `dispute_resolved`, `dispute_auto_cancelled`, `match_ghost_cancelled`, `dispute_needs_admin` (admins seulement). `data` est un payload **display-safe** (ids, heure — jamais d'email/hash) : `matchId` + `ladderId` toujours, `disputeId` (types dispute), `winnerSideId` (result_confirmed), `scheduledAt` (match_accepted), `resolution` (dispute_resolved).
+         * @description Les notifications de l'utilisateur courant, **plus récentes d'abord**, paginées par **curseur** (keyset sur `(createdAt, id)` — un offset sauterait des lignes, la liste bouge en permanence). `unreadCount` compte TOUTES mes non-lues (pas seulement la page) : c'est le badge de la cloche. `nextCursor` = l'id à repasser en `cursor` pour la page suivante ; `null` quand on est au bout. Les 10 types possibles : `match_accepted`, `result_submitted`, `result_confirmed`, `dispute_opened`, `dispute_resolved`, `dispute_auto_cancelled`, `match_ghost_cancelled`, `dispute_needs_admin` (admins seulement), `friend_request_received`, `friend_request_accepted` (social). `data` est un payload **display-safe** (ids, heure, pseudo — jamais d'email/hash) : pour les types **match/dispute**, `matchId` + `ladderId` toujours, plus `disputeId` (types dispute), `winnerSideId` (result_confirmed), `scheduledAt` (match_accepted) et `resolution` (dispute_resolved) ; pour les types **social**, `friendshipId` + l'auteur (`fromUserId`/`fromPseudo` pour reçue, `byUserId`/`byPseudo` pour acceptée).
          */
         get: {
             parameters: {
@@ -3267,7 +3419,7 @@ export interface paths {
                                 /** Format: uuid */
                                 id?: string;
                                 /** @enum {string} */
-                                type?: "match_accepted" | "result_submitted" | "result_confirmed" | "dispute_opened" | "dispute_resolved" | "dispute_auto_cancelled" | "match_ghost_cancelled" | "dispute_needs_admin";
+                                type?: "match_accepted" | "result_submitted" | "result_confirmed" | "dispute_opened" | "dispute_resolved" | "dispute_auto_cancelled" | "match_ghost_cancelled" | "dispute_needs_admin" | "friend_request_received" | "friend_request_accepted";
                                 /** @description Payload display-safe (matchId, ladderId, …selon le type). */
                                 data?: Record<string, never>;
                                 /** Format: date-time */
