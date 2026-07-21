@@ -144,19 +144,22 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 │   ├── package.json          # TanStack Router + Query, Zustand, RHF, Zod/resolvers, Geist, lucide, clsx...
 │   └── src/
 │       ├── main.tsx          # createRouter(routeTree) + RouterProvider (plus d'App.tsx)
-│       ├── routeTree.gen.ts  # généré par le plugin TanStack (VERSIONNÉ, ne pas éditer à la main)
+│       ├── routeTree.gen.ts  # généré par le plugin TanStack — PLUS VERSIONNÉ (gitignoré depuis `0df06ef`), régénéré au démarrage de Vite
 │       ├── index.css         # source de vérité visuelle : tokens Tailwind + @utility (panel/label-caps/focus-ring) + utilitaires arène
 │       ├── routes/           # wrappers file-based createFileRoute : __root, index, home, login, register, privacy, terms, dashboard (gardé)
 │       ├── pages/            # composants : index (landing), register (FR1), login (FR2 + 2FA), home/privacy/terms (stubs)
 │       ├── stores/           # auth-store.ts (Zustand session — F0-A)
 │       ├── lib/              # api.ts, api-config.ts, schémas Zod register/login, utils.ts (cn())
 │       ├── types/            # auth.ts
-│       ├── assets/images/    # bg.webp (hero), google-g.png (logo Google officiel)
+│       ├── data/             # games.ts : maps assets (images/logos/icons) + gameOrder + gameHref, clés = id back
+│       ├── assets/           # images/ (bg.webp hero, google-g.png, <jeu>.webp), logos/, icons/
 │       └── components/
-│           ├── ui/           # button, input, label, card, form-message, password-input, avatar, menu-item, icon-menu-item
+│           ├── ui/           # button, button-variants (buttonClasses), input, label, card, form-message, password-input, avatar, menu-item, icon-menu-item
 │           ├── auth/         # composants partagés Register/Login : layout, carte, formulaire, divider, options, langue, Google
-│           ├── layout/       # RootLayout, LeftNav, RightNav, AuthNav, SiteFooter
-│           └── home/         # HeroBanner, GameRail
+│           ├── layout/       # RootLayout, LeftNav, RightNav, AuthNav, SiteFooter, Logo, SiteLogo (⚠️ deux logos, fusion à arbitrer)
+│           ├── landing/      # vitrine publique : HeroBanner, LandingNav
+│           ├── games/        # GameAsset + coquilles GameLogo/GameIcon/GameImage, GamesCards, GameInfo, GamesFallback (+ previews non montées)
+│           └── home/         # ⚠️ MAL NOMMÉ : contient du teams/ranking (LadderSelect, RankingTable, TeamCreation, SearchBar, LinkAccountBanner)
 │
 └── data/                    # volumes bind-mount Postgres/MinIO (NON versionné)
 ```
@@ -304,6 +307,26 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 - ✅ `npm run build`, `tsc --noEmit` et `npm run lint` passent (2 **warnings** Fast Refresh non bloquants, préexistants à FR2, sur `routes/games.tsx` et `routes/profile.tsx`).
 
 **Tenu à l'écart de ce commit (local uniquement, PAS sur origin)** : `SearchBar` (recherche partielle de pseudo, `components/home/SearchBar.tsx` untracked), l'endpoint back `GET /users?search=` (`ilike`, dans un `git stash`) et le type manuel `types/api.ts`. À reprendre quand le back de recherche sera prêt : décommenter l'import + le bloc « Add member » + la fonction `addMember` dans `team-detail.tsx`, puis committer les fichiers tenus à l'écart.
+
+**FL — Landing publique (branche `feature/fl-landing-public`, REBASÉE sur `master` `1c8f7a6`) : vitrine `/` avant connexion** :
+
+- **Objectif carte Trello [FL]** : vitrine publique `/` (cartes de jeux alimentées par le back, CTA login/register, footer PP/ToS, redirect si déjà connecté). **DoD faite** : `/` public, cartes `GET /games`, CTA login/register, footer PP/ToS, composants icônes/logos. **Reste** : **redirect si déjà connecté** → déplacé dans un **ticket garde de route** séparé, avec la structure en deux zones (voir plus bas).
+- 🧭 **`LandingNav` (`components/landing/`) — nav PROPRE à la landing, distincte de `LeftNav`.** C'est la décision structurante de la branche : `LeftNav` est le rail de la **zone connectée** (routes `/teams` `/ranking` `/games`, positionnement `fixed`) et **n'est plus touché par la landing**. `LandingNav` ne garde que les entrées qui ont un sens sans session (pas de `play`, `find party`, `club`). ⚠️ **Réduit au logo + `AuthNav`** : les entrées `ranking`/`games` ont été retirées avant merge parce qu'elles étaient **sans `to`**, donc des `<button>` inertes. `/ranking` et `/games` existent sur master → à recâbler quand la landing aura sa nav définitive (voir barre mobile).
+- ♿ **Le landmark est le rail lui-même** : `<nav aria-label="Main">` à la racine de `LandingNav`, pas un `<nav>` interne — le logo et les liens login/sign-up d'`AuthNav` sont **aussi** de la navigation. Le libellé distingue ce nav de celui du footer (`aria-label="Legal"`).
+- 📐 **`SiteLogo` mis à l'échelle du rail** via **container query** : `@container` sur le `<nav>` + `text-[length:23cqw]` sur le logo — les `cqw` se résolvent contre la largeur du **rail**, pas du viewport (un `vw` déborderait dès que `max-w-[300px]` plafonne). ⚠️ `--font-display` est une **pile système** (pas Geist) : le rendu du wordmark diffère d'un poste à l'autre, la proportion est nominale.
+- 📱 **Responsive partiel (assumé)** : `LandingNav` est `hidden md:flex` → **plus de nav ni de logo sous 768px**, les CTA du hero sont le seul accès à l'authentification. La barre horizontale mobile reste à faire. ⚠️ **Vrai bloqueur mobile non traité** : l'overlay `GameInfo` ne se révèle qu'en `group-hover`/`group-focus-within` → **infos des jeux inatteignables au tactile**.
+- **Layout `pages/index.tsx`** : deux colonnes flex — `LandingNav` + colonne corps scrollable. **`h-dvh`** (et non `h-screen`) : `100vh` est calculé barre d'URL rétractée, donc avec `overflow-hidden` le bas de page devenait inatteignable sur mobile. Landmarks frères : nav / `<main>` (hero + cartes) / `<footer>`.
+- **`GamesCards`** : cartes **fixes 300px** (`w-[300px] shrink-0`, image `aspect-square`) dans un `flex flex-wrap`. **Sémantique de liste** : `<ul role="list">` + `<li>` (le `role` explicite est requis — Safari retire les sémantiques de liste sur un `<ul>` en `display:flex`), et `<section aria-labelledby>` relié au `<h2>` via **`useId()`**. ⚠️ Sous ~332px de large, les cartes débordent (prix de la taille fixe).
+- **Données (`lib/games.ts`)** : `useGames()` (`GET /games`) + `useLadders()` (`GET /ladders`), `staleTime` 1 h ; helpers purs `sortGames` (ordre `data/games.ts`), `formatsForGame`, `useSortedGames`. ⚠️ **Types `Game`/`Ladder` écrits à la main** — à basculer sur `lib/api-types.gen.ts` (codegen OpenAPI, arrivée avec F-Nav) : **dette identifiée, non traitée**.
+- **`buttonClasses` (`components/ui/button-variants.ts`)** : style extrait de `button.tsx` (règle Fast Refresh) et partagé par `Button` **et** les `<Link>` stylés bouton du hero. ⚠️ **Fusionné au rebase** avec les apports de master : 4 variantes (`primary`/`secondary`/`ghost`/**`danger`**) et bordure + `font-semibold` sur `primary`.
+- **Assets** (`frontend/src/assets/`) : `images/*.webp` (512²), `logos/*.png`, `icons/*.png` — maps `gameImages`/`gameLogos`/`gameIcons` dans `data/games.ts`, **clés = id back**. Renderer unique `GameAsset` → coquilles `GameLogo`/`GameIcon`/`GameImage` ; `GamesFallback` loading/error ; `GameInfo` présentational.
+- ⚠️ **`.gitignore` : `data/` → `/data/`** — changement **obligatoire**, pas cosmétique : l'ancien motif attrapait `frontend/src/data/`, donc `data/games.ts` (toutes les maps d'assets) ne pouvait pas être commité.
+- ⚠️ **`components/home/` n'a PAS été renommé** : seul `HeroBanner` a migré vers `landing/`. Les 5 composants de F-Nav (`LadderSelect`, `RankingTable`, `TeamCreation`, `SearchBar`, `LinkAccountBanner`) **restent dans `home/`** — git avait tenté de les emporter par *directory rename detection* pendant le rebase. `home/` est donc mal nommé (il contient du teams/ranking) : **nettoyage à faire, séparément**.
+- ⚠️ **`Logo` (master, `<h1>` + italique, prop `to`) et `SiteLogo` (FL, lien auth-aware `/home` ou `/`) coexistent** — deux composants réellement différents, **fusion à arbitrer**, volontairement pas tranchée pendant le rebase.
+- ⚠️ **Composants sans consommateur conservés** (décision assumée) : `GamesIcons`, `GamesLogos`, `GamesInfos`, `RightNav`. `GamesInfos` porte encore l'ancienne largeur de carte → **déjà en train de diverger**.
+- 🧩 **Décision d'architecture prise, pas encore codée — le site en DEUX ZONES** : zone publique (landing + pages associées) et zone app (`/home` + ses pages). Le déterminant est **la zone, pas la session** (la session n'en est qu'un proxy, valable tant que les gardes le forcent). Cible : *pathless layout routes* TanStack (`routes/_public.tsx` / `routes/_app.tsx`) portant chacune sa nav **et sa garde** ; `SiteLogo` deviendrait purement présentationnel (`to` obligatoire), chaque nav déclarant sa destination. **Redirection retenue : `/home`.** Étape intermédiaire possible : helpers `requireAnonymous()` / `requireSession()` dans `lib/route-guards.ts`. ⚠️ `/terms` et `/privacy` appartiennent aux **deux** zones → shell neutre à prévoir **le jour où elles auront du contenu** (pas avant).
+- **Reste FL** : garde de route (ticket séparé), barre de nav mobile + overlay tactile, compteur de joueurs (aucune route back ne le fournit — piste : `COUNT(DISTINCT user_id)` sur `user_external_accounts` joint par `provider`), `gameHref` (table vide) + `<Link>`, i18n, bascule sur la codegen OpenAPI.
+- 🐛 **Défauts connus, non corrigés** : `GameAsset` affiche un texte de debug à l'utilisateur (`"<jeu> — missing image"`) si un asset manque ; le hero promet **« Queue by skill »** alors que le produit n'a **ni file d'attente ni appariement automatique** (contredit la décision du 13/07) ; `index.html` de master écrivait « VS MODE » alors que le reste du code écrit « VSMODE » (résolu en faveur de **VSMODE** au rebase).
 
 **Règles front à respecter dès F0-A et les pages suivantes** :
 
@@ -482,3 +505,5 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 ---
 
 _Dernière mise à jour : 21 juillet 2026 — **B7 (disputes) mergé** (`15238e7`) ; **B9 (notifications) mergé** (`88c33e8`, commit `eca332d` — 12 suites / 397 cas, Vitest 19/19, push live vérifié) ; **FR2 Login + 2FA mergé après review** (commit `26f908d`, parcours classique et TOTP testés avec le backend réel ; observation cookie cross-scheme dev documentée ci-dessus). **BA1 n'est pas encore dans master** à cette date (`origin/feature/ba1-change-password`, commit `ce6809a`) et devra conserver ces états documentaires lors de son propre merge._
+
+_21 juillet 2026 — **FL (landing publique) rebasée sur `master` `1c8f7a6`** (trois fois : `88c33e8`, puis le sommet après FR2, puis celui après `b-notif-social` + `get-search` — les 2e et 3e passes n'ont conflicté que sur ce bloc, la 3e résolue automatiquement par `git rerere`). Résolutions retenues : `LeftNav` et le corps de `CLAUDE.md` gardent master, `index.html` garde le titre descriptif FL, `button.tsx` **fusionné** (structure FL + 4 variantes master dont `danger`), les 5 composants F-Nav remis dans `components/home/` (git avait tenté de les emporter par *directory rename detection*). Un commit est devenu vide et a été supprimé par git : il ne portait que `CLAUDE.md`. `tsc -b` et lint verts (2 warnings hérités de master sur `routes/profile.tsx`). **À faire avant merge** : `git push --force-with-lease` (historique réécrit → prévenir l'équipe), corriger les 2 défauts visibles restants (texte de debug de `GameAsset`, « Queue by skill » du hero), arbitrer `Logo` / `SiteLogo`._
