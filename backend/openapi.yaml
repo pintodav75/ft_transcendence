@@ -935,6 +935,66 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /users/me/password:
+    patch:
+      tags: [Users]
+      summary: Changer son mot de passe
+      description: >
+        Change le mot de passe de l'utilisateur courant. `currentPassword` est vérifié
+        contre le hash existant (**401** si faux) ; `newPassword` doit respecter la **même
+        règle que l'inscription** (≥ 8 car., 1 majuscule, 1 minuscule, 1 chiffre, 1 spécial
+        — **400** sinon). Un compte **OAuth-only** (jamais de mot de passe local) → **400**
+        (définir un premier mot de passe serait un flux séparé). Rate-limit **5/min** par
+        route. Les sessions/refresh tokens existants ne sont PAS invalidés (pas d'infra de
+        révocation dans le stack).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword:
+                  type: string
+                  minLength: 8
+                  maxLength: 72
+                  description: ≥ 8 car., 1 majuscule, 1 minuscule, 1 chiffre, 1 spécial.
+      responses:
+        '200':
+          description: Mot de passe changé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '400':
+          description: >
+            `newPassword` non conforme (ValidationError) ou compte OAuth-only sans mot de
+            passe local (Error).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Non authentifié, ou `currentPassword` incorrect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit dépassé (5/min)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /users/me/avatar:
     post:
       tags: [Users]
