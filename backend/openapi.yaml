@@ -50,6 +50,10 @@ tags:
       disputes, jobs 24 h) — aucune route de création. Source de vérité en base ; push
       temps réel best-effort par-dessus via l'event `notification` de `/ws/chat`
       (documenté en fin de fichier).
+  - name: Search
+    description: >
+      Recherche globale préfixe (joueurs + teams) pour la barre du rail gauche. Insensible
+      à la casse, blocages exclus (les deux sens), résultats bornés et tagués par type.
   - name: System
     description: Endpoints utilitaires
 
@@ -3087,6 +3091,102 @@ paths:
                   ok: { type: boolean, example: true }
                   updated: { type: integer, example: 4 }
                 required: [ok, updated]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Recherche globale préfixe (joueurs + teams)
+      description: >
+        Cherche les **joueurs** (par `pseudo`) et les **teams** (par `name`) dont le nom
+        **commence par** `q`, **insensible à la casse**. Résultats fusionnés en une seule
+        liste, chaque item tagué `type: user | team`. **Exclut les blocages** (joueurs que
+        j'ai bloqués OU qui m'ont bloqués — les teams ne sont pas filtrées). Jamais de champ
+        privé (`email`, hash). Les jokers SQL (`%`, `_`) dans `q` sont échappés → traités
+        comme du texte littéral.
+
+
+        **Filtre** (`type`), **tri** et **pagination** (`limit`/`offset`) s'appliquent à
+        la **liste fusionnée**, pas à chaque source : joueurs et teams sont triés
+        **ensemble** par nom (une team peut donc précéder un joueur) et `limit`/`offset`
+        découpent ce résultat global. `limit` borne donc le **nombre total** d'items
+        rendus. Les ex æquo sont départagés par `type` puis `id` : l'ordre est **total**,
+        donc stable d'un appel à l'autre — condition nécessaire pour qu'`offset` ne saute
+        ni ne duplique de résultat. `hasMore` indique s'il reste une page après celle-ci.
+        Une page au-delà du total renvoie simplement une liste vide.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Préfixe recherché (trimé, 2 à 50 caractères).
+          schema: { type: string, minLength: 2, maxLength: 50 }
+        - name: type
+          in: query
+          required: false
+          description: >
+            Filtre par type. Absent → joueurs **et** teams. `user` → joueurs seulement,
+            `team` → teams seulement.
+          schema: { type: string, enum: [user, team] }
+        - name: limit
+          in: query
+          required: false
+          description: Nombre maximum d'items rendus, toutes sources confondues.
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+        - name: offset
+          in: query
+          required: false
+          description: Décalage dans la liste fusionnée et triée.
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Résultats (liste vide si aucun match)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      oneOf:
+                        - type: object
+                          description: Résultat joueur
+                          properties:
+                            type: { type: string, enum: [user] }
+                            id: { type: string, format: uuid }
+                            pseudo: { type: string }
+                            displayName: { type: string, nullable: true }
+                            avatarUrl: { type: string, nullable: true }
+                          required: [type, id, pseudo, displayName, avatarUrl]
+                        - type: object
+                          description: Résultat team
+                          properties:
+                            type: { type: string, enum: [team] }
+                            id: { type: string, format: uuid }
+                            name: { type: string }
+                            logoUrl: { type: string, nullable: true }
+                            ladderId: { type: string, format: uuid }
+                          required: [type, id, name, logoUrl, ladderId]
+                  hasMore:
+                    type: boolean
+                    description: >
+                      `true` s'il existe au moins un résultat après cette page
+                      (`offset + limit`). Permet au front de savoir s'il doit proposer
+                      « voir plus » sans avoir à compter le total.
+                required: [results, hasMore]
+        '400':
+          description: >
+            `q` manquant, trop court (< 2) ou trop long (> 50) ; `type` hors enum ;
+            `limit` hors 1-50 ou non numérique ; `offset` négatif.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':

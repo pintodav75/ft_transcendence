@@ -4,7 +4,7 @@ Scripts Python qui tapent sur le **vrai backend** et la **vraie base de dev** �
 Ils créent leurs propres utilisateurs et **les suppriment à la fin** : les données de
 l'équipe (seed-dev, comptes perso) ne sont **jamais** touchées.
 
-**9 suites, 206 cas.** Aucune dépendance à installer : uniquement la stdlib Python 3.
+**13 suites, 443 cas.** Aucune dépendance à installer : uniquement la stdlib Python 3.
 
 ## Lancer
 
@@ -37,6 +37,10 @@ en tâche de fond plutôt que de le regarder tourner.
 | `test_matches_concurrency.py` | B5c (review) | **Courses réelles, avec threads** : double accept, acceptation croisée (interblocage), double création, et la fuite d'autorisation du `DELETE` |
 | `test_matches_scheduling.py` | B5d | **Le temps** : grille horaire (quart fixe + 15 min), **fenêtres de disponibilité** (chevauchement interdit mais **dos à dos autorisé**), la « soirée gaming » (plusieurs slots qui coexistent), **l'option A resserrée** (les slots non chevauchants SURVIVENT à l'accept), l'expiration, le plafond de 5, et le **job** |
 | `test_teams_linked.py` | B5c | `hasLinkedAccount` par membre dans `GET /teams/:id` + `unlinkedPlayers` dans le 400 |
+| `test_matches_result.py` | B6 | `POST /matches/:id/result` : machine à états §5.4 (accord → `completed` + ELO, désaccord → `disputed`), §5.3, et les 2 jobs 24 h (`B6_JOBS=1`) |
+| `test_disputes.py` | B7 | Les 4 routes `/disputes` : dépôt de preuve (garde de camp **avant** de révéler l'état, bornes multipart, bucket privé + URL présignée), arbitrage admin, job d'annulation neutre (`B7_JOBS=1`) |
+| `test_notifications.py` | B9 | Les 8 déclencheurs et leurs **destinataires** (alignés sauf l'acteur, banc exclu, admins), la pagination par curseur, `read`/`read-all` idempotents (`B9_JOBS=1`) |
+| `test_search.py` | SEARCH | `GET /search` : **tri global entrelacé** (une team avant un joueur), pagination de la liste **fusionnée** sans trou ni doublon, filtre `type`, casse et **Unicode** (`İ`), échappement des jokers, blocages dans les 2 sens, projection |
 
 Il existe aussi des **tests unitaires Vitest** pour les helpers purs (sans DB ni HTTP) :
 `tests/unit/` (elo, leaderboard, password) → `cd backend && npm test`.

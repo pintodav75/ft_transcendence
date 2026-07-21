@@ -2190,6 +2190,7 @@ export interface paths {
         /**
          * Lister les slots ouverts d'un ladder (anonyme)
          * @description Slots pending d'un ladder. Team créatrice ET maps masquées (anonymat) ; mes propres slots exclus. Ne renvoie que id / format / jeu / heure.
+         *     ⚠️ Les slots **périmés** (à moins de 15 min de leur heure) sont **masqués** : plus personne ne peut les accepter. Le job les passera à `cancelled` à sa prochaine passe (à la minute) ; en attendant, ils ne sont pas listés.
          */
         get: {
             parameters: {
@@ -2250,7 +2251,10 @@ export interface paths {
         put?: never;
         /**
          * Créer un slot de match (team ou solo 1v1)
-         * @description Ouvre un slot (match en attente d'adversaire). Deux modes selon le format du ladder : • **2v2+** : un **capitaine** engage sa team avec une **lineup** (team déduite du ladder). • **1v1** : le **créateur** s'engage **seul** (lineup ignorée, side sans team). Maps BO3 tirées à la création (3 distinctes pour val/cs2 ; [] sinon). Gardes §5.1 (compte externe lié) et §5.2 (slot ouvert unique + lockout temporel), appliquées à la team (2v2+) ou au joueur (1v1).
+         * @description Ouvre un slot (match en attente d'adversaire). Deux modes selon le format du ladder : • **2v2+** : un **capitaine** engage sa team avec une **lineup** (team déduite du ladder). • **1v1** : le **créateur** s'engage **seul** (lineup ignorée, side sans team). Maps BO3 tirées à la création (3 distinctes pour val/cs2 ; [] sinon).
+         *     **Gardes** : §5.1 (compte externe lié) · **§5.2 disponibilité par FENÊTRE** · grille horaire · plafond de 5 slots ouverts.
+         *     **§5.2 — le modèle des fenêtres.** Chaque match occupe `[scheduledAt, scheduledAt + lockout_minutes]` (60 min en 5v5, 30 ailleurs). Un camp ne peut pas être engagé dans deux matchs dont les fenêtres se **chevauchent**. **À la création**, les slots `pending` comptent autant que les matchs actifs : on ne peut pas *proposer* deux créneaux qui se chevauchent.
+         *     ⚠️ **Le « camp » est PAR LADDER** : en 2v2+ c'est la **team** ; en 1v1 c'est le couple **(joueur, ladder)**. Un joueur **peut donc** avoir un match d'échecs à 21h et un match Rocket League à 21h — c'est **assumé**. La plateforme n'observe pas les parties ; une absence se règle par **dispute → forfait**, et c'est une responsabilité humaine (le capitaine engage sa team en connaissance de cause). Les fenêtres qui se **touchent** ne se chevauchent PAS : on peut donc enchaîner 21h–22h puis 22h–23h. Une team peut ainsi ouvrir **21h, 23h et 01h** en même temps et planifier sa soirée.
          */
         post: {
             parameters: {
@@ -2264,7 +2268,11 @@ export interface paths {
                     "application/json": {
                         /** Format: uuid */
                         ladderId: string;
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description L'heure du match. **Doit tomber sur un quart fixe** (`:00`, `:15`, `:30`, `:45` — secondes et ms à 0) et être **au moins 15 minutes dans le futur** (borne incluse : à 20h45:00 on peut encore créer pour 21h ; à 20h45:01, non). C'est LA référence temporelle du match : §5.2 (disponibilité) et §5.3 (soumission de score) s'y réfèrent. `startedAt`, lui, n'enregistre que l'instant de l'acceptation — aucune règle ne le lit.
+                         * @example 2026-07-14T21:00:00.000Z
+                         */
                         scheduledAt: string;
                         /** @description **Requise en 2v2+** : exactement format_size joueurs (2 / 3 / 5), tous membres de la team, tous avec un compte lié pour le provider du jeu, sans doublon. **Ignorée en 1v1** (le participant = le créateur). */
                         lineup?: string[];
@@ -2302,13 +2310,13 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Body invalide (ValidationError) ; scheduledAt dans le passé ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors team ; §5.1 compte non lié (team ou solo) (Error). */
+                /** @description Body invalide (ValidationError) — dont **scheduledAt hors quart fixe** (ex. 21h07) ou **à moins de 15 min** ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors team (Error) ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple. */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["Error"];
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["UnlinkedPlayersError"] | components["schemas"]["Error"];
                     };
                 };
                 401: components["responses"]["Unauthorized"];
@@ -2330,7 +2338,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description §5.2 — la team a déjà un slot ouvert (pending), ou est en lockout (started_at + lockout_minutes non écoulé). */
+                /** @description **§5.2** — le camp a déjà un match (slot ouvert **ou** match actif) dont la fenêtre **chevauche** celle demandée (`your team already has a match around that time`) ; **ou** il a atteint le **plafond de 5 slots ouverts** sur ce ladder. Les slots périmés ne comptent dans aucun des deux. */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2348,6 +2356,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/matches/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Mes matchs (tous ladders, tous statuts)
+         * @description Les matchs qui **me concernent**, réunis depuis **deux sources** : • je suis dans `match_participants` → mes solos + les matchs où j'étais **aligné** ; • une de **mes teams** est engagée sur un side → y compris quand j'étais **sur le banc** (un membre du roster hors lineup n'a aucune ligne dans `match_participants` : sans cette seconde source il ne verrait pas le match de son équipe). Résultats dédoublonnés (un match d'équipe où j'ai joué remonte des deux sources) et triés du plus récent au plus ancien. **Rien n'est masqué ici** (maps visibles) — contrairement à `GET /matches?ladderId=`, ces matchs sont les miens.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Mes matchs (tableau vide si aucun — pas une 404) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            matches: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** Format: uuid */
+                                ladderId?: string;
+                                /** @example in_progress */
+                                status?: string;
+                                /** Format: date-time */
+                                scheduledAt?: string | null;
+                                /** Format: date-time */
+                                startedAt?: string | null;
+                                /**
+                                 * @example [
+                                 *       "Breeze",
+                                 *       "Split",
+                                 *       "Summit"
+                                 *     ]
+                                 */
+                                maps?: string[];
+                            }[];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/matches/{id}": {
         parameters: {
             query?: never;
@@ -2356,8 +2426,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Détail d'un match (participants only)
-         * @description Détail brut : sides (avec teamId), participants et maps. Réservé aux participants — **membre d'une team engagée** (2v2+) **OU joueur du match** (1v1). 403 sinon — préserve l'anonymat des slots ouverts.
+         * Détail enrichi d'un match (participants only)
+         * @description Détail complet, prêt à afficher : pour chaque side, son **id**, son **état de soumission** (`submittedAt`, `submittedWinnerSideId` — B6), l'**objet team** (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar), plus les maps. Sides **triés** (0 = créateur, 1 = accepteur). Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**) **OU joueur du match** (1v1). 403 sinon — préserve l'anonymat des slots ouverts.
          */
         get: {
             parameters: {
@@ -2385,16 +2455,61 @@ export interface paths {
                                 status?: string;
                                 /** Format: date-time */
                                 scheduledAt?: string | null;
+                                /** Format: date-time */
+                                startedAt?: string | null;
+                                /** Format: date-time */
+                                completedAt?: string | null;
+                                /**
+                                 * Format: uuid
+                                 * @description Side vainqueur une fois le match `completed` ; `null` sinon.
+                                 */
+                                winnerSideId?: string | null;
                                 maps?: string[];
                                 /** Format: date-time */
                                 createdAt?: string;
+                                /**
+                                 * Format: uuid
+                                 * @description Id de la dispute quand le match est `disputed` — le front l'utilise pour naviguer vers `GET /disputes/:id`. `null` dans tous les autres états.
+                                 */
+                                disputeId?: string | null;
                             };
                             sides: {
+                                /**
+                                 * Format: uuid
+                                 * @description Id du side — à renvoyer comme `winnerSideId` dans POST /matches/:id/result.
+                                 */
+                                id?: string;
                                 /** @example 0 */
                                 sideIndex?: number;
-                                /** Format: uuid */
-                                teamId?: string | null;
-                                participants?: string[];
+                                /**
+                                 * Format: date-time
+                                 * @description Instant où ce camp a soumis un résultat (B6) ; `null` sans soumission.
+                                 */
+                                submittedAt?: string | null;
+                                /**
+                                 * Format: uuid
+                                 * @description Vainqueur déclaré par CE camp ; `null` sans soumission.
+                                 */
+                                submittedWinnerSideId?: string | null;
+                                /** @description `null` en 1v1 (le côté est un joueur, pas une team). */
+                                team?: {
+                                    /** Format: uuid */
+                                    id?: string;
+                                    /** @example Los Ratones */
+                                    name?: string;
+                                    logoUrl?: string | null;
+                                    /** Format: uuid */
+                                    captainId?: string;
+                                } | null;
+                                /** @description La lineup engagée sur ce side (pas le roster entier). */
+                                players?: {
+                                    /** Format: uuid */
+                                    id?: string;
+                                    /** @example alice */
+                                    pseudo?: string;
+                                    displayName?: string | null;
+                                    avatarUrl?: string | null;
+                                }[];
                             }[];
                         };
                     };
@@ -2427,6 +2542,948 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Annuler son slot ouvert
+         * @description Passe le match à `cancelled` — on **n'efface pas** la ligne (l'historique est conservé). Réservé au **créateur**, c'est-à-dire au **side_index 0** : le **capitaine** de la team engagée (2v2+) ou le **joueur** du side (1v1). Idempotent (200 si déjà `cancelled`). L'update est **conditionnel** (`WHERE status = 'pending'`) : si quelqu'un accepte entre-temps → 409.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slot annulé (ou déjà annulé — idempotent) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @example true */
+                            ok: boolean;
+                        };
+                    };
+                };
+                /** @description Param :id non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Je ne suis pas le créateur (ni capitaine de la team engagée, ni le joueur solo) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Match inconnu */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Le match n'est plus `pending` (accepté, terminé…) — rien n'est écrasé */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/matches/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accepter un slot ouvert (engager le side 1)
+         * @description Engage le **second camp** d'un slot `pending`. Le côté de l'accepteur est validé **exactement comme celui du créateur** (même helper `validateSide`) : §5.1 compte externe lié, lineup (présente, de taille `format_size`, incluse dans le roster), garde capitaine, §5.2 lockout. • **2v2+** : un **capitaine d'une autre team** du même ladder, avec sa **lineup**. • **1v1** : le **joueur** s'engage seul (body facultatif, lineup ignorée). Effets (en **transaction**) : `status → in_progress`, `started_at = now()` (historique : l'instant de l'acceptation — **aucune règle ne le lit**, cf. §5.2), création du side 1 + ses participants, et **annulation des slots `pending` des deux camps QUI CHEVAUCHENT la fenêtre de ce match**.
+         *     ⚠️ **Seuls les slots qui chevauchent tombent.** Une team qui a planifié 21h / 23h / 01h et se fait accepter celui de 21h **garde** ceux de 23h et 01h : ils ne se recouvrent pas. (Annuler tous les slots ouverts, comme avant B5d, détruirait sa soirée.)
+         *     ⚠️ **À l'accept, seuls les matchs ACTIFS bloquent** — pas mes slots `pending`. Un slot n'est qu'une **proposition** : m'engager pour de bon la rend caduque, et elle est justement retirée ci-dessus. La compter comme un blocage me refuserait un match à cause d'une offre que je m'apprête moi-même à annuler.
+         *     L'update de statut est **conditionnel** : deux accepts simultanés → le second reçoit 409.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description Requis en 2v2+ (la lineup). **Aucun body en 1v1.** */
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description **Requise en 2v2+** : exactement format_size joueurs (2 / 3 / 5), tous membres de ma team, tous avec un compte lié pour le provider du jeu, sans doublon. **Ignorée en 1v1.** */
+                        lineup?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Match accepté — il démarre */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            match: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** Format: uuid */
+                                ladderId?: string;
+                                /** @example in_progress */
+                                status?: string;
+                                /** Format: date-time */
+                                startedAt?: string;
+                                /** Format: date-time */
+                                scheduledAt?: string | null;
+                                maps?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Body/param invalide (ValidationError) ; **on ne peut pas accepter son propre slot** (vérifié **par team** en 2v2+, **par user_id** en 1v1 — les deux sides y ont `team_id = NULL`) ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors roster ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["UnlinkedPlayersError"] | components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Seul le capitaine peut engager sa team */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Match, ladder ou jeu inconnu */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Quatre causes. (1) Le match n'est plus `pending` (déjà accepté, annulé, terminé). (2) **Slot PÉRIMÉ** : il reste moins de **15 minutes** avant l'heure du match. Le job d'expiration tourne à la minute, donc un slot peut être mort mais encore `pending` en base — cette garde ferme la fenêtre. (3) **Course perdue sur CE match** : deux camps l'acceptent au même instant → l'update conditionnel n'en laisse passer qu'un, le second reçoit 409. (4) **§5.2 disponibilité** : la fenêtre de ce match **chevauche** un autre **match actif** de l'accepteur (`LOCKING_STATUSES`) — y compris quand il vient de s'engager **ailleurs au même instant**. Ses propres slots `pending` qui chevauchent ne comptent PAS à l'accept (ce sont des propositions, retirées par l'option A quand il s'engage) — seuls les matchs actifs bloquent. Fermé par un **verrou transactionnel** sur l'identité des DEUX camps, pris dans un **ordre déterministe** (sinon deux acceptations croisées provoquent un **interblocage** Postgres → 500), suivi d'une re-vérification **dans** la transaction : le second accept attend, relit, est refusé. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/matches/{id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Soumettre le résultat d'un match (déclarer le vainqueur)
+         * @description Un camp déclare le **side gagnant** (`winnerSideId` = l'id d'un `match_sides`, PAS l'id du match). Qui peut soumettre : **capitaine** en 2v2+, **le joueur** en 1v1 (même règle que créer/accepter). Le match doit être `in_progress` ou `awaiting_confirmation`.
+         *     **§5.3** : impossible de soumettre **avant** l'heure prévue (`now() < scheduled_at` → 400) — la partie doit avoir commencé.
+         *     **Machine à états (§5.4)**, selon la soumission de l'AUTRE camp : • l'autre n'a pas encore soumis → **1re soumission** : `status → awaiting_confirmation`. • l'autre a soumis le **même** vainqueur → **accord** : `status → completed`, `winner_side_id` + `completed_at` posés, et **ELO appliqué** (K=32 ; la ligne `rankings` du compétiteur est créée à 1000 à son 1er match). Tout dans la même transaction. • l'autre a soumis un vainqueur **différent** → **désaccord** : `status → disputed` et une ligne `disputes` est ouverte (B7 prend le relais). Aucun ELO.
+         *     **Re-soumission** : tant que le match n'est pas résolu (`in_progress` ou `awaiting_confirmation`), un camp peut re-soumettre — sa précédente déclaration est **écrasée** et `submitted_at` est remis à maintenant, ce qui **redémarre sa fenêtre d'auto-confirmation de 24 h**.
+         *     Écritures sous **verrou consultatif** (clé = matchId) + re-lecture du statut **dans** la transaction : deux soumissions simultanées sont sérialisées.
+         *     ⏰ **Jobs 24 h liés** (planificateur) : un match `in_progress` sans aucune soumission 24 h après `scheduled_at` passe à `cancelled` ; un match `awaiting_confirmation` dont l'unique soumission date de +24 h (horloge sur `submitted_at`) est auto-confirmé (`completed` + ELO) sur ce score.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Id du **side** déclaré vainqueur — doit être l'un des deux sides de CE match. « Mon side » et le side vainqueur sont indépendants (on peut déclarer la victoire de l'adversaire).
+                         */
+                        winnerSideId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Soumission enregistrée — renvoie le nouveau statut du match */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "awaiting_confirmation" | "completed" | "disputed";
+                        };
+                    };
+                };
+                /** @description Body/param invalide (ValidationError) ; **§5.3** le match n'a pas encore commencé (`match not started yet`) ; ou `winnerSideId` n'est **pas un side de ce match**. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description L'appelant n'est pas habilité à soumettre (ni capitaine d'une team engagée, ni joueur solo du match). Vérifié **avant** l'état du match, pour ne pas donner d'oracle sur son statut à un non-participant. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Match inconnu */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Le match n'attend pas de résultat : il n'est ni `in_progress` ni `awaiting_confirmation` (déjà `completed` / `cancelled` / `disputed`, ou encore `pending`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/disputes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * File d'arbitrage — disputes ouvertes (admin)
+         * @description **Admin only** (`is_admin`) — liste les disputes encore `open`, **triées de la plus ancienne à la plus récente** (ordre de traitement). Chaque entrée porte le match, son ladder, l'heure prévue, la date d'ouverture et le **nombre de preuves déjà déposées**. C'est le point d'entrée de l'arbitre : sans lui, impossible de **découvrir** les litiges en attente sans connaître leur UUID.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Les disputes ouvertes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            disputes: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** Format: uuid */
+                                matchId?: string;
+                                /** Format: uuid */
+                                ladderId?: string;
+                                /** Format: date-time */
+                                scheduledAt?: string | null;
+                                /** Format: date-time */
+                                createdAt?: string;
+                                /** @example 2 */
+                                evidenceCount?: number;
+                            }[];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Réservé aux admins (`is_admin`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/disputes/{id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Déposer une preuve (image + message) sur une dispute
+         * @description Un camp dépose une **preuve** dans le fil : une **image obligatoire** (image/png, image/jpeg, image/webp — ≤ 5 Mo, stockée dans un **bucket MinIO privé**) **+ un message** d'explication. Réservé au **capitaine** (2v2+) / **joueur** (1v1) d'un des deux camps. Plusieurs posts par camp autorisés (le fil est un dialogue asynchrone). La dispute doit être encore `open`. Le fichier est **entièrement validé en mémoire avant tout upload** (message présent, type supporté) → aucun objet orphelin ; l'insert en base se fait sous **verrou** (clé = matchId) avec re-vérification `open` → aucune preuve n'atterrit sur une dispute close entre-temps. La garde de camp est vérifiée **avant** de révéler si la dispute est résolue (pas d'oracle d'état pour un inconnu).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description Image de preuve (image/png, image/jpeg, image/webp), ≤ 5 Mo.
+                         */
+                        evidence: string;
+                        /** @description Explication accompagnant la preuve. */
+                        message: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Preuve enregistrée. La réponse **n'expose pas** l'URL de la preuve (la colonne interne stocke une clé d'objet privée) : recharger `GET /disputes/{id}` pour obtenir l'URL présignée. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            evidence: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** Format: uuid */
+                                disputeId?: string;
+                                /** Format: uuid */
+                                matchSideId?: string;
+                                /** Format: uuid */
+                                submittedByUserId?: string | null;
+                                message?: string;
+                                /** Format: date-time */
+                                submittedAt?: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Param :id non-uuid (ValidationError) ; body pas en `multipart/form-data` ; image manquante, type non supporté ou champ fichier ≠ `evidence` ; message manquant/vide ; **structure hors bornes** (plus d'un fichier, plus d'un champ, ou plus de deux parties — une preuve = 1 image + 1 message). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Ni capitaine (2v2+) ni joueur (1v1) d'un des deux camps */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Dispute inconnue */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description La dispute n'est plus `open` (déjà résolue) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Fichier trop volumineux (> 5 Mo) */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/disputes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Détail d'une dispute + déclarations des camps + fil de preuves
+         * @description Rend l'état de la dispute (statut, résolution, note d'arbitrage, date), **ce que chaque camp a déclaré** (les `sides` : index, identité de la team ou du joueur, et `submittedWinnerSideId` = le vainqueur annoncé par ce camp) et le **fil de preuves trié par date** — chaque post avec son image, son message, son camp (`matchSideId`) et son auteur (pseudo/avatar). Ce sont les `sides` qui rendent l'arbitrage possible : l'admin voit qui est le side 0/1 et ce que chacun a annoncé, puis choisit `side_0_wins` / `side_1_wins`. Lecture ouverte à tout **participant du match** (banc compris, même garde que `GET /matches/:id`) **OU à un admin**. Projection explicite — aucun champ privé. Chaque `evidenceUrl` est une **URL présignée courte durée** (bucket privé), générée seulement après la garde. Reste consultable après résolution (historique).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Détail de la dispute */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            dispute: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** Format: uuid */
+                                matchId?: string;
+                                /** @enum {string} */
+                                status?: "open" | "resolved";
+                                /**
+                                 * @description `null` tant que la dispute est `open`.
+                                 * @enum {string|null}
+                                 */
+                                resolution?: "side_0_wins" | "side_1_wins" | "cancelled" | null;
+                                resolutionNotes?: string | null;
+                                /** Format: date-time */
+                                resolvedAt?: string | null;
+                            };
+                            /** @description Les deux camps, triés par `sideIndex` (0 = créateur, 1 = accepteur). `submittedWinnerSideId` = le side que CE camp a déclaré vainqueur (B6). */
+                            sides: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** @enum {integer} */
+                                sideIndex?: 0 | 1;
+                                /**
+                                 * Format: uuid
+                                 * @description Vainqueur annoncé par ce camp ; `null` si pas de soumission.
+                                 */
+                                submittedWinnerSideId?: string | null;
+                                /** @description `null` en 1v1 (pas de team). */
+                                team?: {
+                                    /** Format: uuid */
+                                    id?: string;
+                                    name?: string;
+                                    logoUrl?: string | null;
+                                    /** Format: uuid */
+                                    captainId?: string;
+                                } | null;
+                                players?: {
+                                    /** Format: uuid */
+                                    id?: string;
+                                    /** @example alice */
+                                    pseudo?: string;
+                                    displayName?: string | null;
+                                    avatarUrl?: string | null;
+                                }[];
+                            }[];
+                            /** @description Le fil, trié par `submittedAt` croissant. */
+                            evidence: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** Format: uuid */
+                                matchSideId?: string;
+                                /** @description URL présignée courte durée (bucket privé), valable ~5 min. */
+                                evidenceUrl?: string;
+                                message?: string | null;
+                                /** Format: date-time */
+                                submittedAt?: string;
+                                /** @description `null` si l'auteur a supprimé son compte. */
+                                author?: {
+                                    /** Format: uuid */
+                                    id?: string;
+                                    /** @example alice */
+                                    pseudo?: string;
+                                    displayName?: string | null;
+                                    avatarUrl?: string | null;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Param :id non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Ni participant du match (banc compris) ni admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Dispute inconnue */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/disputes/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Arbitrer une dispute (admin)
+         * @description **Admin only** (`is_admin`) — c'est LA sortie de l'état `disputed`. L'admin tranche : • `side_0_wins` / `side_1_wins` → match `completed` + **ELO** appliqué (helper partagé avec B6, K=32) ; • `cancelled` → match `cancelled`, **ELO inchangé** (cas où l'admin ne peut pas départager). La dispute passe `resolved` (résolution + note + arbitre + date), le match sort de `disputed` → **les deux camps sont libérés** (§5.2). **Définitif** : ré-arbitrer une dispute close → 409. Écrit sous **verrou consultatif** (clé = matchId, le même que `/matches/:id/result` et les jobs) + re-lecture sous verrou. Le **job 24 h** applique l'issue `cancelled` automatiquement si aucun admin ne passe.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description L'issue choisie par l'arbitre.
+                         * @enum {string}
+                         */
+                        resolution: "side_0_wins" | "side_1_wins" | "cancelled";
+                        /** @description Note de résolution (facultative), visible par les deux camps. */
+                        notes?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Dispute résolue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @example resolved */
+                            status: string;
+                            /** @enum {string} */
+                            resolution: "side_0_wins" | "side_1_wins" | "cancelled";
+                        };
+                    };
+                };
+                /** @description Param :id non-uuid ou `resolution` hors enum (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Réservé aux admins (`is_admin`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Dispute inconnue */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description La dispute est déjà résolue (ou le match n'est plus `disputed`) — course avec un autre arbitrage ou le job 24 h, rattrapée par la re-lecture sous verrou. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Mes notifications (paginées) + compteur non-lu
+         * @description Les notifications de l'utilisateur courant, **plus récentes d'abord**, paginées par **curseur** (keyset sur `(createdAt, id)` — un offset sauterait des lignes, la liste bouge en permanence). `unreadCount` compte TOUTES mes non-lues (pas seulement la page) : c'est le badge de la cloche. `nextCursor` = l'id à repasser en `cursor` pour la page suivante ; `null` quand on est au bout. Les 8 types possibles : `match_accepted`, `result_submitted`, `result_confirmed`, `dispute_opened`, `dispute_resolved`, `dispute_auto_cancelled`, `match_ghost_cancelled`, `dispute_needs_admin` (admins seulement). `data` est un payload **display-safe** (ids, heure — jamais d'email/hash) : `matchId` + `ladderId` toujours, `disputeId` (types dispute), `winnerSideId` (result_confirmed), `scheduledAt` (match_accepted), `resolution` (dispute_resolved).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    /** @description Id de la dernière notification de la page précédente (`nextCursor`). */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Mes notifications */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            notifications: {
+                                /** Format: uuid */
+                                id?: string;
+                                /** @enum {string} */
+                                type?: "match_accepted" | "result_submitted" | "result_confirmed" | "dispute_opened" | "dispute_resolved" | "dispute_auto_cancelled" | "match_ghost_cancelled" | "dispute_needs_admin";
+                                /** @description Payload display-safe (matchId, ladderId, …selon le type). */
+                                data?: Record<string, never>;
+                                /** Format: date-time */
+                                readAt?: string | null;
+                                /** Format: date-time */
+                                createdAt?: string;
+                            }[];
+                            /** @example 3 */
+                            unreadCount: number;
+                            /** Format: uuid */
+                            nextCursor: string | null;
+                        };
+                    };
+                };
+                /** @description `limit`/`cursor` invalides (ValidationError, schéma Zod), ou curseur inconnu — un curseur appartenant à un AUTRE user renvoie le même 400 (pas d'oracle). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"] | components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Marquer une notification comme lue
+         * @description **Idempotente** : re-marquer une notification déjà lue → 200 sans toucher `readAt` (on garde l'horodatage de la première lecture). N'agit que sur MES notifications : l'id d'un autre user → le **même 404** qu'un id inexistant (pas d'oracle).
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Notification marquée lue (ou déjà lue) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @example true */
+                            ok: boolean;
+                        };
+                    };
+                };
+                /** @description Param :id non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Notification inconnue OU appartenant à un autre utilisateur */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        trace?: never;
+    };
+    "/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Marquer toutes mes notifications comme lues
+         * @description Marque lues TOUTES mes notifications non-lues. **Idempotente** (deuxième appel : `updated: 0`). `updated` = nombre de notifications effectivement marquées.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Fait */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @example true */
+                            ok: boolean;
+                            /** @example 4 */
+                            updated: number;
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                500: components["responses"]["InternalError"];
+            };
+        };
+        trace?: never;
+    };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recherche globale préfixe (joueurs + teams)
+         * @description Cherche les **joueurs** (par `pseudo`) et les **teams** (par `name`) dont le nom **commence par** `q`, **insensible à la casse**. Résultats fusionnés en une seule liste, chaque item tagué `type: user | team`. **Exclut les blocages** (joueurs que j'ai bloqués OU qui m'ont bloqués — les teams ne sont pas filtrées). Jamais de champ privé (`email`, hash). Les jokers SQL (`%`, `_`) dans `q` sont échappés → traités comme du texte littéral.
+         *
+         *     **Filtre** (`type`), **tri** et **pagination** (`limit`/`offset`) s'appliquent à la **liste fusionnée**, pas à chaque source : joueurs et teams sont triés **ensemble** par nom (une team peut donc précéder un joueur) et `limit`/`offset` découpent ce résultat global. `limit` borne donc le **nombre total** d'items rendus. Les ex æquo sont départagés par `type` puis `id` : l'ordre est **total**, donc stable d'un appel à l'autre — condition nécessaire pour qu'`offset` ne saute ni ne duplique de résultat. `hasMore` indique s'il reste une page après celle-ci. Une page au-delà du total renvoie simplement une liste vide.
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description Préfixe recherché (trimé, 2 à 50 caractères). */
+                    q: string;
+                    /** @description Filtre par type. Absent → joueurs **et** teams. `user` → joueurs seulement, `team` → teams seulement. */
+                    type?: "user" | "team";
+                    /** @description Nombre maximum d'items rendus, toutes sources confondues. */
+                    limit?: number;
+                    /** @description Décalage dans la liste fusionnée et triée. */
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Résultats (liste vide si aucun match) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            results: ({
+                                /** @enum {string} */
+                                type: "user";
+                                /** Format: uuid */
+                                id: string;
+                                pseudo: string;
+                                displayName: string | null;
+                                avatarUrl: string | null;
+                            } | {
+                                /** @enum {string} */
+                                type: "team";
+                                /** Format: uuid */
+                                id: string;
+                                name: string;
+                                logoUrl: string | null;
+                                /** Format: uuid */
+                                ladderId: string;
+                            })[];
+                            /** @description `true` s'il existe au moins un résultat après cette page (`offset + limit`). Permet au front de savoir s'il doit proposer « voir plus » sans avoir à compter le total. */
+                            hasMore: boolean;
+                        };
+                    };
+                };
+                /** @description `q` manquant, trop court (< 2) ou trop long (> 50) ; `type` hors enum ; `limit` hors 1-50 ou non numérique ; `offset` négatif. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
                 500: components["responses"]["InternalError"];
             };
         };
@@ -2672,6 +3729,11 @@ export interface components {
             /** @enum {string} */
             format: "1v1" | "2v2" | "3v3" | "5v5";
             gameId: string;
+            /**
+             * @description Le provider imposé par le JEU de ce ladder (§5.1). Le front sait ainsi quel message afficher (« compte Riot non lié ») pour les membres non sélectionnables.
+             * @enum {string}
+             */
+            requiredProvider: "riot" | "steam" | "epic" | "chess_com";
             /** Format: uuid */
             captainId: string;
             logoUrl: string | null;
@@ -2684,6 +3746,14 @@ export interface components {
             displayName: string | null;
             avatarUrl: string | null;
             isCaptain: boolean;
+            /** @description §5.1 — ce membre a-t-il un compte lié pour le `requiredProvider` du jeu ? `false` = **non sélectionnable dans une lineup** → le front le grise AVANT que le capitaine ne compose son équipe (prévenir plutôt que refuser). */
+            hasLinkedAccount: boolean;
+        };
+        /** @description 400 spécifique au §5.1 en 2v2+ : un ou plusieurs joueurs de la lineup n'ont pas de compte lié. `unlinkedPlayers` dit **lesquels** — sans lui, le capitaine devrait deviner parmi ses 5 sélectionnés. */
+        UnlinkedPlayersError: {
+            /** @example every selected player must have a linked riot account */
+            error: string;
+            unlinkedPlayers: string[];
         };
     };
     responses: {

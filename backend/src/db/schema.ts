@@ -34,6 +34,14 @@ export const disputeResolutionEnum = pgEnum('dispute_resolution_enum', [
   'cancelled',
 ]);
 
+// ⚠️ INDEX EXISTANTS HORS SCHÉMA (posés en migration custom, invisibles ici) :
+//   - 0015 `users_pseudo_lower_unique`      : unique sur lower(pseudo), unicité insensible à la casse
+//   - 0018 `users_pseudo_lower_prefix_idx`  : lower(pseudo) text_pattern_ops, recherche préfixe GET /search
+//   - 0018 `teams_name_lower_prefix_idx`    : idem sur teams.name
+// Drizzle ne sait pas exprimer proprement une classe d'opérateurs sur une expression :
+// ils ne sont donc PAS dans les snapshots. `generate` les ignore (il ne diffe que
+// schema.ts contre le snapshot), mais un `drizzle-kit push` — qui aligne la BASE sur
+// le schéma — les SUPPRIMERAIT sans prévenir. On n'utilise que `generate` + `migrate`.
 export const usersTable = pgTable(
   'users',
   {

@@ -127,6 +127,13 @@
       "when": 1784610485236,
       "tag": "0017_easy_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784651826885,
+      "tag": "0018_search_prefix_indexes",
+      "breakpoints": true
     }
   ]
 }
