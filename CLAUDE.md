@@ -23,7 +23,7 @@
 
 ---
 
-## 🧩 Modules choisis (15 points)
+## 🧩 Modules choisis (16 points)
 
 | Module                                         | Type  | Points | État                                   |
 | ---------------------------------------------- | ----- | ------ | -------------------------------------- |
@@ -37,7 +37,8 @@
 | 2FA TOTP                                       | Minor | 1      | ✅                                     |
 | File upload                                    | Minor | 1      | ✅ (avatar MinIO)                      |
 | Notification system                            | Minor | 1      | ✅ (B9)                                |
-| **TOTAL**                                      |       | **15** |                                        |
+| **Advanced search**                            | Minor | **1**  | ✅ **vérifié PDF 22/07** — `GET /search` (filtres + tri + pagination) |
+| **TOTAL**                                      |       | **16** |                                        |
 
 ### 🚨 Pourquoi « Game stats & match history » a disparu
 
@@ -45,7 +46,7 @@
 
 Sans remplacement, l'équipe tombait à **13 points → sous la barre des 14 → projet rejeté.**
 
-Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/supprimer des organisations et gérer leurs membres — c'est **exactement** ce que font nos teams (B5a : création, roster, capitaine, kick/quit, dissolution). **Zéro ligne de code à écrire**, juste à le déclarer dans le README et savoir le défendre.
+Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/supprimer des organisations et gérer leurs membres — c'est **exactement** ce que font nos teams (B5a : création, roster, capitaine, kick/quit, dissolution). Au 13/07 on le croyait **gratuit** — en réalité l'**édition** manquait : elle a coûté un ticket (**B-Org**, `PATCH /teams/:id`). Le module est complet depuis.
 
 ✅ **Vérifié contre le PDF du sujet (David, 22/07)** : « Organization system » est bien un **Major à 2 points** et notre implémentation teams y répond. Le sujet exige *create, **edit**, delete* — l'édition manquait, elle a été livrée par **B-Org** (`PATCH /teams/:id`, merge `3be19b7`). **Les 15 points sont confirmés**, ne plus écrire « sous réserve » à propos de ce module.
 
@@ -53,9 +54,9 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 ### Candidats de réserve (marge)
 
-- **Advanced permissions / roles** (Major, 2 pts) — s'appuierait sur l'**arbitrage admin des disputes** (ticket **B7**). ⚠️ À vérifier dans le sujet : un booléen `is_admin` suffit-il, ou faut-il de **vrais rôles assignables** ? Si ça colle, quasi gratuit une fois B7 fait → 17 pts.
+- **Advanced permissions / roles** (Major, 2 pts) — s'appuierait sur l'**arbitrage admin des disputes** (ticket **B7**). ⚠️ À vérifier dans le sujet : un booléen `is_admin` suffit-il, ou faut-il de **vrais rôles assignables** ? Si ça colle, quasi gratuit une fois B7 fait → 18 pts.
 - **Public API** (Major, 2 pts) — 20+ endpoints, rate-limit et `openapi.yaml` déjà là ; il manquerait une **clé d'API**. ⚠️ Le seul qui coûte du **vrai code neuf** → à ne prendre que s'il reste du temps.
-- Mineurs : Advanced search (1), Custom design system (1), GDPR (1 — la suppression de compte existe déjà), i18n (1).
+- Mineurs : Custom design system (1), GDPR (1 — la suppression de compte existe déjà), i18n (1). *(Advanced search est **compté dans le tableau** depuis le 22/07, il n'est plus en réserve.)*
 
 ---
 
@@ -493,7 +494,7 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 **Backend — B5d et B6 mergés sur `master`** (B6 : merge `f9128bf`, review Walid approuvée, 246 ✅ / 0 ❌ ; 46 avec les jobs). Disponibilité par fenêtre (B5d) et soumission de résultats + ELO + jobs 24 h (B6) en place. La table `rankings` **se remplit désormais** dès qu'un match est `completed` → le leaderboard renvoie de vrais classements. Aussi mergé : `fix/cors-methods` (CORS `methods` explicite → débloque tous les DELETE/PATCH depuis le navigateur).
 
 - ✅ **B7 — disputes : MERGÉ sur master** (merge `15238e7`, commit `5900d23`, 3 passes de review Walid traitées). Décisions actées : timeout neutre, dépôt capitaine-seul, MIME = limite connue → la règle du timeout reste **à écrire dans la ToS ([FT])**.
-- **B9 — notifications : MERGÉ** (merge `88c33e8`, commit `eca332d`, carte Trello #51). Livré : migration `0016` (enum + table `notifications`), `utils/notification-schemas.ts` (schémas Zod par type, purs/sans DB) + `utils/notifications.ts` (`notify<T>` validé + dans la tx / `pushNotifications` après commit), `routes/notifications.ts` (3 routes : liste paginée par curseur + `unreadCount`, read idempotent sans oracle, read-all), event WS `notification` sur `/ws/chat` (`sendToUser` exporté), **8 déclencheurs** câblés dans `matches.ts` (accept, result × 3 issues), `disputes.ts` (resolve) et les 3 jobs 24 h, `openapi.yaml`. **3 correctifs de review appliqués** (spam re-soumission, validation Zod à l'écriture, pagination sur multiple exact) — détail dans la section Notifications ci-dessus. `test_notifications.py` (**81 ✅ / 0 ❌ avec `B9_JOBS=1`**), Vitest **19/19**. Au passage : fix d'un bug `helpers.py cleanup()` cassé depuis des jours (270 users/325 matchs de test jamais nettoyés). Le module **Notification system (1 pt)** passe au vert → **15 pts atteints** (« Organization system » vérifié contre le PDF le 22/07 — plus aucune réserve).
+- **B9 — notifications : MERGÉ** (merge `88c33e8`, commit `eca332d`, carte Trello #51). Livré : migration `0016` (enum + table `notifications`), `utils/notification-schemas.ts` (schémas Zod par type, purs/sans DB) + `utils/notifications.ts` (`notify<T>` validé + dans la tx / `pushNotifications` après commit), `routes/notifications.ts` (3 routes : liste paginée par curseur + `unreadCount`, read idempotent sans oracle, read-all), event WS `notification` sur `/ws/chat` (`sendToUser` exporté), **8 déclencheurs** câblés dans `matches.ts` (accept, result × 3 issues), `disputes.ts` (resolve) et les 3 jobs 24 h, `openapi.yaml`. **3 correctifs de review appliqués** (spam re-soumission, validation Zod à l'écriture, pagination sur multiple exact) — détail dans la section Notifications ci-dessus. `test_notifications.py` (**81 ✅ / 0 ❌ avec `B9_JOBS=1`**), Vitest **19/19**. Au passage : fix d'un bug `helpers.py cleanup()` cassé depuis des jours (270 users/325 matchs de test jamais nettoyés). Le module **Notification system (1 pt)** passe au vert. **Total : 16 pts** depuis que « Advanced search » est compté (22/07) — soit **2 points de marge** au-dessus de la barre des 14, au lieu d'un seul.
 
 - ✅ **BA1 — changer son mot de passe : MERGÉ** (merge `37c4e8c`, commit `9c1ae0b`, review Walid approuvée). `PATCH /users/me/password` — détail dans la section Auth & user ci-dessus.
 
