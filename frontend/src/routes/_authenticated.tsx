@@ -1,8 +1,9 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
-import Index from '@/pages/index';
+
+import { AuthenticatedLayout } from '@/components/layout/AuthenticatedLayout';
 import { useAuthStore } from '@/stores/auth-store';
 
-export const Route = createFileRoute('/')({
+export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async () => {
     const { ready, restoreSession } = useAuthStore.getState();
 
@@ -10,9 +11,9 @@ export const Route = createFileRoute('/')({
       await restoreSession();
     }
 
-    if (useAuthStore.getState().user) {
-      throw redirect({ to: '/home' });
+    if (!useAuthStore.getState().user) {
+      throw redirect({ to: '/' });
     }
   },
-  component: Index,
+  component: AuthenticatedLayout,
 });
