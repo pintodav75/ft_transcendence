@@ -9,6 +9,7 @@ import {
   userExternalAccountsTable,
 } from '../db/schema.js';
 import { eq, and, count, inArray } from 'drizzle-orm';
+import { notify, pushNotifications } from '../utils/notifications.js';
 import z from 'zod';
 
 const createTeamSchema = z.object({
@@ -249,19 +250,40 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         if (!team) return reply.code(404).send({ error: 'no team found' });
         if (team.captainId !== captainId)
           return reply.code(403).send({ error: 'only the captain can add members' });
-        const [user] = await db.select().from(usersTable).where(eq(usersTable.id, data.userId));
-        if (!user) return reply.code(404).send({ error: 'user not found' });
+        // Les deux users en UNE requête : la cible (pour le 404) et le capitaine (dont le
+        // pseudo part dans la notif). Deux SELECT séparés feraient un aller-retour de plus
+        // sur une route qui n'en a pas besoin.
+        const people = await db
+          .select({ id: usersTable.id, pseudo: usersTable.pseudo })
+          .from(usersTable)
+          .where(inArray(usersTable.id, [captainId, data.userId]));
+        const target = people.find((p) => p.id === data.userId);
+        const actor = people.find((p) => p.id === captainId);
+        if (!target) return reply.code(404).send({ error: 'user not found' });
+        if (!actor) return reply.code(500).send({ error: 'Internal error' });
         const [row] = await db
           .select({ total: count() })
           .from(teamMembersTable)
           .where(eq(teamMembersTable.teamId, teamId));
         if (!row) return reply.code(500).send({ error: 'Internal error' });
         if (row.total >= 10) return reply.code(409).send({ error: 'team is full' });
-        await db.insert(teamMembersTable).values({
-          teamId,
-          userId: data.userId,
-          ladderId: team.ladderId,
+        // B9 — notif DANS la transaction métier (atomique avec l'adhésion), push APRÈS le
+        // commit. Destinataire : le joueur ajouté, jamais le capitaine qui agit.
+        const notifs = await db.transaction(async (tx) => {
+          await tx.insert(teamMembersTable).values({
+            teamId,
+            userId: data.userId,
+            ladderId: team.ladderId,
+          });
+          return notify(tx, [data.userId], 'team_member_added', {
+            teamId,
+            teamName: team.name,
+            ladderId: team.ladderId,
+            byUserId: actor.id,
+            byPseudo: actor.pseudo,
+          });
         });
+        pushNotifications(notifs);
         return reply.code(201).send({ ok: true });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
@@ -282,6 +304,20 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
             return reply.code(409).send({ error: 'already in a team on this ladder' });
           return reply.code(409).send({ error: 'conflict' });
         }
+        // L'équipe a été dissoute entre la lecture et l'insertion : la clé étrangère
+        // vers `teams` échoue (SQLSTATE 23503). C'est le cas que le `FOR UPDATE` de la
+        // dissolution rend désormais atteignable — il doit sortir en 404 « équipe
+        // introuvable », pas en 500 : rien n'a planté, la cible a simplement disparu.
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'cause' in error &&
+          typeof error.cause === 'object' &&
+          error.cause !== null &&
+          'code' in error.cause &&
+          error.cause.code === '23503'
+        )
+          return reply.code(404).send({ error: 'no team found' });
         return reply.code(500).send({ error: 'Internal error' });
       }
     },
@@ -299,9 +335,38 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           return reply.code(403).send({ error: 'no authorization' });
         if (targetId === team.captainId)
           return reply.code(400).send({ error: 'captain cannot leave, dissolve the team instead' });
-        await db
-          .delete(teamMembersTable)
-          .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, targetId)));
+
+        // Cette route sert À LA FOIS le kick (capitaine) et le départ volontaire.
+        // On ne notifie QUE le kick : si le joueur part de lui-même il est l'acteur, et
+        // la règle B9 est « jamais l'acteur ».
+        const isKick = me !== targetId;
+        const actor = isKick
+          ? (
+              await db
+                .select({ id: usersTable.id, pseudo: usersTable.pseudo })
+                .from(usersTable)
+                .where(eq(usersTable.id, me))
+            )[0]
+          : undefined;
+
+        const notifs = await db.transaction(async (tx) => {
+          // ⚠️ `.returning()` : la route est IDEMPOTENTE (retirer un non-membre rend 200).
+          // Sans ce garde, on notifierait « tu as été exclu » à quelqu'un qui n'a jamais
+          // été dans l'équipe. On ne notifie que si une ligne a réellement disparu.
+          const deleted = await tx
+            .delete(teamMembersTable)
+            .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, targetId)))
+            .returning({ id: teamMembersTable.id });
+          if (deleted.length === 0 || !isKick || !actor) return [];
+          return notify(tx, [targetId], 'team_member_removed', {
+            teamId,
+            teamName: team.name,
+            ladderId: team.ladderId,
+            byUserId: actor.id,
+            byPseudo: actor.pseudo,
+          });
+        });
+        pushNotifications(notifs);
         return reply.code(200).send({ ok: true });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
@@ -316,11 +381,66 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       try {
         const me = request.user.sub;
         const { id: teamId } = idParamSchema.parse(request.params);
-        const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
-        if (!team) return reply.code(404).send({ error: 'team not found' });
-        if (team.captainId !== me)
-          return reply.code(403).send({ error: 'only the captain can dissolve the team' });
-        await db.delete(teamsTable).where(eq(teamsTable.id, teamId));
+
+        const [actor] = await db
+          .select({ id: usersTable.id, pseudo: usersTable.pseudo })
+          .from(usersTable)
+          .where(eq(usersTable.id, me));
+        if (!actor) return reply.code(500).send({ error: 'Internal error' });
+
+        // ⚠️ TOUT se joue DANS la transaction, sous verrou de ligne — piège #14.
+        // Lire la team AVANT la transaction laissait passer deux dissolutions
+        // simultanées : les deux lisaient le même roster, une seule supprimait
+        // réellement, mais les deux notifiaient. Chaque membre recevait DEUX
+        // `team_disbanded` (reproduit 5 fois sur 5 avec deux DELETE concurrents).
+        const outcome = await db.transaction(async (tx) => {
+          // `FOR UPDATE` sérialise les dissolutions concurrentes : la seconde attend,
+          // puis ne retrouve plus la ligne et sort en 404 sans rien notifier. Il fait
+          // aussi patienter un ajout de membre concurrent, dont la vérification de clé
+          // étrangère prend un verrou sur cette même ligne.
+          const [team] = await tx
+            .select()
+            .from(teamsTable)
+            .where(eq(teamsTable.id, teamId))
+            .for('update');
+          if (!team) return { ok: false as const, status: 404, error: 'team not found' };
+          if (team.captainId !== me)
+            return {
+              ok: false as const,
+              status: 403,
+              error: 'only the captain can dissolve the team',
+            };
+
+          // 🔑 Roster lu APRÈS le verrou et AVANT le DELETE : la suppression CASCADE
+          // sur `team_members`, et plus aucun ajout ne peut s'intercaler entre les deux.
+          const members = await tx
+            .select({ userId: teamMembersTable.userId })
+            .from(teamMembersTable)
+            .where(eq(teamMembersTable.teamId, teamId));
+
+          const deleted = await tx
+            .delete(teamsTable)
+            .where(eq(teamsTable.id, teamId))
+            .returning({ id: teamsTable.id });
+          // Sous verrou ce cas ne peut plus se produire ; le garde reste pour que la
+          // règle « on ne notifie jamais une dissolution qui n'a pas eu lieu » soit
+          // portée par le code et pas seulement par le raisonnement.
+          if (deleted.length === 0) return { ok: true as const, notifs: [] };
+
+          // Tout le roster SAUF le capitaine : c'est lui qui dissout, il le sait déjà.
+          const recipients = members.map((m) => m.userId).filter((id) => id !== me);
+          const notifs = await notify(tx, recipients, 'team_disbanded', {
+            teamId,
+            teamName: team.name,
+            ladderId: team.ladderId,
+            byUserId: actor.id,
+            byPseudo: actor.pseudo,
+          });
+          return { ok: true as const, notifs };
+        });
+
+        if (!outcome.ok) return reply.code(outcome.status).send({ error: outcome.error });
+        pushNotifications(outcome.notifs);
         return reply.code(200).send({ ok: true });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });

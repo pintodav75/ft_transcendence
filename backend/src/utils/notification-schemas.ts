@@ -71,6 +71,31 @@ export const notificationPayloadSchemas = {
     byUserId: uuidField,
     byPseudo: z.string(),
   }),
+  // Équipe (B11) — même forme pour les trois : de qui vient l'action (`by*`) et sur quelle
+  // équipe. `teamName` est un INSTANTANÉ, indispensable pour `team_disbanded` : l'équipe
+  // n'existe plus au moment où le destinataire lit sa notif, on ne pourra plus la relire.
+  // `ladderId` survit à la dissolution et permet au front de renvoyer vers le ladder.
+  team_member_added: z.strictObject({
+    teamId: uuidField,
+    teamName: z.string(),
+    ladderId: uuidField,
+    byUserId: uuidField,
+    byPseudo: z.string(),
+  }),
+  team_member_removed: z.strictObject({
+    teamId: uuidField,
+    teamName: z.string(),
+    ladderId: uuidField,
+    byUserId: uuidField,
+    byPseudo: z.string(),
+  }),
+  team_disbanded: z.strictObject({
+    teamId: uuidField,
+    teamName: z.string(),
+    ladderId: uuidField,
+    byUserId: uuidField,
+    byPseudo: z.string(),
+  }),
 } as const satisfies Record<NotificationType, z.ZodType>;
 
 export type NotificationPayload<T extends NotificationType> = z.infer<

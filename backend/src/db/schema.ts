@@ -335,7 +335,7 @@ export const rankingsTable = pgTable(
 );
 
 // ⚠️ `export` obligatoire (piège #8) : un enum non exporté n'est pas vu par drizzle-kit
-// → migration cassée. Les 8 valeurs = les 8 déclencheurs de B9 (cf. carte Trello).
+// → migration cassée. 13 valeurs : les 8 déclencheurs de B9, +2 social (#53), +3 équipe (B11).
 export const notificationTypeEnum = pgEnum('notification_type', [
   'match_accepted',
   'result_submitted',
@@ -349,6 +349,12 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // notifs pour TOUTES les actions, pas seulement le cœur match/dispute).
   'friend_request_received',
   'friend_request_accepted',
+  // Équipe (B11) — `teams.ts` était le seul fichier métier à ne jamais notifier.
+  // ⚠️ Pas de `team_created` : personne d'autre que le créateur n'est concerné, et la
+  // règle B9 est « jamais l'acteur ». Pas de notif d'édition non plus (trop cosmétique).
+  'team_member_added',
+  'team_member_removed',
+  'team_disbanded',
 ]);
 
 export const notificationsTable = pgTable(
