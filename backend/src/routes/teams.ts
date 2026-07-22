@@ -19,6 +19,45 @@ const addMemberSchema = z.object({ userId: z.uuid() });
 const idParamSchema = z.object({ id: z.uuid() });
 const memberParamsSchema = z.object({ id: z.uuid(), userId: z.uuid() });
 
+// Édition d'une team : les deux champs sont optionnels (`.partial()`), mais la route
+// refuse un corps vide. `name` suit la même règle qu'à la création.
+// `logoUrl` accepte `null` pour RETIRER le logo. C'est une URL, pas un upload :
+// l'envoi d'un fichier de logo vers MinIO (comme l'avatar) serait un ticket à part.
+//
+// ⚠️ `z.url()` seul valide une URI SYNTAXIQUE, pas une URL Web : il accepte
+// `javascript:alert(1)` et `ftp://…`. On restreint donc explicitement le protocole à
+// http/https. Il n'y a pas d'exécution côté backend et un `<img src>` moderne ne rend
+// pas un `javascript:` dangereux — mais la valeur est PERSISTÉE, et le jour où elle
+// atterrit dans un `<a href>`, du CSS ou un autre contexte de rendu, elle le devient.
+// On refuse à l'entrée plutôt que de compter sur chaque futur consommateur.
+// (Le protocole est normalisé en minuscules par WHATWG URL → `HTTPS://` passe.)
+const updateTeamSchema = z
+  .object({
+    name: z.string().trim().min(1).max(50),
+    logoUrl: z.url({ protocol: /^https?$/ }).max(2048).nullable(),
+  })
+  .partial();
+
+/**
+ * Si l'erreur est une violation d'unicité Postgres (SQLSTATE 23505), rend le nom de la
+ * contrainte violée ; sinon `undefined`. Évite de redupliquer le déballage de
+ * `error.cause` (Drizzle emballe l'erreur du driver) à chaque route.
+ */
+function uniqueViolationConstraint(error: unknown): string | undefined {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'cause' in error &&
+    typeof error.cause === 'object' &&
+    error.cause !== null &&
+    'code' in error.cause &&
+    error.cause.code === '23505'
+  ) {
+    return 'constraint_name' in error.cause ? String(error.cause.constraint_name) : 'unknown';
+  }
+  return undefined;
+}
+
 export const teamsRoutes: FastifyPluginAsync = async (server) => {
   server.post('/', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
@@ -153,6 +192,47 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         return reply.code(200).send({ team: teamSafe, members: membersSafe });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
+        return reply.code(500).send({ error: 'Internal error' });
+      }
+    },
+  );
+  // PATCH /teams/:id — ÉDITER l'organisation (nom et/ou logo), capitaine only.
+  // Complète le module « Organization system » du sujet : « Create, EDIT, and delete
+  // organizations » — la création et la dissolution existaient, l'édition manquait.
+  server.patch<{ Params: { id: string } }>(
+    '/:id',
+    { onRequest: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const me = request.user.sub;
+        const { id: teamId } = idParamSchema.parse(request.params);
+        const data = updateTeamSchema.parse(request.body);
+        // `.partial()` accepte {} : sans ce garde on ferait un UPDATE qui ne change rien.
+        if (Object.keys(data).length === 0)
+          return reply.code(400).send({ error: 'no fields to update' });
+
+        const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
+        if (!team) return reply.code(404).send({ error: 'team not found' });
+        if (team.captainId !== me)
+          return reply.code(403).send({ error: 'only the captain can edit the team' });
+
+        const [updated] = await db
+          .update(teamsTable)
+          .set(data)
+          .where(eq(teamsTable.id, teamId))
+          .returning();
+        if (!updated) return reply.code(404).send({ error: 'team not found' });
+        return reply.code(200).send({ team: updated });
+      } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
+        // Renommer vers un nom déjà pris sur ce ladder viole unique(ladder_id, name) :
+        // même traitement qu'à la création -> 409, pas 500.
+        const constraint = uniqueViolationConstraint(error);
+        if (constraint) {
+          if (constraint === 'teams_ladder_name_unique')
+            return reply.code(409).send({ error: 'team name already taken on this ladder' });
+          return reply.code(409).send({ error: 'conflict' });
+        }
         return reply.code(500).send({ error: 'Internal error' });
       }
     },
