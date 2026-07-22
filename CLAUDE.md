@@ -413,7 +413,7 @@ Tests re-vérifiés après tous les correctifs : `tsc` propre, Vitest **19/19** 
 ### Code
 
 - **TypeScript strict** partout (`strict`, `noUncheckedIndexedAccess`…)
-- **ESM** (`"type": "module"`), **Node 24 LTS**
+- **ESM** (`"type": "module"`), **Node 24 LTS** : lancer `nvm use` à la racine (`.nvmrc` = `24`) ; frontend et backend déclarent `engines.node: ">=24 <25"`
 - Imports nommés > default ; validation systématique **Zod** côté API
 - Front : tokens Tailwind depuis `frontend/src/index.css`, composants UI dans `frontend/src/components/ui`, imports `@/...`, pas de couleurs en dur dans les pages
 
@@ -487,6 +487,8 @@ Tests re-vérifiés après tous les correctifs : `tsc` propre, Vitest **19/19** 
 
 ```bash
 cd ~/transcendence
+nvm use                           # sélectionne Node 24 depuis .nvmrc
+node --version                    # doit afficher v24.x
 docker compose up -d --build      # construire et démarrer toute l'application
 docker compose ps                 # état
 docker compose logs -f <service>  # logs
@@ -504,6 +506,8 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 **Infrastructure — I2 et I3 mergés sur `master`** : images Compose figées et lancement autonome avec `docker compose up -d --build`. Prévenir l'équipe que le premier démarrage après mise à jour peut lancer un `npm ci` plus long pour resynchroniser les anciens volumes `node_modules` ; les démarrages suivants redeviennent rapides.
 
+**Infrastructure — alignement Node 24 (`chore/node-24-toolchain`)** : `.nvmrc` racine + `engines.node` identique dans les manifests frontend/backend. Les Dockerfiles étaient déjà sur `node:24-alpine`. Les lockfiles ne reflètent que cette métadonnée racine, sans mise à jour de dépendance directe ou transitive. Validé avec Node `v24.18.0` / npm `11.16.0` : `npm ci` des deux projets, backend `tsc --noEmit` + Vitest **20/20**, frontend build + lint **0 erreur** (2 warnings Fast Refresh préexistants sur `master`).
+
 **Backend — B5d et B6 mergés sur `master`** (B6 : merge `f9128bf`, review Walid approuvée, 246 ✅ / 0 ❌ ; 46 avec les jobs). Disponibilité par fenêtre (B5d) et soumission de résultats + ELO + jobs 24 h (B6) en place. La table `rankings` **se remplit désormais** dès qu'un match est `completed` → le leaderboard renvoie de vrais classements. Aussi mergé : `fix/cors-methods` (CORS `methods` explicite → débloque tous les DELETE/PATCH depuis le navigateur).
 
 - ✅ **B7 — disputes : MERGÉ sur master** (merge `15238e7`, commit `5900d23`, 3 passes de review Walid traitées). Décisions actées : timeout neutre, dépôt capitaine-seul, MIME = limite connue → la règle du timeout reste **à écrire dans la ToS ([FT])**.
@@ -511,12 +515,12 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 - ✅ **BA1 — changer son mot de passe : MERGÉ** (merge `37c4e8c`, commit `9c1ae0b`, review Walid approuvée). `PATCH /users/me/password` — détail dans la section Auth & user ci-dessus.
 
-**Frontend — F0-B, Fast Refresh, FR1 Register, F0-D, F-Nav, FR2 Login + 2FA et FL Landing publique mergés ; F0-C implémenté sur `feature/f0c-authenticated-shell-guard`.**
+**Frontend — F0-B, Fast Refresh, FR1 Register, F0-D, F-Nav, FR2 Login + 2FA, FL Landing publique et F0-C mergés.**
 
 - Register complet et mergé : validation, inscription classique, erreurs backend, Google OAuth, session et redirection `/home` testés avec le backend réel.
 - **F-Nav mergé** (commit `feat(frontend): partial F-nav`) : coquille de navigation (rails `LeftNav`/`RightNav`, `AuthNav`, `Logo`), pages **Mes équipes** + **Détail équipe** (création, roster, kick/quit/dissolve — consomme B5a), page **Ranking** (`RankingTable` consomme B2), sélecteur `LadderSelect`, et **codegen OpenAPI** (`api-types.gen.ts`). Détail dans la section Frontend plus haut.
 - **FL mergé** (merge `85e1c76`) : vitrine publique `/` (cartes de jeux alimentées par `GET /games`, CTA login/register, footer PP/ToS, `LandingNav` distincte de `LeftNav`). ⚠️ Mergée **avec sa dette** — voir « Défauts connus » et la note FL en bas de fichier.
-- **F0-C prêt pour review** : shell authentifié trois colonnes + garde unique sur la route layout `_authenticated`; `/home`, `/games`, `/profile`, `/ranking` et `/teams` sont protégés, les visiteurs sont renvoyés vers `/`, tandis qu'un utilisateur connecté sur `/` est redirigé vers `/home`. L'ancien `/dashboard` a été supprimé. Build, lint et parcours manuels connecté/déconnecté validés.
+- **F0-C mergé** (merge `9d3b97c`, commit `7abdb3f`) : shell authentifié trois colonnes + garde unique sur la route layout `_authenticated`; `/home`, `/games`, `/profile`, `/ranking` et `/teams` sont protégés, les visiteurs sont renvoyés vers `/`, tandis qu'un utilisateur connecté sur `/` est redirigé vers `/home`. L'ancien `/dashboard` a été supprimé. Build/lint à 0 erreur et 0 warning. ⚠️ Le reload d'une session connectée reste bloqué par le contexte cross-scheme HTTP/HTTPS de dev et est suivi dans I4 : https://trello.com/c/wvEfFTVq.
 - **Tickets frontend suivants** :
   - **Recherche + ajout de membre** : le back de recherche est **fait** — c'est **`GET /search?q=`** (préfixe joueurs + teams, réponse taggée `type`), **pas** `GET /users?search=`. Câbler `SearchBar` (tenu à l'écart, local) dessus → décommenter le bloc « Add member » + `addMember` de `team-detail.tsx`. ⚠️ Le `SearchBar` stashé tapait `GET /users?search=` : adapter l'URL + le parsing (la réponse est `{ results: [...] }` taggée, pas une liste d'users brute).
   - **Page `/profile`** (stub « a faire mdr »), **flux de liaison de compte** (`LinkAccountBanner` → external-accounts), rendre les lignes de ranking cliquables (**bloqué** : le back ne renvoie pas d'id de compétiteur), Upload Avatar (user : back prêt ; team : endpoint à créer).
@@ -526,7 +530,7 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ---
 
-_Dernière mise à jour : 22 juillet 2026 — **F0-C prêt pour review** sur `feature/f0c-authenticated-shell-guard` : branche rebasée sur `master` `97deb7d`, garde centralisée et shell authentifié validés, visiteurs renvoyés vers `/` et utilisateurs connectés renvoyés de `/` vers `/home`, build/lint et tests manuels verts. Les changements de version Node (`.nvmrc` et `package*.json`) sont volontairement exclus de F0-C et réservés à un ticket séparé._
+_Dernière mise à jour : 22 juillet 2026 — **F0-C mergé sur `master`** (merge `9d3b97c`, commit `7abdb3f`) après review navigateur ; dette HTTPS/cookie isolée dans **I4** (https://trello.com/c/wvEfFTVq). **Alignement Node 24 prêt pour review** sur `chore/node-24-toolchain` : `.nvmrc`, engines frontend/backend et lockfiles sans bump de dépendance ; validations Node `v24.18.0`, backend 20/20, frontend build/lint verts._
 
 _21 juillet 2026 — **B7 (disputes) mergé** (`15238e7`) ; **B9 (notifications) mergé** (`88c33e8`, commit `eca332d` — 12 suites / 397 cas, Vitest 19/19, push live vérifié) ; **FR2 Login + 2FA mergé après review** (commit `26f908d`, parcours classique et TOTP testés avec le backend réel ; observation cookie cross-scheme dev documentée ci-dessus). **BA1 (changer son mot de passe) mergé** (merge `37c4e8c`, commit `9c1ae0b` — review Walid approuvée) : rebasé sur `master` `85e1c76` **sans conflit** (aucun commit de master n'avait touché `users.ts` ni `openapi.yaml` depuis son point de départ), `tsc --noEmit` vert avant merge._
 
