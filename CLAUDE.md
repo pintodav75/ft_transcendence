@@ -506,7 +506,7 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 **Infrastructure — I2 et I3 mergés sur `master`** : images Compose figées et lancement autonome avec `docker compose up -d --build`. Prévenir l'équipe que le premier démarrage après mise à jour peut lancer un `npm ci` plus long pour resynchroniser les anciens volumes `node_modules` ; les démarrages suivants redeviennent rapides.
 
-**Infrastructure — alignement Node 24 (`chore/node-24-toolchain`)** : `.nvmrc` racine + `engines.node` identique dans les manifests frontend/backend. Les Dockerfiles étaient déjà sur `node:24-alpine`. Les lockfiles ne reflètent que cette métadonnée racine, sans mise à jour de dépendance directe ou transitive. Validé avec Node `v24.18.0` / npm `11.16.0` : `npm ci` des deux projets, backend `tsc --noEmit` + Vitest **20/20**, frontend build + lint **0 erreur** (2 warnings Fast Refresh préexistants sur `master`).
+**Infrastructure — alignement Node 24 mergé sur `master`** (merge `cc9141c`, commit `21b6a19`) : `.nvmrc` racine + `engines.node` identique dans les manifests frontend/backend. Les Dockerfiles étaient déjà sur `node:24-alpine`. Les lockfiles ne reflètent que cette métadonnée racine, sans mise à jour de dépendance directe ou transitive. Validation finale avec Node `v24.18.0` / npm `11.16.0` : backend `tsc --noEmit` + Vitest **21/21**, frontend build + lint **0 erreur, 0 warning**.
 
 **Backend — B5d et B6 mergés sur `master`** (B6 : merge `f9128bf`, review Walid approuvée, 246 ✅ / 0 ❌ ; 46 avec les jobs). Disponibilité par fenêtre (B5d) et soumission de résultats + ELO + jobs 24 h (B6) en place. La table `rankings` **se remplit désormais** dès qu'un match est `completed` → le leaderboard renvoie de vrais classements. Aussi mergé : `fix/cors-methods` (CORS `methods` explicite → débloque tous les DELETE/PATCH depuis le navigateur).
 
@@ -530,7 +530,7 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 
 ---
 
-_Dernière mise à jour : 22 juillet 2026 — **F0-C mergé sur `master`** (merge `9d3b97c`, commit `7abdb3f`) après review navigateur ; dette HTTPS/cookie isolée dans **I4** (https://trello.com/c/wvEfFTVq). **Alignement Node 24 prêt pour review** sur `chore/node-24-toolchain` : `.nvmrc`, engines frontend/backend et lockfiles sans bump de dépendance ; validations Node `v24.18.0`, backend 20/20, frontend build/lint verts._
+_Dernière mise à jour : 22 juillet 2026 — **alignement Node 24 mergé sur `master`** (merge `cc9141c`, commit `21b6a19`) : `.nvmrc`, engines frontend/backend et lockfiles sans bump de dépendance ; validation finale Node `v24.18.0`, backend 21/21, frontend build/lint à 0 warning. **F0-C est mergé** (`9d3b97c`) et sa dette HTTPS/cookie est isolée dans **I4** (https://trello.com/c/wvEfFTVq)._
 
 _21 juillet 2026 — **B7 (disputes) mergé** (`15238e7`) ; **B9 (notifications) mergé** (`88c33e8`, commit `eca332d` — 12 suites / 397 cas, Vitest 19/19, push live vérifié) ; **FR2 Login + 2FA mergé après review** (commit `26f908d`, parcours classique et TOTP testés avec le backend réel ; observation cookie cross-scheme dev documentée ci-dessus). **BA1 (changer son mot de passe) mergé** (merge `37c4e8c`, commit `9c1ae0b` — review Walid approuvée) : rebasé sur `master` `85e1c76` **sans conflit** (aucun commit de master n'avait touché `users.ts` ni `openapi.yaml` depuis son point de départ), `tsc --noEmit` vert avant merge._
 
