@@ -12,7 +12,7 @@ export const Route = createFileRoute('/login')({
     }
 
     if (useAuthStore.getState().user) {
-      throw redirect({ to: '/' });
+      throw redirect({ to: '/home' });
     }
   },
   component: Login,

@@ -32,7 +32,7 @@ function getViewerRole(team: TeamDetail, members: TeamMember[], userId: string):
 }
 
 export function TeamDetail() {
-  const { teamId } = useParams({ from: '/teams/$teamId' });
+  const { teamId } = useParams({ from: '/_authenticated/teams/$teamId' });
   const navigate = useNavigate();
 
   const [team, setTeam] = useState<TeamDetail>();
