@@ -79,7 +79,7 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
     expect(typeof parsed.scheduledAt).toBe('string')
   })
 
-  it('les 10 types de notification ont bien un schéma', () => {
+  it('les 13 types de notification ont bien un schéma', () => {
     const expectedTypes = [
       'match_accepted',
       'result_submitted',
@@ -92,8 +92,41 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
       // social
       'friend_request_received',
       'friend_request_accepted',
+      // équipe (B11) — pas de type pour la création ni l'édition : personne d'autre
+      // que l'acteur n'est concerné (règle B9 « jamais l'acteur »).
+      'team_member_added',
+      'team_member_removed',
+      'team_disbanded',
     ]
     expect(Object.keys(notificationPayloadSchemas).sort()).toEqual(expectedTypes.sort())
+  })
+
+  it('les payloads équipe sont stricts et gardent le nom en instantané', () => {
+    const ok = notificationPayloadSchemas.team_disbanded.parse({
+      teamId: uuid1,
+      teamName: 'Les Bleus',
+      ladderId: uuid2,
+      byUserId: uuid1,
+      byPseudo: 'alice',
+    })
+    // `teamName` est un instantané : l'équipe n'existe plus quand la notif est lue.
+    expect(ok.teamName).toBe('Les Bleus')
+    // Un champ en trop (ici un email glissé par erreur) doit faire ÉCHOUER l'écriture,
+    // pas être silencieusement retiré : c'est ce qui rend "display-safe" garanti.
+    expect(() =>
+      notificationPayloadSchemas.team_member_added.parse({
+        teamId: uuid1,
+        teamName: 'Les Bleus',
+        ladderId: uuid2,
+        byUserId: uuid1,
+        byPseudo: 'alice',
+        byEmail: 'alice@example.com',
+      }),
+    ).toThrow()
+    // Et un champ obligatoire manquant aussi.
+    expect(() =>
+      notificationPayloadSchemas.team_member_removed.parse({ teamId: uuid1, teamName: 'X' }),
+    ).toThrow()
   })
 
   it('les payloads social sont stricts (champ en trop rejeté, pseudo requis)', () => {
