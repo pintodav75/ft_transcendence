@@ -35,10 +35,17 @@
 | ORM (Drizzle)                                  | Minor | 1      | ✅                                     |
 | OAuth 2.0                                      | Minor | 1      | ✅                                     |
 | 2FA TOTP                                       | Minor | 1      | ✅                                     |
-| File upload                                    | Minor | 1      | ✅ (avatar MinIO)                      |
-| Notification system                            | Minor | 1      | ✅ (B9)                                |
+| File upload                                    | Minor | 1      | ⚠️ **le plus fragile** — voir sous le tableau |
+| Notification system                            | Minor | 1      | ⚠️ **B9 + #53, mais incomplet** — voir [B11] |
 | **Advanced search**                            | Minor | **1**  | ✅ **vérifié PDF 22/07** — `GET /search` (filtres + tri + pagination) |
 | **TOTAL**                                      |       | **16** |                                        |
+
+### ⚠️ Les 2 minors qui ne sont PAS acquis (audit contre le PDF, 22/07)
+
+Le sujet est explicite : *« You will be asked to demonstrate each claimed module. Only fully functional and properly implemented modules will be counted. **Non-functional or incomplete modules = 0 points.** »* Les 9 autres modules du tableau sont couverts par le back. Ces deux-là ne le sont pas encore :
+
+- **Notification system** — le sujet dit *« for **all** creation, update, and deletion actions »*. B9 + #53 couvrent matchs, disputes et amis (10 types), mais **`teams.ts` n'appelle jamais `notify()`** : ajout de membre, kick et dissolution ne préviennent personne. → carte **[B11]**. ⚠️ **On ne notifie PAS la création d'équipe** : la règle B9 est « jamais l'acteur », et personne d'autre n'est concerné — c'est un choix à défendre, pas un oubli.
+- **File upload** — deux exigences du sujet manquent **côté back**, vérifiées dans le code : *« Support multiple file types (images, documents, etc.) »* (on n'accepte que `jpeg/png/webp`, avatar comme preuves de dispute) et *« **Ability to delete uploaded files** »* (aucune route de suppression d'avatar ; le fichier n'est effacé qu'à la suppression du compte). ⚠️ Même complété, il reste fragile : le sujet décrit un vrai **système de gestion de fichiers**, on a un avatar et des preuves de litige — accepter des PDF comme avatar n'aurait aucun sens produit. **Envisager de l'échanger contre « Custom design system »** (voir candidats de réserve), bien moins cher.
 
 ### 🚨 Pourquoi « Game stats & match history » a disparu
 
@@ -54,9 +61,11 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 ### Candidats de réserve (marge)
 
-- **Advanced permissions / roles** (Major, 2 pts) — s'appuierait sur l'**arbitrage admin des disputes** (ticket **B7**). ⚠️ À vérifier dans le sujet : un booléen `is_admin` suffit-il, ou faut-il de **vrais rôles assignables** ? Si ça colle, quasi gratuit une fois B7 fait → 18 pts.
+- **Advanced permissions / roles** (Major, 2 pts) — ❌ **PLUS quasi gratuit : le PDF a tranché (22/07), `is_admin` NE SUFFIT PAS.** Le sujet exige *« Roles management (admin, user, guest, moderator, etc.) »*, *« different views and actions based on user role »* **et** un CRUD complet sur les users (view/edit/delete). Il faudrait de vrais rôles assignables + les vues associées → **vrai chantier**, pas un bonus.
 - **Public API** (Major, 2 pts) — 20+ endpoints, rate-limit et `openapi.yaml` déjà là ; il manquerait une **clé d'API**. ⚠️ Le seul qui coûte du **vrai code neuf** → à ne prendre que s'il reste du temps.
-- Mineurs : Custom design system (1), GDPR (1 — la suppression de compte existe déjà), i18n (1). *(Advanced search est **compté dans le tableau** depuis le 22/07, il n'est plus en réserve.)*
+- **Custom design system** (1) — 🎯 **le candidat le moins cher qui reste** : le sujet demande **10 composants réutilisables minimum** + palette, typographie et icônes. `components/ui/` en compte déjà 9-10 (avatar, button, card, form-message, icon-menu-item, input, label, menu-item, password-input) et `index.css` porte tokens de couleurs, polices, radius et shadows ; lucide fournit les icônes. **Surtout à documenter dans le README**, quasi rien à coder.
+- GDPR (1) — ⚠️ **plus loin qu'il n'y paraît** : la suppression de compte existe, mais le sujet exige AUSSI l'**export des données dans un format lisible**, la demande de ses données, et des **emails de confirmation** (aucune infra mail dans le projet).
+- i18n (1) — 3 langues complètes + sélecteur ; les sélecteurs EN/FR/ES existent dans l'UI mais **ne sont pas câblés**. *(Advanced search est **compté dans le tableau** depuis le 22/07, il n'est plus en réserve.)*
 
 ---
 
@@ -371,7 +380,8 @@ Tests re-vérifiés après tous les correctifs : `tsc` propre, Vitest **19/19** 
 
 ### Reste à faire (transverse / 42)
 
-- Polish 42 : Privacy Policy, ToS, zéro warning console, README à jour
+- 🚨 **Privacy Policy et ToS — MOTIF DE REJET, pas du polish.** Le sujet : *« Missing or inadequate Privacy Policy/Terms of Service pages will **result in project rejection** »*, et elles ne doivent être ni vides ni des placeholders. Aujourd'hui `pages/privacy.tsx` et `pages/terms.tsx` font **8 lignes chacune** → en l'état, projet rejeté. Contenu prévu dans la carte **[FT]** (rédaction volontairement gardée pour la fin).
+- Zéro warning/erreur en console Chrome (exigence générale du sujet), README complet (sections obligatoires : Team Info, Project Management, Technical Stack, Database Schema, Features List **avec qui a fait quoi**, Modules **avec le calcul de points**, Individual Contributions, usage de l'IA)
 - Préparation soutenance
 
 ---
