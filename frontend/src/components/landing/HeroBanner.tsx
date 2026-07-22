@@ -33,8 +33,8 @@ export function HeroBanner() {
           <span className="text-arena-gradient">Conquer.</span>
         </h1>
         <p className="mt-5 max-w-115 text-xs label-caps leading-6 text-white/70 md:text-sm">
-          Queue by skill, battle it out, then settle the score with both sides confirming the result
-          — and climb an ELO ladder built for every game and format.
+          Challenge any team, agree on a time, then settle the score with both sides confirming the
+          result — and climb an ELO ladder built for every game and format.
         </p>
 
         {/* CTA: links (they navigate), styled as buttons via buttonClasses. */}
