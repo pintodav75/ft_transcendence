@@ -31,7 +31,7 @@
 | Standard user management                       | Major | 2      | ✅                                     |
 | Real-time WebSocket                            | Major | 2      | ✅ (chat)                              |
 | User interaction (chat + profil + amis)        | Major | 2      | ✅                                     |
-| **Organization system** (= nos **teams**, B5a) | Major | **2**  | ✅ **déjà codé** — remplace Game stats |
+| **Organization system** (= nos **teams**, B5a + B-Org) | Major | **2**  | ✅ **vérifié PDF 22/07** — remplace Game stats |
 | ORM (Drizzle)                                  | Minor | 1      | ✅                                     |
 | OAuth 2.0                                      | Minor | 1      | ✅                                     |
 | 2FA TOTP                                       | Minor | 1      | ✅                                     |
@@ -47,7 +47,9 @@ Sans remplacement, l'équipe tombait à **13 points → sous la barre des 14 →
 
 Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/supprimer des organisations et gérer leurs membres — c'est **exactement** ce que font nos teams (B5a : création, roster, capitaine, kick/quit, dissolution). **Zéro ligne de code à écrire**, juste à le déclarer dans le README et savoir le défendre.
 
-⚠️ **À confirmer contre le PDF du sujet** — l'intitulé exact et ses exigences n'ont pas été revérifiés depuis le 04/07. **Ne pas bâtir le compte de points sur cette ligne sans vérifier.**
+✅ **Vérifié contre le PDF du sujet (David, 22/07)** : « Organization system » est bien un **Major à 2 points** et notre implémentation teams y répond. Le sujet exige *create, **edit**, delete* — l'édition manquait, elle a été livrée par **B-Org** (`PATCH /teams/:id`, merge `3be19b7`). **Les 15 points sont confirmés**, ne plus écrire « sous réserve » à propos de ce module.
+
+⚠️ La réserve **reste entière pour les candidats de réserve ci-dessous** : leurs intitulés et exigences datent de la lecture du 04/07 et n'ont pas été revérifiés.
 
 ### Candidats de réserve (marge)
 
@@ -491,7 +493,7 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 **Backend — B5d et B6 mergés sur `master`** (B6 : merge `f9128bf`, review Walid approuvée, 246 ✅ / 0 ❌ ; 46 avec les jobs). Disponibilité par fenêtre (B5d) et soumission de résultats + ELO + jobs 24 h (B6) en place. La table `rankings` **se remplit désormais** dès qu'un match est `completed` → le leaderboard renvoie de vrais classements. Aussi mergé : `fix/cors-methods` (CORS `methods` explicite → débloque tous les DELETE/PATCH depuis le navigateur).
 
 - ✅ **B7 — disputes : MERGÉ sur master** (merge `15238e7`, commit `5900d23`, 3 passes de review Walid traitées). Décisions actées : timeout neutre, dépôt capitaine-seul, MIME = limite connue → la règle du timeout reste **à écrire dans la ToS ([FT])**.
-- **B9 — notifications : MERGÉ** (merge `88c33e8`, commit `eca332d`, carte Trello #51). Livré : migration `0016` (enum + table `notifications`), `utils/notification-schemas.ts` (schémas Zod par type, purs/sans DB) + `utils/notifications.ts` (`notify<T>` validé + dans la tx / `pushNotifications` après commit), `routes/notifications.ts` (3 routes : liste paginée par curseur + `unreadCount`, read idempotent sans oracle, read-all), event WS `notification` sur `/ws/chat` (`sendToUser` exporté), **8 déclencheurs** câblés dans `matches.ts` (accept, result × 3 issues), `disputes.ts` (resolve) et les 3 jobs 24 h, `openapi.yaml`. **3 correctifs de review appliqués** (spam re-soumission, validation Zod à l'écriture, pagination sur multiple exact) — détail dans la section Notifications ci-dessus. `test_notifications.py` (**81 ✅ / 0 ❌ avec `B9_JOBS=1`**), Vitest **19/19**. Au passage : fix d'un bug `helpers.py cleanup()` cassé depuis des jours (270 users/325 matchs de test jamais nettoyés). Le module **Notification system (1 pt)** passe au vert → **15 pts atteints** (sous réserve de la vérif PDF « Organization system »).
+- **B9 — notifications : MERGÉ** (merge `88c33e8`, commit `eca332d`, carte Trello #51). Livré : migration `0016` (enum + table `notifications`), `utils/notification-schemas.ts` (schémas Zod par type, purs/sans DB) + `utils/notifications.ts` (`notify<T>` validé + dans la tx / `pushNotifications` après commit), `routes/notifications.ts` (3 routes : liste paginée par curseur + `unreadCount`, read idempotent sans oracle, read-all), event WS `notification` sur `/ws/chat` (`sendToUser` exporté), **8 déclencheurs** câblés dans `matches.ts` (accept, result × 3 issues), `disputes.ts` (resolve) et les 3 jobs 24 h, `openapi.yaml`. **3 correctifs de review appliqués** (spam re-soumission, validation Zod à l'écriture, pagination sur multiple exact) — détail dans la section Notifications ci-dessus. `test_notifications.py` (**81 ✅ / 0 ❌ avec `B9_JOBS=1`**), Vitest **19/19**. Au passage : fix d'un bug `helpers.py cleanup()` cassé depuis des jours (270 users/325 matchs de test jamais nettoyés). Le module **Notification system (1 pt)** passe au vert → **15 pts atteints** (« Organization system » vérifié contre le PDF le 22/07 — plus aucune réserve).
 
 - ✅ **BA1 — changer son mot de passe : MERGÉ** (merge `37c4e8c`, commit `9c1ae0b`, review Walid approuvée). `PATCH /users/me/password` — détail dans la section Auth & user ci-dessus.
 
