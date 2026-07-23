@@ -27,15 +27,16 @@ const memberParamsSchema = z.object({ id: z.uuid(), userId: z.uuid() });
 //
 // ⚠️ `z.url()` seul valide une URI SYNTAXIQUE, pas une URL Web : il accepte
 // `javascript:alert(1)` et `ftp://…`. On restreint donc explicitement le protocole à
-// http/https. Il n'y a pas d'exécution côté backend et un `<img src>` moderne ne rend
-// pas un `javascript:` dangereux — mais la valeur est PERSISTÉE, et le jour où elle
-// atterrit dans un `<a href>`, du CSS ou un autre contexte de rendu, elle le devient.
-// On refuse à l'entrée plutôt que de compter sur chaque futur consommateur.
-// (Le protocole est normalisé en minuscules par WHATWG URL → `HTTPS://` passe.)
+// HTTPS uniquement (I4) : le logo est affiché dans la page applicative HTTPS, une URL en
+// `http://` produirait un avertissement de CONTENU MIXTE et serait bloquée par le navigateur.
+// Il n'y a pas d'exécution côté backend, mais la valeur est PERSISTÉE : on refuse à l'entrée
+// plutôt que de compter sur chaque futur consommateur (`<a href>`, CSS…).
+// `logoUrl` accepte `null` pour RETIRER le logo. (Le protocole est normalisé en minuscules
+// par WHATWG URL → `HTTPS://` passe.)
 const updateTeamSchema = z
   .object({
     name: z.string().trim().min(1).max(50),
-    logoUrl: z.url({ protocol: /^https?$/ }).max(2048).nullable(),
+    logoUrl: z.url({ protocol: /^https$/ }).max(2048).nullable(),
   })
   .partial();
 

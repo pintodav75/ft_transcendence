@@ -478,7 +478,9 @@
 		}
 	],
 	"variable": [
-		{ "key": "baseUrl", "value": "https://localhost:3000", "type": "string" },
-		{ "key": "wsBaseUrl", "value": "wss://localhost:3000", "type": "string" }
+		{ "key": "baseUrl", "value": "https://localhost:5173/api", "type": "string" },
+		{ "key": "wsBaseUrl", "value": "wss://localhost:5173/api", "type": "string" },
+		{ "key": "baseUrlDirect", "value": "https://localhost:3000", "type": "string" },
+		{ "key": "wsBaseUrlDirect", "value": "wss://localhost:3000", "type": "string" }
 	]
 }

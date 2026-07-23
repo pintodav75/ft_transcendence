@@ -7,6 +7,7 @@ import { minioClient, BUCKET_NAME, buildPublicUrl } from '../storage/minio.js';
 import { isBlocked } from '../utils/blocks.js';
 import { randomUUID } from 'node:crypto';
 import { verifyPassword, hashPassword } from '../auth/password.js';
+import { clearRefreshCookie } from '../auth/cookies.js';
 import speakeasy from 'speakeasy';
 
 const patchProfileSchema = z
@@ -214,7 +215,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         }
       }
       await db.delete(usersTable).where(eq(usersTable.id, userId));
-      reply.clearCookie('refresh', { path: '/auth' });
+      clearRefreshCookie(reply);
       return reply.code(200).send({ ok: true });
     } catch (err) {
       if (err instanceof z.ZodError) return reply.code(400).send({ errors: err.issues });

@@ -77,10 +77,32 @@ def post_evidence(token, disp_id, message, img=PNG, mime="image/png", n_files=1)
         return -1, {"raw": "connection aborted"}
 
 
+# Depuis I4 l'URL présignée renvoyée par l'API est RELATIVE (/media/evidence/<clé>?X-Amz-...) :
+# elle n'est résoluble qu'à travers le proxy same-origin. On la résout donc contre l'origine
+# applicative (5173 par défaut ; PROXY_BASE_URL surchargeable).
+PROXY_BASE = os.environ.get("PROXY_BASE_URL", "https://localhost:5173")
+
+
+def _absolutize(url):
+    return f"{PROXY_BASE}{url}" if url.startswith("/") else url
+
+
+def raw_get_signed(url):
+    """GET l'URL présignée COMPLÈTE (avec signature) via le proxy /media → doit être 200.
+    Prouve que la signature reste valide à travers le proxy (Host interne rétabli)."""
+    try:
+        with urllib.request.urlopen(_absolutize(url), context=CTX) as resp:
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except (urllib.error.URLError, OSError):
+        return -1
+
+
 def raw_get_no_sig(url):
     """GET une URL présignée en RETIRANT sa query (donc sans signature) → doit être refusé par
     MinIO (bucket privé). Renvoie le status HTTP (-1 si erreur transport)."""
-    base = url.split("?", 1)[0]
+    base = _absolutize(url).split("?", 1)[0]
     try:
         with urllib.request.urlopen(base, context=CTX) as resp:
             return resp.status
@@ -208,6 +230,8 @@ def run():
         s.check("preuve rattachee au side 0", ev[0].get("matchSideId"), s0)
         s.check("preuve a un auteur (pseudo)", "pseudo" in (ev[0].get("author") or {}), True)
         s.check("evidenceUrl presignee (query X-Amz)", "X-Amz-" in (ev[0].get("evidenceUrl") or ""), True)
+        s.check("evidenceUrl relative sous /media (I4)", (ev[0].get("evidenceUrl") or "").startswith("/media/evidence/"), True)
+        s.check("preuve LISIBLE avec signature via /media -> 200", raw_get_signed(ev[0].get("evidenceUrl") or ""), 200)
         s.check("preuve INACCESSIBLE sans signature -> 403", raw_get_no_sig(ev[0].get("evidenceUrl") or ""), 403)
     # les DÉCLARATIONS des deux camps : c'est ce qui rend l'arbitrage possible.
     sides = body.get("sides", []) if isinstance(body, dict) else []

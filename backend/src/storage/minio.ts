@@ -6,7 +6,19 @@ const USE_SSL = process.env.MINIO_USE_SSL === 'true';
 const ACCESS_KEY = process.env.MINIO_ACCESS_KEY;
 const SECRET_KEY = process.env.MINIO_SECRET_KEY;
 export const BUCKET_NAME = process.env.MINIO_BUCKET;
-export const PUBLIC_URL = process.env.MINIO_PUBLIC_URL;
+
+// Préfixe navigateur des médias (I4). Le navigateur ne parle PLUS jamais à http://localhost:9000
+// (contenu mixte sur une page HTTPS) : il tape /media/*, que le proxy Vite réécrit vers
+// http://minio:9000/* (retrait du seul préfixe /media, Host interne rétabli via changeOrigin).
+const MEDIA_PREFIX = '/media';
+
+// Transforme une URL MinIO INTERNE (http://minio:9000/<bucket>/<clé>?<query>) en chemin
+// navigateur relatif (/media/<bucket>/<clé>?<query>). On ne garde que path + query : l'hôte
+// interne est réinjecté par le proxy. Relatif → résolu contre l'origine applicative courante.
+function toMediaPath(internalUrl: string): string {
+  const parsed = new URL(internalUrl);
+  return `${MEDIA_PREFIX}${parsed.pathname}${parsed.search}`;
+}
 
 // Bucket PRIVÉ dédié aux preuves de dispute — JAMAIS de policy public-read. Contrairement à un
 // avatar, une capture de dispute ne doit être lisible que par un participant du match ou un
@@ -23,24 +35,18 @@ export const minioClient = new Client({
 });
 
 // Client de SIGNATURE des URL présignées. Une URL présignée (SigV4) couvre l'en-tête `Host` :
-// elle n'est valide que si le navigateur tape l'hôte pour lequel elle a été signée. Le client
-// interne ci-dessus pointe sur `minio:9000` (réseau Docker), injoignable depuis le navigateur.
-// On signe donc avec l'hôte PUBLIC (MINIO_PUBLIC_URL) pour que l'URL soit à la fois valide ET
-// résoluble côté client.
-const publicUrl = new URL(PUBLIC_URL);
+// elle n'est valide que si la requête finale atteint MinIO avec l'hôte pour lequel elle a été
+// signée. On signe donc contre l'hôte INTERNE (minio:9000) — le même que le proxy /media
+// rétablit via `changeOrigin`. Ainsi MinIO reçoit exactement le host/path/query ayant servi à
+// la signature. L'URL renvoyée au navigateur est ensuite convertie en /media/... (toMediaPath).
 const presignClient = new Client({
-  endPoint: publicUrl.hostname,
-  port: publicUrl.port
-    ? Number(publicUrl.port)
-    : publicUrl.protocol === 'https:'
-      ? 443
-      : 80,
-  useSSL: publicUrl.protocol === 'https:',
+  endPoint: ENDPOINT,
+  port: PORT,
+  useSSL: USE_SSL,
   accessKey: ACCESS_KEY,
   secretKey: SECRET_KEY,
-  // Région FIXÉE : sans elle, minio-js fait un lookup réseau de la région du bucket avant de
-  // signer → il taperait `localhost:9000`, qui DEPUIS le conteneur backend est le backend
-  // lui-même (pas MinIO) → 500. La signer localement évite tout appel réseau.
+  // Région FIXÉE : sans elle, minio-js fait un lookup réseau (GetBucketLocation) avant de
+  // signer. La fixer évite tout appel réseau et garantit une signature déterministe.
   region: 'us-east-1',
 });
 
@@ -87,12 +93,17 @@ export async function ensureBucket() {
   }
 }
 
+// URL PUBLIQUE (navigateur) d'un avatar : chemin RELATIF /media/avatars/<fichier>. Servi via
+// le proxy /media → MinIO. Relatif = pas de contenu mixte, pas d'hôte codé en dur.
 export function buildPublicUrl(filename: string): string {
-  return `${PUBLIC_URL}/${BUCKET_NAME}/${filename}`;
+  return `${MEDIA_PREFIX}/${BUCKET_NAME}/${filename}`;
 }
 
 // URL présignée en lecture (GET) sur une preuve du bucket privé, valable `expirySeconds`.
-// `key` est la clé d'objet stockée en base (dispute_evidence.evidence_url).
-export function presignEvidenceUrl(key: string, expirySeconds = 300): Promise<string> {
-  return presignClient.presignedGetObject(EVIDENCE_BUCKET, key, expirySeconds);
+// `key` est la clé d'objet stockée en base (dispute_evidence.evidence_url). On signe contre
+// l'hôte interne puis on renvoie un chemin /media/evidence/<clé>?X-Amz-... : la signature
+// (query) est préservée, le proxy rétablit l'hôte interne → MinIO valide la signature.
+export async function presignEvidenceUrl(key: string, expirySeconds = 300): Promise<string> {
+  const signed = await presignClient.presignedGetObject(EVIDENCE_BUCKET, key, expirySeconds);
+  return toMediaPath(signed);
 }

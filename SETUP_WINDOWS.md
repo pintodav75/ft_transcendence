@@ -206,19 +206,26 @@ REDIS_PASSWORD=changeme       # un password de ton choix
 
 MINIO_ROOT_USER=changeme      # min. 5 caractères
 MINIO_ROOT_PASSWORD=changeme  # min. 8 caractères
-MINIO_DEFAULT_BUCKETS=avatars
 MINIO_ENDPOINT=minio
 MINIO_PORT=9000
 MINIO_USE_SSL=false
 MINIO_BUCKET=avatars
-MINIO_PUBLIC_URL=http://localhost:9000
 
-JWT_SECRET=...                # génère avec : openssl rand -hex 64
+JWT_SECRET=...                # génère avec : openssl rand -hex 64 (min. 16 caractères)
 
 GOOGLE_CLIENT_ID=...          # demande à Da/Brahim de partager les credentials
 GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=https://localhost:3000/auth/oauth/google/callback
+GOOGLE_REDIRECT_URI=https://localhost:5173/api/auth/oauth/google/callback
+
+# Origine applicative unique (navigateur) + cibles proxy internes lues par le frontend.
+FRONTEND_URL=https://localhost:5173
+API_PROXY_TARGET=https://backend:3000
+MINIO_PROXY_TARGET=http://minio:9000
 ```
+
+> ⚠️ Le backend **valide ces variables au démarrage** : si l'une manque ou est malformée, il
+> s'arrête immédiatement en affichant le **nom** de la variable fautive (jamais sa valeur).
+> Copie bien tout le `.env.example`.
 
 Pour générer `JWT_SECRET` :
 ```bash
@@ -226,29 +233,37 @@ openssl rand -hex 64
 ```
 Copie la sortie dans la valeur de `JWT_SECRET`.
 
-⚠️ Pour les credentials Google OAuth, demande-les à l'équipe (ils sont dans la Google Cloud Console partagée).
+⚠️ Pour les credentials Google OAuth, demande-les à l'équipe (ils sont dans la Google Cloud
+Console partagée). Voir aussi l'**Étape 8.2** : l'URI de redirection doit y être enregistrée.
 
-### 8.2 — Générer le certificat HTTPS auto-signé
+### 8.2 — Google Cloud : enregistrer l'URI de redirection
 
-```bash
-mkdir -p backend/certs
-openssl req -x509 -newkey rsa:4096 \
-  -keyout backend/certs/key.pem \
-  -out backend/certs/cert.pem \
-  -days 365 -nodes \
-  -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+Pour que « Se connecter avec Google » fonctionne, l'URI de redirection utilisée par l'app doit
+être **enregistrée à l'identique** dans la Google Cloud Console (OAuth 2.0 Client → *Authorized
+redirect URIs*) :
+
 ```
+https://localhost:5173/api/auth/oauth/google/callback
+```
+
+C'est la personne qui possède le projet Google Cloud qui l'ajoute (demande à l'équipe). Tant
+que ce n'est pas fait, Google renvoie une erreur `redirect_uri_mismatch`. Le reste de l'app
+(register/login classiques) fonctionne sans ça.
+
+> Le certificat HTTPS n'a **rien à générer à la main** : le backend le crée automatiquement au
+> démarrage dans le volume `backend_certs` et le partage au frontend. (Ancienne étape supprimée.)
 
 ---
 
 ## Étape 9 — Lancer le projet
 
 ```bash
-docker compose up -d
+docker compose up -d --build --wait
 ```
 
-Premier démarrage : Docker build les images (~2-5 min). Les suivants seront instantanés.
+Premier démarrage : Docker build les images (~2-5 min). `--wait` bloque jusqu'à ce que tous les
+services soient **healthy**. Le backend génère le certificat, applique les **migrations
+automatiquement**, puis démarre ; le frontend démarre ensuite.
 
 ### Vérifier que tout tourne
 
@@ -256,47 +271,51 @@ Premier démarrage : Docker build les images (~2-5 min). Les suivants seront ins
 docker compose ps
 ```
 
-Tous les services doivent être en **"Up"** :
-- `backend` (port 3000)
-- `frontend` (port 5173)
+Tous les services doivent être **healthy** (aucun `Restarting`) :
+- `frontend` (port 5173, HTTPS) — l'origine applicative
+- `backend` (port 3000, HTTPS) — accès direct diagnostic/tests
 - `postgres`, `redis`, `minio`
 - `adminer`, `redis-commander`
 
-### Appliquer les migrations de la base (OBLIGATOIRE au 1er lancement)
+> Les migrations Drizzle sont appliquées **automatiquement** au démarrage du backend — plus
+> aucune commande manuelle. (Si un jour tu veux les inspecter : `docker compose exec backend
+> npx drizzle-kit migrate`.)
 
-⚠️ La base démarre **vide** : aucune table n'existe tant que tu n'as pas appliqué les migrations Drizzle. Sans ça, Adminer n'affiche rien et register/login plantent.
-
-```bash
-docker compose exec backend npx drizzle-kit migrate
-```
-
-Vérifie que les 15 tables sont créées (remplace `<POSTGRES_USER>`/`<POSTGRES_DB>` par les valeurs de ton `.env`) :
+### Tester
 
 ```bash
-docker compose exec postgres psql -U <POSTGRES_USER> -d <POSTGRES_DB> -c '\dt'
+curl -k https://localhost:5173/api/ping   # via le proxy
+curl -k https://localhost:3000/ping       # backend direct
 ```
 
-À refaire uniquement quand de nouvelles migrations arrivent (`git pull` qui ramène des fichiers dans `backend/drizzle/`).
-
-### Tester le backend
-
-```bash
-curl -k https://localhost:3000/ping
-```
-
-Doit renvoyer `pong-from-docker`.
+Les deux doivent renvoyer `pong-from-docker`.
 
 ### URLs en local (depuis ton navigateur Windows)
 
 | Service | URL |
 |---|---|
-| Frontend | http://localhost:5173 |
-| Backend API | https://localhost:3000 |
+| **App (unique)** | **https://localhost:5173** |
+| Backend direct (diagnostic) | https://localhost:3000 |
 | Adminer (Postgres) | http://localhost:8080 |
 | Redis Commander | http://localhost:8081 |
 | MinIO Console | http://localhost:9001 |
 
-⚠️ Sur le navigateur, le backend HTTPS va te dire "certificat non sécurisé" — c'est normal (cert auto-signé). Clique **Avancé → Continuer**.
+⚠️ Ouvre **`https://localhost:5173`** : le navigateur dira "certificat non sécurisé" (cert
+auto-signé) → **Avancé → Continuer**. C'est la **seule** exception à accepter ; l'API et les
+médias passent par cette même origine.
+
+### Note Redis / WSL — warning `vm.overcommit_memory`
+
+Au démarrage, Redis peut logger un avertissement `Memory overcommit must be enabled`. Il dépend
+d'un réglage **de l'hôte** (le noyau WSL), pas du projet — on ne le modifie **pas** depuis
+Compose. Pour le diagnostiquer / corriger côté WSL :
+
+```bash
+cat /proc/sys/vm/overcommit_memory      # 0 par défaut → d'où le warning
+sudo sysctl vm.overcommit_memory=1      # correction temporaire (jusqu'au prochain reboot WSL)
+```
+
+Sans correction, Redis fonctionne quand même en dev ; le warning est bénin ici.
 
 ---
 
@@ -391,9 +410,9 @@ Checklist rapide :
 - [ ] `docker --version` marche dans Ubuntu
 - [ ] clé SSH ajoutée sur l'intra 42 et clone vogsphere OK
 - [ ] `node --version` affiche v24.x
-- [ ] `docker compose ps` (depuis `~/ft_transcendence`) affiche tous les services Up
-- [ ] `docker compose exec backend npx drizzle-kit migrate` a créé les 15 tables (visibles dans Adminer)
-- [ ] `curl -k https://localhost:3000/ping` répond `pong-from-docker`
+- [ ] `docker compose ps` (depuis `~/ft_transcendence`) affiche tous les services **healthy**
+- [ ] les tables sont visibles dans Adminer (migrations appliquées automatiquement au boot)
+- [ ] `curl -k https://localhost:5173/api/ping` **et** `curl -k https://localhost:3000/ping` répondent `pong-from-docker`
 - [ ] VS Code s'ouvre en mode WSL (`code .` depuis Ubuntu)
 - [ ] Postman → Login renvoie un 200 avec accessToken
 

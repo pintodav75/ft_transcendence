@@ -4,15 +4,22 @@ info:
   description: >
     API REST du backend ft_transcendence (Fastify v5 + TypeScript).
     Auth JWT (access token Bearer 15 min) + refresh token en cookie httpOnly
-    (SameSite=Strict, Path=/auth). Chat temps réel hors-OpenAPI via WebSocket
-    `/ws/chat` (documenté en fin de fichier pour mémoire).
-  version: 0.8.0
+    (SameSite=Strict). Le cookie est posé Path=/auth par le backend et réécrit en
+    Path=/api/auth par le proxy Vite pour le navigateur (invariant I4). Chat temps réel
+    hors-OpenAPI via WebSocket `/ws/chat` (documenté en fin de fichier pour mémoire).
+  version: 0.9.0
   contact:
     name: ft_transcendence team
 
 servers:
+  # Origine applicative PRINCIPALE (navigateur) : tout passe par le proxy Vite same-origin.
+  # Les chemins ci-dessous sont relatifs à cette base — /auth/login s'appelle donc
+  # https://localhost:5173/api/auth/login côté navigateur.
+  - url: https://localhost:5173/api
+    description: App proxifiée (origine unique navigateur, I4)
+  # Backend en direct : diagnostic, tests e2e Python et curl uniquement (hors navigateur app).
   - url: https://localhost:3000
-    description: Dev local (HTTPS, certificat auto-signé)
+    description: Backend direct (diagnostic / tests, HTTPS certificat auto-signé)
 
 tags:
   - name: Auth
@@ -479,7 +486,9 @@ paths:
           description: Compte créé
           headers:
             Set-Cookie:
-              description: refresh (httpOnly, Secure, SameSite=Strict, Path=/auth, 7j)
+              description: >
+                refresh (httpOnly, Secure, SameSite=Strict, 7j). Path=/auth côté backend,
+                réécrit en Path=/api/auth par le proxy Vite pour le navigateur (I4).
               schema:
                 type: string
           content:
@@ -1911,7 +1920,8 @@ paths:
         **Capitaine only.** Modifie le **nom** et/ou le **logo** de l'équipe. Les deux
         champs sont optionnels mais **au moins un** est requis (corps vide → 400).
         `logoUrl` accepte `null` pour **retirer** le logo, et n'accepte que les URL
-        **http/https**. C'est une **URL**, pas un upload de fichier (un envoi de logo
+        **https** (I4 : une URL `http://` produirait du contenu mixte sur la page HTTPS).
+        C'est une **URL**, pas un upload de fichier (un envoi de logo
         vers MinIO, comme l'avatar utilisateur, serait un endpoint séparé). Renommer
         vers un nom déjà pris sur le même ladder viole `unique(ladder_id, name)` →
         **409**.
@@ -1943,14 +1953,14 @@ paths:
                 logoUrl:
                   type: string
                   format: uri
-                  pattern: '^https?://'
+                  pattern: '^https://'
                   maxLength: 2048
                   nullable: true
                   description: >
-                    URL **http/https** du logo, ou `null` pour le retirer. Les autres
-                    schémas d'URI (`javascript:`, `ftp:`…) sont **refusés** (400) : la
-                    valeur est persistée et pourrait plus tard atterrir dans un `<a href>`
-                    ou du CSS.
+                    URL **https** du logo, ou `null` pour le retirer. `http://` et les
+                    autres schémas d'URI (`javascript:`, `ftp:`…) sont **refusés** (400) :
+                    `http://` produirait du contenu mixte, et une valeur persistée pourrait
+                    plus tard atterrir dans un `<a href>` ou du CSS.
       responses:
         '200':
           description: Équipe mise à jour
@@ -1965,7 +1975,7 @@ paths:
         '400':
           description: >
             Param `:id` non-uuid, corps vide (aucun champ à modifier), `name` vide ou
-            > 50, `logoUrl` non conforme à une URL **http/https**.
+            > 50, `logoUrl` non conforme à une URL **https**.
           content:
             application/json:
               schema:
@@ -3368,7 +3378,9 @@ paths:
 # WebSocket (hors OpenAPI — documenté pour mémoire)
 # =======================================================================
 # GET (upgrade) /ws/chat?token=<accessToken>
-#   - Auth : token JWT en query string (sub). Fermeture 1008 si invalide.
+#   - Navigateur : wss://localhost:5173/api/ws/chat?token=<accessToken> (proxy Vite ws:true,
+#     retrait du préfixe /api). Direct/tests : wss://localhost:3000/ws/chat?token=...
+#   - Auth : token JWT en query string (sub). Fermeture 1008 si invalide OU si tempToken 2FA.
 #   - À la connexion : SADD online_users <userId> (Redis).
 #   - Message entrant (JSON) : { "to": "<uuid>", "content": "1..1000 chars" }
 #       * vérifie l'amitié acceptée, sinon ignore silencieusement

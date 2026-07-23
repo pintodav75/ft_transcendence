@@ -4,6 +4,7 @@ import { usersTable } from '../../db/schema.js';
 import { db } from '../../db/index.js';
 import { hashPassword, verifyPassword } from '../../auth/password.js';
 import { signAccessToken, signRefreshToken, signTempToken } from '../../auth/tokens.js';
+import { setRefreshCookie, clearRefreshCookie } from '../../auth/cookies.js';
 import { eq } from 'drizzle-orm';
 
 const registerSchema = z.object({
@@ -43,13 +44,7 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
       if (!user) throw new Error('Insert returned no row');
       const accessToken = signAccessToken(request.server, { sub: user.id });
       const refreshToken = signRefreshToken(request.server, { sub: user.id });
-      reply.setCookie('refresh', refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'strict',
-        path: '/auth',
-        maxAge: 60 * 60 * 24 * 7,
-      });
+      setRefreshCookie(reply, refreshToken);
       const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
       return reply.code(201).send({ accessToken, user: userSafe });
     } catch (err) {
@@ -86,13 +81,7 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
       }
       const accessToken = signAccessToken(request.server, { sub: user.id });
       const refreshToken = signRefreshToken(request.server, { sub: user.id });
-      reply.setCookie('refresh', refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'strict',
-        path: '/auth',
-        maxAge: 60 * 60 * 24 * 7,
-      });
+      setRefreshCookie(reply, refreshToken);
       const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
       return reply.code(200).send({ accessToken, user: userSafe });
     } catch (err) {
@@ -126,7 +115,7 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
     }
   });
   server.post('/logout', async (request, reply) => {
-    reply.clearCookie('refresh', { path: '/auth' });
+    clearRefreshCookie(reply);
     return reply.code(200).send({ ok: true });
   });
 };
