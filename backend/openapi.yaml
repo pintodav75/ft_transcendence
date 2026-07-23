@@ -1050,6 +1050,29 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Users]
+      summary: Supprimer son avatar
+      description: >
+        Supprime l'objet MinIO de l'avatar (si présent) et remet avatar_url à null.
+        Idempotente : sans avatar, renvoie l'utilisateur inchangé. Le front retombe
+        alors sur l'avatar par défaut.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Avatar supprimé (ou déjà absent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # =====================================================================
   # EXTERNAL ACCOUNTS (in-game)
@@ -2808,11 +2831,11 @@ paths:
   /disputes/{id}/evidence:
     post:
       tags: [Disputes]
-      summary: Déposer une preuve (image + message) sur une dispute
+      summary: Déposer une preuve (image ou PDF + message) sur une dispute
       description: >
-        Un camp dépose une **preuve** dans le fil : une **image obligatoire**
-        (image/png, image/jpeg, image/webp — ≤ 5 Mo, stockée dans un **bucket MinIO privé**)
-        **+ un message** d'explication. Réservé au **capitaine** (2v2+) / **joueur** (1v1) d'un
+        Un camp dépose une **preuve** dans le fil : un **fichier obligatoire**
+        (image/png, image/jpeg, image/webp ou application/pdf — ≤ 5 Mo, stocké dans un
+        **bucket MinIO privé**) **+ un message** d'explication. Réservé au **capitaine** (2v2+) / **joueur** (1v1) d'un
         des deux camps. Plusieurs posts par camp autorisés (le fil est un dialogue asynchrone).
         La dispute doit être encore `open`. Le fichier est **entièrement validé en mémoire avant
         tout upload** (message présent, type supporté) → aucun objet orphelin ; l'insert en base
@@ -2837,7 +2860,9 @@ paths:
                 evidence:
                   type: string
                   format: binary
-                  description: Image de preuve (image/png, image/jpeg, image/webp), ≤ 5 Mo.
+                  description: >-
+                    Fichier de preuve (image/png, image/jpeg, image/webp ou application/pdf),
+                    ≤ 5 Mo.
                 message:
                   type: string
                   minLength: 1

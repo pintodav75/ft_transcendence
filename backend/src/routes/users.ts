@@ -32,10 +32,18 @@ const changePasswordSchema = z.object({
     .regex(/[^A-Za-z0-9]/, 'au moins un caractère spécial'),
 });
 
-export const MIME_TO_EXT = {
+// Deux allowlists distinctes (ne PAS refusionner) : un avatar est forcément une image,
+// une preuve de dispute peut aussi être un document (PDF). Chaque map traduit le MIME
+// déclaré vers l'extension du fichier stocké.
+export const IMAGE_MIME = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
+} as const;
+
+export const EVIDENCE_MIME = {
+  ...IMAGE_MIME,
+  'application/pdf': 'pdf',
 } as const;
 
 const deleteSchema = z.object({
@@ -153,10 +161,10 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       try {
         const file = await request.file();
         if (!file) return reply.code(400).send({ error: 'no file uploaded' });
-        if (!(file.mimetype in MIME_TO_EXT))
+        if (!(file.mimetype in IMAGE_MIME))
           return reply.code(400).send({ error: 'unsupported file type' });
         const id = randomUUID();
-        const ext = MIME_TO_EXT[file.mimetype as keyof typeof MIME_TO_EXT];
+        const ext = IMAGE_MIME[file.mimetype as keyof typeof IMAGE_MIME];
         const filename = `${id}.${ext}`;
         await minioClient.putObject(BUCKET_NAME, filename, file.file, undefined, {
           'Content-Type': file.mimetype,
@@ -181,6 +189,40 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
+  // Supprimer son avatar (module File upload : « Ability to delete uploaded files »).
+  // Idempotente : sans avatar, on renvoie l'user tel quel (rien à faire). Le front retombe
+  // sur l'avatar par défaut quand avatarUrl est NULL.
+  server.delete('/me/avatar', { onRequest: [server.authenticate] }, async (request, reply) => {
+    try {
+      const userId = request.user.sub;
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+      if (!user) return reply.code(401).send({ error: 'Unauthorized' });
+
+      if (user.avatarUrl) {
+        const filename = user.avatarUrl.split('/').pop();
+        if (filename) {
+          try {
+            await minioClient.removeObject(BUCKET_NAME, filename);
+          } catch (err) {
+            request.log.warn({ err }, 'Failed to remove avatar from MinIO');
+          }
+        }
+        const [updated] = await db
+          .update(usersTable)
+          .set({ avatarUrl: null })
+          .where(eq(usersTable.id, userId))
+          .returning();
+        if (!updated) return reply.code(401).send({ error: 'Unauthorized' });
+        const { passwordHash: _, totpSecret: _t, ...userSafe } = updated;
+        return { user: userSafe };
+      }
+
+      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
+      return { user: userSafe };
+    } catch (error) {
+      reply.code(500).send({ error: 'Internal error' });
+    }
+  });
   server.delete('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
       const data = deleteSchema.parse(request.body);
