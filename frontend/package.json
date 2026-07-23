@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
+    "generate:routes": "node scripts/generate-routes.mjs",
+    "prebuild": "node scripts/generate-routes.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

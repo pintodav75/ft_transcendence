@@ -1,3 +1,7 @@
+// ⚠️ DOIT rester le tout premier import : valide l'environnement (effet de bord) avant que
+// db/index.ts ou storage/minio.ts ne lisent process.env à leur chargement. Échoue tôt et
+// lisiblement (nom de la variable fautive, jamais sa valeur) si la config est invalide.
+import './config/validate-env.js';
 import fastify from 'fastify';
 import { readFileSync } from 'node:fs';
 import cookie from '@fastify/cookie';
@@ -47,6 +51,16 @@ await server.register(oauth2, {
   startRedirectPath: '/auth/oauth/google/start',
   callbackUri: process.env.GOOGLE_REDIRECT_URI,
   scope: ['profile', 'email'],
+  // Cookie d'ÉTAT OAuth (anti-CSRF, posé au /start, relu au /callback). SameSite=Lax est
+  // VOLONTAIRE : le retour de Google est une navigation top-level cross-site, un cookie
+  // `Strict` ne serait PAS renvoyé au callback et l'échange échouerait. Path `/` pour qu'il
+  // survive à la réécriture de chemin du proxy (le callback arrive sur /api/auth/...).
+  cookie: {
+    secure: true,
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+  },
 });
 
 server.decorate('authenticate', async function (request, reply) {
@@ -59,8 +73,11 @@ server.decorate('authenticate', async function (request, reply) {
   }
 });
 
+// Origine unique de l'app navigateur, lue depuis FRONTEND_URL (jamais de wildcard). En dev
+// proxifié tout est same-origin (https://localhost:5173) ; CORS ne sert qu'à l'accès direct
+// au backend (:3000) pour les tests. FRONTEND_URL est validé au démarrage (config/env.ts).
 await server.register(fastifyCors, {
-  origin: ['http://localhost:5173'],
+  origin: [process.env.FRONTEND_URL],
   methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
   credentials: true,
 });

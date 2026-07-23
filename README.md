@@ -8,7 +8,7 @@ Projet final du Common Core 42, en équipe de 4. Sujet libre — on construit un
 
 - Profils utilisateurs, équipes
 - Ladders par jeu avec ELO
-- Matchmaking automatique (file d'attente, matching par skill)
+- Matchmaking par défi (challenge/accept) : on ouvre un créneau, une autre équipe l'accepte
 - Soumission de résultats, système de disputes
 - Chat, amis, notifications temps réel
 - Pattern config-driven pour supporter plusieurs jeux
@@ -31,7 +31,7 @@ Projet final du Common Core 42, en équipe de 4. Sujet libre — on construit un
 
 ## 🛠️ Stack technique
 
-**Frontend** : Vite 8 + React 19 + TypeScript + TanStack Router + TanStack Query + Zustand + Tailwind v4 + shadcn/ui + React Hook Form + Zod + socket.io-client
+**Frontend** : Vite 8 + React 19 + TypeScript + TanStack Router + TanStack Query + Zustand + Tailwind v4 + shadcn/ui + React Hook Form + Zod + WebSocket natif (`ws`, pas socket.io)
 
 **Backend** : Fastify v5 sur Node 24 LTS (TypeScript)
 
@@ -51,9 +51,13 @@ Projet final du Common Core 42, en équipe de 4. Sujet libre — on construit un
 
 **Infra**
 
-- Docker Compose (un seul `up -d` lance tout)
-- **Pas de Nginx** — Fastify sert tout (API + frontend statique en prod + HTTPS)
-- HTTPS via certificats auto-signés en dev
+- Docker Compose (un seul `up -d --build` lance tout)
+- **Pas de Nginx** — le serveur de dev **Vite** est l'origine applicative unique du navigateur
+  (`https://localhost:5173`) et proxifie l'API (`/api/*`) et les médias (`/media/*`) vers le
+  backend et MinIO sur le réseau Docker interne. Le backend Fastify reste en HTTPS sur `:3000`
+  (accès direct pour diagnostic/tests).
+- HTTPS via certificat auto-signé en dev : généré par le backend, partagé au frontend (volume
+  `backend_certs`). Le navigateur n'a qu'**une seule** empreinte à accepter, sur `:5173`.
 
 ## 📦 Prérequis
 
@@ -101,23 +105,32 @@ Drizzle puis démarre le backend. Les migrations sont revérifiées automatiquem
 ### 4. Vérifier que ça tourne
 
 ```bash
-docker compose ps                  # tous les services en "Up"
-curl -k https://localhost:3000/ping  # doit renvoyer "pong-from-docker"
+docker compose ps                        # tous les services "healthy", aucun restart-loop
+curl -k https://localhost:5173/api/ping  # via le proxy → doit renvoyer "pong-from-docker"
+curl -k https://localhost:3000/ping      # backend en direct (diagnostic) → idem
 ```
 
-Dans le navigateur, ouvre aussi `https://localhost:3000/ping` et accepte
-l'exception de sécurité du certificat auto-signé avant d'utiliser le front.
+Dans le navigateur, ouvre **`https://localhost:5173`** (l'origine applicative) et accepte
+une fois l'exception de sécurité du certificat auto-signé. C'est la **seule** empreinte à
+accepter : l'API et les médias passent par cette même origine.
+
+> ⚠️ Si le certificat est régénéré (expiré, supprimé…), redémarre le frontend
+> (`docker compose restart frontend`) et **accepte à nouveau** la nouvelle empreinte dans le
+> navigateur.
 
 ## 🌐 UIs locales
 
-| Service         | URL                    | Description                                                |
-| --------------- | ---------------------- | ---------------------------------------------------------- |
-| Frontend        | http://localhost:5173  | Vite dev server                                            |
-| Backend API     | https://localhost:3000 | Fastify (HTTPS auto-signé)                                 |
-| Adminer         | http://localhost:8080  | UI Postgres                                                |
-| redis-commander | http://localhost:8081  | UI Redis                                                   |
-| MinIO console   | http://localhost:9001  | UI MinIO (login = `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`) |
-| MinIO API       | http://localhost:9000  | Endpoint S3 pour les avatars                               |
+| Service          | URL                         | Description                                                       |
+| ---------------- | --------------------------- | ----------------------------------------------------------------- |
+| **App (unique)** | **https://localhost:5173**  | Origine navigateur : React + proxy `/api/*` et `/media/*` (HTTPS) |
+| Backend direct   | https://localhost:3000      | Fastify HTTPS — diagnostic / tests uniquement (hors navigateur)   |
+| Adminer          | http://localhost:8080       | UI Postgres                                                       |
+| redis-commander  | http://localhost:8081       | UI Redis                                                          |
+| MinIO console    | http://localhost:9001       | UI MinIO (login = `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`)        |
+| MinIO API        | http://localhost:9000       | Endpoint S3 direct — hors navigateur applicatif                  |
+
+> Le navigateur applicatif ne doit émettre **aucune** requête vers `:3000` ou
+> `http://localhost:9000` : tout transite par `https://localhost:5173` (`/api`, `/media`).
 
 ## 🔗 Commandes utiles
 

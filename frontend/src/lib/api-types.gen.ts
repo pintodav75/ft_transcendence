@@ -39,7 +39,7 @@ export interface paths {
                 /** @description Compte créé */
                 201: {
                     headers: {
-                        /** @description refresh (httpOnly, Secure, SameSite=Strict, Path=/auth, 7j) */
+                        /** @description refresh (httpOnly, Secure, SameSite=Strict, 7j). Path=/auth côté backend, réécrit en Path=/api/auth par le proxy Vite pour le navigateur (I4). */
                         "Set-Cookie"?: string;
                         [name: string]: unknown;
                     };
@@ -2097,7 +2097,7 @@ export interface paths {
         head?: never;
         /**
          * Éditer une équipe (nom et/ou logo)
-         * @description **Capitaine only.** Modifie le **nom** et/ou le **logo** de l'équipe. Les deux champs sont optionnels mais **au moins un** est requis (corps vide → 400). `logoUrl` accepte `null` pour **retirer** le logo, et n'accepte que les URL **http/https**. C'est une **URL**, pas un upload de fichier (un envoi de logo vers MinIO, comme l'avatar utilisateur, serait un endpoint séparé). Renommer vers un nom déjà pris sur le même ladder viole `unique(ladder_id, name)` → **409**.
+         * @description **Capitaine only.** Modifie le **nom** et/ou le **logo** de l'équipe. Les deux champs sont optionnels mais **au moins un** est requis (corps vide → 400). `logoUrl` accepte `null` pour **retirer** le logo, et n'accepte que les URL **https** (I4 : une URL `http://` produirait du contenu mixte sur la page HTTPS). C'est une **URL**, pas un upload de fichier (un envoi de logo vers MinIO, comme l'avatar utilisateur, serait un endpoint séparé). Renommer vers un nom déjà pris sur le même ladder viole `unique(ladder_id, name)` → **409**.
          */
         patch: {
             parameters: {
@@ -2115,7 +2115,7 @@ export interface paths {
                         name?: string;
                         /**
                          * Format: uri
-                         * @description URL **http/https** du logo, ou `null` pour le retirer. Les autres schémas d'URI (`javascript:`, `ftp:`…) sont **refusés** (400) : la valeur est persistée et pourrait plus tard atterrir dans un `<a href>` ou du CSS.
+                         * @description URL **https** du logo, ou `null` pour le retirer. `http://` et les autres schémas d'URI (`javascript:`, `ftp:`…) sont **refusés** (400) : `http://` produirait du contenu mixte, et une valeur persistée pourrait plus tard atterrir dans un `<a href>` ou du CSS.
                          */
                         logoUrl?: string | null;
                     };
@@ -2133,7 +2133,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Param `:id` non-uuid, corps vide (aucun champ à modifier), `name` vide ou > 50, `logoUrl` non conforme à une URL **http/https**. */
+                /** @description Param `:id` non-uuid, corps vide (aucun champ à modifier), `name` vide ou > 50, `logoUrl` non conforme à une URL **https**. */
                 400: {
                     headers: {
                         [name: string]: unknown;

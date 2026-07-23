@@ -12,8 +12,22 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      # Cert dev généré par le backend, monté en LECTURE SEULE : Vite sert le front en HTTPS
+      # sur la MÊME empreinte que le backend. Le frontend n'est jamais générateur de cert.
+      - backend_certs:/app/certs:ro
     environment:
       - CHOKIDAR_USEPOLLING=true
+      # Cibles proxy INTERNES (réseau Docker) lues par vite.config.ts. Non préfixées VITE_ :
+      # elles ne doivent PAS fuiter dans le bundle client. Obligatoires (`:?`) et SANS fallback :
+      # une config incomplète doit échouer tôt, pas démarrer sur une valeur devinée.
+      - API_PROXY_TARGET=${API_PROXY_TARGET:?API_PROXY_TARGET manquant (ex. https://backend:3000)}
+      - MINIO_PROXY_TARGET=${MINIO_PROXY_TARGET:?MINIO_PROXY_TARGET manquant (ex. http://minio:9000)}
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1:5173/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
 
   backend:
     build: ./backend
@@ -33,22 +47,23 @@ services:
         condition: service_healthy
     environment:
       - CHOKIDAR_USEPOLLING=true
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - JWT_SECRET=${JWT_SECRET}
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_PORT=${MINIO_PORT}
-      - MINIO_USE_SSL=${MINIO_USE_SSL}
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
-      - MINIO_BUCKET=${MINIO_BUCKET}
-      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
-      - REDIS_HOSTNAME=${REDIS_HOSTNAME}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # Variables OBLIGATOIRES : `${VAR:?message}` fait échouer `docker compose config`/`up` tôt
+      # et clairement (nom de la variable) si l'une manque, au lieu de démarrer sur une chaîne vide.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER manquant}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB manquant}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET manquant (openssl rand -hex 64)}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:?MINIO_ENDPOINT manquant}
+      - MINIO_PORT=${MINIO_PORT:?MINIO_PORT manquant}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:?MINIO_USE_SSL manquant (true/false)}
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?MINIO_ROOT_USER manquant}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD manquant}
+      - MINIO_BUCKET=${MINIO_BUCKET:?MINIO_BUCKET manquant}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID manquant}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET manquant}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:?GOOGLE_REDIRECT_URI manquant (https://localhost:5173/api/auth/oauth/google/callback)}
+      - FRONTEND_URL=${FRONTEND_URL:?FRONTEND_URL manquant (https://localhost:5173)}
+      - REDIS_HOSTNAME=${REDIS_HOSTNAME:?REDIS_HOSTNAME manquant}
+      - REDIS_PORT=${REDIS_PORT:?REDIS_PORT manquant}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD manquant}
     healthcheck:
       test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1:3000/ping"]
       interval: 5s

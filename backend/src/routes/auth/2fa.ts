@@ -3,6 +3,7 @@ import z from 'zod';
 import { db } from '../../db/index.js';
 import { usersTable } from '../../db/schema.js';
 import { signAccessToken, signRefreshToken } from '../../auth/tokens.js';
+import { setRefreshCookie } from '../../auth/cookies.js';
 import { eq } from 'drizzle-orm';
 import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
@@ -106,13 +107,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (server) => {
       if (!verified) return reply.code(400).send({ error: 'invalid code' });
       const accessToken = signAccessToken(request.server, { sub: user.id });
       const refreshToken = signRefreshToken(request.server, { sub: user.id });
-      reply.setCookie('refresh', refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'strict',
-        path: '/auth',
-        maxAge: 60 * 60 * 24 * 7,
-      });
+      setRefreshCookie(reply, refreshToken);
       const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
       return reply.code(200).send({ accessToken, user: userSafe });
     } catch (error) {
