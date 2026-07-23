@@ -50,6 +50,69 @@ const presignClient = new Client({
   region: 'us-east-1',
 });
 
+// Codes d'erreur système signalant une indisponibilité TRANSITOIRE de MinIO (DNS qui bafouille
+// pendant un `docker compose restart minio`, socket refusée/coupée le temps que le service
+// remonte). Ce sont les SEULS cas où l'on retente : ils n'ont RIEN à voir avec une erreur S3
+// réelle (permission refusée, policy invalide) qui, elle, doit rester FATALE — cf. l'invariant
+// fail-closed du bucket privé `evidence`.
+const TRANSIENT_NETWORK_CODES = new Set([
+  'EAI_AGAIN', // résolution DNS temporairement indisponible (le cas du ticket #28)
+  'ENOTFOUND', // le nom `minio` ne résout pas encore (service en cours de démarrage)
+  'ECONNREFUSED', // MinIO n'écoute pas encore sur le port
+  'ECONNRESET', // connexion coupée en plein vol (MinIO redémarre)
+  'ETIMEDOUT', // pas de réponse dans les temps
+  'EPIPE', // écriture sur un socket déjà fermé
+  'ECONNABORTED', // connexion avortée localement (MinIO ferme pendant l'échange)
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENETDOWN', // interface/réseau temporairement hors service
+  'EADDRNOTAVAIL', // adresse pas encore disponible (réseau Docker en cours de remontée)
+  'EAI_NODATA',
+]);
+
+// Une erreur MinIO est « transitoire » si elle porte (ou mentionne) un code réseau ci-dessus.
+// Toute autre erreur — typiquement une S3Error `AccessDenied` sur setBucketPolicy — n'est PAS
+// transitoire et doit remonter immédiatement pour préserver le fail-closed.
+function isTransientNetworkError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code)) return true;
+  // Certaines erreurs réseau remontées par minio-js n'exposent pas `.code` proprement mais
+  // portent le token dans le message (ex. « getaddrinfo EAI_AGAIN minio »).
+  const message = (error as { message?: unknown }).message;
+  if (typeof message === 'string') {
+    for (const token of TRANSIENT_NETWORK_CODES) {
+      if (message.includes(token)) return true;
+    }
+  }
+  return false;
+}
+
+const MAX_ATTEMPTS = 10;
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 10_000;
+
+// Retente `operation` UNIQUEMENT sur une indisponibilité réseau transitoire de MinIO, avec un
+// backoff exponentiel plafonné et un nombre de tentatives borné. Une erreur non transitoire
+// (permission, policy, etc.) est propagée IMMÉDIATEMENT, sans retry — le backend doit alors
+// refuser de démarrer. `operation` doit être idempotente (elle l'est : bucketExists / makeBucket
+// conditionnel / setBucketPolicy sont tous rejouables).
+async function withMinioConnectRetry<T>(operation: () => Promise<T>, label: string): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isTransientNetworkError(error) || attempt >= MAX_ATTEMPTS) throw error;
+      const delay = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `MinIO ${label}: indisponibilité transitoire (tentative ${attempt}/${MAX_ATTEMPTS}) : ${reason} — nouvelle tentative dans ${delay}ms`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 async function ensureOneBucket(name: string, isPublic: boolean) {
   const exists = await minioClient.bucketExists(name);
   if (!exists) {
@@ -85,8 +148,16 @@ async function ensureOneBucket(name: string, isPublic: boolean) {
 
 export async function ensureBucket() {
   try {
-    await ensureOneBucket(BUCKET_NAME, true); // avatars : public en lecture
-    await ensureOneBucket(EVIDENCE_BUCKET, false); // preuves de dispute : privé
+    // Chaque bucket est mis en place derrière le retry : un blip DNS/réseau de MinIO au boot
+    // (ticket #28) est absorbé, mais une VRAIE erreur de policy sur le bucket privé reste fatale.
+    await withMinioConnectRetry(
+      () => ensureOneBucket(BUCKET_NAME, true),
+      'préparation du bucket avatars',
+    ); // avatars : public en lecture
+    await withMinioConnectRetry(
+      () => ensureOneBucket(EVIDENCE_BUCKET, false),
+      'préparation du bucket evidence',
+    ); // preuves de dispute : privé
   } catch (error) {
     console.error('ensureBucket failed:', error);
     throw error;
