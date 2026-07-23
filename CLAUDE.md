@@ -48,7 +48,7 @@ Le sujet est explicite : *« You will be asked to demonstrate each claimed modul
 
 ### 🚨 Pourquoi « Game stats & match history » a disparu
 
-**Décision du 13/07 : il n'y aura PAS de jeu jouable dans l'app.** Or le sujet v20 l'exige pour ce module — _« You cannot claim this module without a functional game »_. La plateforme ne fait que **tracker des jeux externes** (LoL / CS2 / chess.com via liaison de compte) → le module est **invalidable**.
+**Décision du 13/07 : il n'y aura PAS de jeu jouable dans l'app.** Or le sujet (v21.1, vérifié 23/07) l'exige pour ce module — _« You cannot claim this module without a functional game »_. La plateforme ne fait que **tracker des jeux externes** (LoL / CS2 / chess.com via liaison de compte) → le module est **invalidable**.
 
 Sans remplacement, l'équipe tombait à **13 points → sous la barre des 14 → projet rejeté.**
 
@@ -537,6 +537,8 @@ docker compose up -d --build <service>  # rebuild après modif Dockerfile
 - ⚠️ **Types d'API côté front** : **codegen en place** — `frontend/src/lib/api-types.gen.ts` généré via `openapi-typescript` depuis `openapi.yaml` ; importer `components['schemas'][...]`, **ne jamais importer les types du backend** (ils décrivent la DB, pas le JSON). ⚠️ La codegen **ne corrige pas** le piège `Date`→`string` : `scheduledAt` est un `Date` côté back mais arrive en **`string` ISO** — ne pas le traiter comme un `Date`. **Régénérer `api-types.gen.ts` après toute modif de `openapi.yaml`.**
 
 ---
+
+_23 juillet 2026 (soir) — **AUDIT BACKEND vs sujet RÉEL (`trans.subject.pdf` = v21.1 « Surprise », PAS v20).** Les 11 modules revendiqués existent tous en v21.1 avec les points annoncés (5 majors + 6 minors = **16 pts**, seuil 14). Confirmé contre le PDF, pas contre un résumé. **Tickets sortis de l'audit** (backlog, non encore ouverts) : (1) **File upload back** — route `DELETE` avatar + upload PDF sur l'evidence des disputes (scinder l'allowlist `MIME_TO_EXT` en `IMAGE_MIME`/`EVIDENCE_MIME`) ; (2) **tokens JWT typés** — claim `type: access|refresh` vérifié dans `authenticate` + `/auth/refresh` (sinon un refresh 7j est un access valide) ; (3) **dédup `GET /me`** — supprimer `/auth/me`, garder `GET /users/me`, front `restoreSession` → `/users/me` + retirer du YAML ; (4) **valider les params d'URL** de `friends`/`blocks`/`messages`/`ladders` (`z.uuid()`) + `games` (`z.string()`) → 400 au lieu de 500. **Points OK confirmés, rien à coder** : online status (fourni par le WS présence, le rail social front le consommera), Notifications (couverture large, « jamais l'acteur »), openapi (régen byte-identique + front `tsc` vert). ⚠️ Rappels rejet-projet (hors back) toujours ouverts : Privacy/ToS non-placeholder, 0 warning console, README complet (rôles PO/PM/Tech Lead/Devs, calcul de points, qui-fait-quoi, usage IA). Rapport détaillé gardé HORS repo (comme l'audit du 05/07)._
 
 _Dernière mise à jour : 23 juillet 2026 — **I4 (origine unique HTTPS + proxy `/api`/`/media` + cycle de vie du cert + validation d'env) mergé sur `master`** (merge `b2800eb`, commit `fe585b6`). Le navigateur ne connaît plus qu'une origine `https://localhost:5173` ; plus de `:3000`/`:9000` côté front, plus de contenu mixte ; cookie refresh `Path=/api/auth` (invariant proxy/back/front), migration `0020` appliquée. Recettes automatisée (7/7) + navigateur Chrome (register + Google + F5 restaure la session) vertes. **La dette cross-scheme F0-C est résolue** — carte https://trello.com/c/wvEfFTVq à passer en Done._
 

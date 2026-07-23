@@ -262,6 +262,7 @@ Métadonnées d'un match. C'est l'entité centrale du domaine jeu.
 | `started_at` | `timestamp tz` | NULLABLE | Instant de l'**acceptation** du slot. **Historique seul — aucune règle métier ne le lit** (la disponibilité est pilotée par `scheduled_at`, cf. §5.2) |
 | `completed_at` | `timestamp tz` | NULLABLE | Quand status devient `'completed'` ou `'cancelled'` |
 | `created_at` | `timestamp tz` | NOT NULL DEFAULT NOW | |
+| `maps` | `text[]` | NOT NULL DEFAULT `[]` | Maps tirées pour ce match (BO3) — 3 maps distinctes tirées du pool du jeu à la création (B5b, `ORDER BY random()`), `[]` si le jeu n'a pas de pool. Source = table `game_maps` (§3.13). Ajouté en migration **0013** |
 
 **State machine de `status`** :
 
@@ -409,6 +410,22 @@ new_elo_A  = elo_A + 32 * (résultat_A - expected_A)
 - ELO de départ : `1000`
 - `résultat_A` : 1 si gagne, 0 si perd (pas de nul)
 - Pour les ladders team : on applique la formule sur l'ELO de la team (et non sur ses joueurs individuels)
+
+---
+
+### 3.13 `game_maps`
+
+Pool de maps par jeu, alimenté en seed dans les migrations (val 6 maps, cs2 7 — migration **0013**, `ON CONFLICT DO NOTHING`). Sert au tirage BO3 à la création d'un match (cf. §3.7, colonne `maps`).
+
+| Colonne | Type | Contraintes | Rôle |
+|---|---|---|---|
+| `id` | `uuid` | PK | |
+| `game_id` | `text` | NOT NULL, FK → games(id) ON DELETE CASCADE | Le jeu auquel la map appartient |
+| `name` | `varchar` | NOT NULL | Nom de la map (NOT NULL depuis migration 0014) |
+
+**Contraintes** : `UNIQUE(game_id, name)`.
+
+⚠️ Table ajoutée en migration **0013** (B5b), hors du design initial de ce document.
 
 ---
 
