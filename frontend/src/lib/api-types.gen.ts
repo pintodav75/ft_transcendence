@@ -873,7 +873,34 @@ export interface paths {
                 500: components["responses"]["InternalError"];
             };
         };
-        delete?: never;
+        /**
+         * Supprimer son avatar
+         * @description Supprime l'objet MinIO de l'avatar (si présent) et remet avatar_url à null. Idempotente : sans avatar, renvoie l'utilisateur inchangé. Le front retombe alors sur l'avatar par défaut.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Avatar supprimé (ou déjà absent) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            user?: components["schemas"]["User"];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                500: components["responses"]["InternalError"];
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -3047,8 +3074,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Déposer une preuve (image + message) sur une dispute
-         * @description Un camp dépose une **preuve** dans le fil : une **image obligatoire** (image/png, image/jpeg, image/webp — ≤ 5 Mo, stockée dans un **bucket MinIO privé**) **+ un message** d'explication. Réservé au **capitaine** (2v2+) / **joueur** (1v1) d'un des deux camps. Plusieurs posts par camp autorisés (le fil est un dialogue asynchrone). La dispute doit être encore `open`. Le fichier est **entièrement validé en mémoire avant tout upload** (message présent, type supporté) → aucun objet orphelin ; l'insert en base se fait sous **verrou** (clé = matchId) avec re-vérification `open` → aucune preuve n'atterrit sur une dispute close entre-temps. La garde de camp est vérifiée **avant** de révéler si la dispute est résolue (pas d'oracle d'état pour un inconnu).
+         * Déposer une preuve (image ou PDF + message) sur une dispute
+         * @description Un camp dépose une **preuve** dans le fil : un **fichier obligatoire** (image/png, image/jpeg, image/webp ou application/pdf — ≤ 5 Mo, stocké dans un **bucket MinIO privé**) **+ un message** d'explication. Réservé au **capitaine** (2v2+) / **joueur** (1v1) d'un des deux camps. Plusieurs posts par camp autorisés (le fil est un dialogue asynchrone). La dispute doit être encore `open`. Le fichier est **entièrement validé en mémoire avant tout upload** (message présent, type supporté) → aucun objet orphelin ; l'insert en base se fait sous **verrou** (clé = matchId) avec re-vérification `open` → aucune preuve n'atterrit sur une dispute close entre-temps. La garde de camp est vérifiée **avant** de révéler si la dispute est résolue (pas d'oracle d'état pour un inconnu).
          */
         post: {
             parameters: {
@@ -3064,7 +3091,7 @@ export interface paths {
                     "multipart/form-data": {
                         /**
                          * Format: binary
-                         * @description Image de preuve (image/png, image/jpeg, image/webp), ≤ 5 Mo.
+                         * @description Fichier de preuve (image/png, image/jpeg, image/webp ou application/pdf), ≤ 5 Mo.
                          */
                         evidence: string;
                         /** @description Explication accompagnant la preuve. */

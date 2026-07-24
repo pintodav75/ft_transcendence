@@ -13,7 +13,7 @@ import {
 } from '../db/schema.js';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { minioClient, EVIDENCE_BUCKET, presignEvidenceUrl } from '../storage/minio.js';
-import { MIME_TO_EXT } from './users.js';
+import { EVIDENCE_MIME } from './users.js';
 import { completeMatchWithElo } from '../utils/rankings.js';
 import {
   notify,
@@ -165,7 +165,7 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
           if (part.type === 'file') {
             if (part.fieldname !== 'evidence')
               return reply.code(400).send({ error: 'unexpected file field' });
-            if (!(part.mimetype in MIME_TO_EXT))
+            if (!(part.mimetype in EVIDENCE_MIME))
               return reply.code(400).send({ error: 'unsupported file type' });
             mime = part.mimetype;
             // toBuffer() respecte la limite 5 Mo → jette FST_REQ_FILE_TOO_LARGE si dépassée.
@@ -180,7 +180,7 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
 
         // 5. Upload dans le bucket PRIVÉ. On stocke la CLÉ d'objet (pas une URL) : l'URL de
         //    lecture sera présignée à la volée dans GET /disputes/:id, après la garde.
-        const ext = MIME_TO_EXT[mime as keyof typeof MIME_TO_EXT];
+        const ext = EVIDENCE_MIME[mime as keyof typeof EVIDENCE_MIME];
         key = `${randomUUID()}.${ext}`;
         await minioClient.putObject(EVIDENCE_BUCKET, key, fileBuffer, fileBuffer.length, {
           'Content-Type': mime,
