@@ -240,6 +240,31 @@ components:
           type: string
           format: date-time
 
+    # ---------- Conversation summary ----------
+    ConversationSummary:
+      type: object
+      properties:
+        friend:
+          $ref: '#/components/schemas/FriendSummary'
+        lastMessage:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            senderId:
+              type: string
+              format: uuid
+            receiverId:
+              type: string
+              format: uuid
+            content:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+          required: [id, senderId, receiverId, content, createdAt]
+
     # ---------- Auth payloads ----------
     AuthSuccess:
       type: object
@@ -1286,9 +1311,22 @@ paths:
   /friends/requests:
     get:
       tags: [Friends]
-      summary: Demandes d'amis reçues (pending)
+      summary: Demandes d'amis (reçues ou envoyées, pending)
+      description: >
+        `direction=received` (défaut) renvoie les demandes reçues avec la clé
+        `from:` (l'expéditeur). `direction=sent` renvoie mes demandes envoyées
+        avec la clé `to:` (le destinataire). Dans les deux cas, uniquement les
+        demandes `pending`.
       security:
         - bearerAuth: []
+      parameters:
+        - in: query
+          name: direction
+          required: false
+          schema:
+            type: string
+            enum: [sent, received]
+            default: received
       responses:
         '200':
           description: OK
@@ -1309,7 +1347,17 @@ paths:
                           type: string
                           format: date-time
                         from:
+                          description: Présent uniquement pour direction=received.
                           $ref: '#/components/schemas/FriendSummary'
+                        to:
+                          description: Présent uniquement pour direction=sent.
+                          $ref: '#/components/schemas/FriendSummary'
+        '400':
+          description: Param direction invalide (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -1409,10 +1457,13 @@ paths:
   /friends/{id}:
     delete:
       tags: [Friends]
-      summary: Supprimer un ami
+      summary: Supprimer un ami ou annuler une demande envoyée
       description: >
-        Unfriend d'une amitié acceptée. Les deux parties (requester ou
-        addressee) peuvent supprimer.
+        Deux usages selon l'état de la relation. Amitié `accepted` -> unfriend
+        (les deux parties, requester ou addressee, peuvent supprimer). Demande
+        `pending` dont je suis le requester -> annulation de ma demande envoyée.
+        Une demande `pending` que j'ai reçue (je suis l'addressee) n'est PAS
+        supprimable ici -> 400 (le refus passe par POST /:id/reject).
       security:
         - bearerAuth: []
       parameters:
@@ -1424,14 +1475,15 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Amitié supprimée
+          description: Amitié supprimée ou demande envoyée annulée
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Ok'
         '400':
           description: >
-            Param :id non-uuid (ValidationError) ou pas d'amitié active à supprimer (Error)
+            Param :id non-uuid (ValidationError) ou action non permise sur cet
+            état — pending reçue, etc. (Error)
           content:
             application/json:
               schema:
@@ -1456,6 +1508,32 @@ paths:
   # =====================================================================
   # MESSAGES
   # =====================================================================
+  /messages/conversations:
+    get:
+      tags: [Messages]
+      summary: Liste des conversations
+      description: >
+        Pour chaque ami accepté avec qui j'ai échangé, le dernier message de la
+        conversation. Trié par date du dernier message décroissante (le plus
+        récent d'abord). Aucun champ de présence (elle vient du WebSocket côté
+        front). Amis acceptés uniquement (bloquer supprime déjà l'amitié).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConversationSummary'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /messages/{friendId}:
     get:
       tags: [Messages]

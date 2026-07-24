@@ -22,6 +22,7 @@ import test_teams_linked
 import test_disputes
 import test_notifications
 import test_search
+import test_social_data
 import test_proxy_smoke
 
 SUITES = [
@@ -38,6 +39,7 @@ SUITES = [
     test_disputes,
     test_notifications,
     test_search,
+    test_social_data,
     # Dernier : suppose le proxy Vite (https://localhost:5173) en marche. Valide la topologie I4
     # proxifiée (/api, /media, cycle de vie du refresh cookie). Surchargeable via PROXY_BASE_URL.
     test_proxy_smoke,

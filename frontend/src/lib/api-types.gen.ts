@@ -1176,10 +1176,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Demandes d'amis reçues (pending) */
+        /**
+         * Demandes d'amis (reçues ou envoyées, pending)
+         * @description `direction=received` (défaut) renvoie les demandes reçues avec la clé `from:` (l'expéditeur). `direction=sent` renvoie mes demandes envoyées avec la clé `to:` (le destinataire). Dans les deux cas, uniquement les demandes `pending`.
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    direction?: "sent" | "received";
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1198,9 +1203,21 @@ export interface paths {
                                 id?: string;
                                 /** Format: date-time */
                                 sentAt?: string;
+                                /** @description Présent uniquement pour direction=received. */
                                 from?: components["schemas"]["FriendSummary"];
+                                /** @description Présent uniquement pour direction=sent. */
+                                to?: components["schemas"]["FriendSummary"];
                             }[];
                         };
+                    };
+                };
+                /** @description Param direction invalide (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
                     };
                 };
                 500: components["responses"]["InternalError"];
@@ -1365,8 +1382,8 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Supprimer un ami
-         * @description Unfriend d'une amitié acceptée. Les deux parties (requester ou addressee) peuvent supprimer.
+         * Supprimer un ami ou annuler une demande envoyée
+         * @description Deux usages selon l'état de la relation. Amitié `accepted` -> unfriend (les deux parties, requester ou addressee, peuvent supprimer). Demande `pending` dont je suis le requester -> annulation de ma demande envoyée. Une demande `pending` que j'ai reçue (je suis l'addressee) n'est PAS supprimable ici -> 400 (le refus passe par POST /:id/reject).
          */
         delete: {
             parameters: {
@@ -1379,7 +1396,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Amitié supprimée */
+                /** @description Amitié supprimée ou demande envoyée annulée */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1388,7 +1405,7 @@ export interface paths {
                         "application/json": components["schemas"]["Ok"];
                     };
                 };
-                /** @description Param :id non-uuid (ValidationError) ou pas d'amitié active à supprimer (Error) */
+                /** @description Param :id non-uuid (ValidationError) ou action non permise sur cet état — pending reçue, etc. (Error) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1418,6 +1435,48 @@ export interface paths {
                 500: components["responses"]["InternalError"];
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/messages/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Liste des conversations
+         * @description Pour chaque ami accepté avec qui j'ai échangé, le dernier message de la conversation. Trié par date du dernier message décroissante (le plus récent d'abord). Aucun champ de présence (elle vient du WebSocket côté front). Amis acceptés uniquement (bloquer supprime déjà l'amitié).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            conversations?: components["schemas"]["ConversationSummary"][];
+                        };
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3800,6 +3859,20 @@ export interface components {
             content?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        ConversationSummary: {
+            friend?: components["schemas"]["FriendSummary"];
+            lastMessage?: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                senderId: string;
+                /** Format: uuid */
+                receiverId: string;
+                content: string;
+                /** Format: date-time */
+                createdAt: string;
+            };
         };
         AuthSuccess: {
             accessToken: string;
