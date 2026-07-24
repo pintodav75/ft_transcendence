@@ -91,7 +91,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
             method: 'POST',
           })
         const { user } = await requestAuthJson<MeResponse>(
-          '/auth/me',
+          '/users/me',
           { method: 'GET' },
           accessToken,
         )
