@@ -1338,11 +1338,14 @@ paths:
                   friendship:
                     $ref: '#/components/schemas/Friendship'
         '400':
-          description: Déjà amis (status non pending)
+          description: >
+            Param :id non-uuid (ValidationError) ou déjà amis — status non pending (Error)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
         '403':
           description: Non autorisé (pas l'addressee)
           content:
@@ -1380,11 +1383,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ok'
         '400':
-          description: Status non pending
+          description: >
+            Param :id non-uuid (ValidationError) ou status non pending (Error)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
         '403':
           description: Non autorisé
           content:
@@ -1424,11 +1430,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ok'
         '400':
-          description: Pas d'amitié active à supprimer
+          description: >
+            Param :id non-uuid (ValidationError) ou pas d'amitié active à supprimer (Error)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
         '403':
           description: Non autorisé
           content:
@@ -1475,6 +1484,12 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Message'
+        '400':
+          description: Param :friendId non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '403':
           description: Pas amis
           content:
@@ -1542,11 +1557,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ok'
         '400':
-          description: Auto-blocage tenté ou déjà bloqué (SQLSTATE 23505)
+          description: >
+            Param :userId non-uuid (ValidationError) ; auto-blocage tenté ou déjà bloqué
+            — SQLSTATE 23505 (Error)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1579,6 +1598,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Ok'
+        '400':
+          description: Param :userId non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -1619,6 +1644,8 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 1
+            maxLength: 50
             example: cs2
       responses:
         '200':
@@ -1631,6 +1658,14 @@ paths:
                   game:
                     $ref: '#/components/schemas/Game'
                 required: [game]
+        '400':
+          description: >
+            Param :id hors bornes — 1 à 50 caractères (ValidationError). `games.id` est un
+            slug `text`, pas un uuid : un slug bien formé mais inconnu reste un 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '404':
           description: Jeu inconnu ou inactif
           content:
@@ -1702,6 +1737,12 @@ paths:
                   game:
                     $ref: '#/components/schemas/Game'
                 required: [ladder, game]
+        '400':
+          description: Param :id non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '404':
           description: Ladder inconnu
           content:
@@ -1779,6 +1820,12 @@ paths:
                               required: [type, name]
                       required: [rank, elo, wins, losses, competitor]
                 required: [rankings]
+        '400':
+          description: Param :id non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '404':
           description: Ladder inconnu
           content:

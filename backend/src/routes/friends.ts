@@ -8,6 +8,7 @@ import { notify, pushNotifications } from '../utils/notifications.js';
 const friendsSchema = z.object({
   addresseeId: z.uuid(),
 });
+const idParamSchema = z.object({ id: z.uuid() });
 
 export const friendsRoutes: FastifyPluginAsync = async (server) => {
   server.post('/', { onRequest: [server.authenticate] }, async (request, reply) => {
@@ -155,7 +156,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const userId = request.user.sub;
-        const friendshipId = request.params.id;
+        const { id: friendshipId } = idParamSchema.parse(request.params);
         const [friendship] = await db
           .select()
           .from(friendshipsTable)
@@ -190,6 +191,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
         pushNotifications(notifs);
         return reply.code(200).send({ friendship: updated });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         reply.code(500).send({ error: 'Internal error' });
       }
     },
@@ -200,7 +202,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const userId = request.user.sub;
-        const friendshipId = request.params.id;
+        const { id: friendshipId } = idParamSchema.parse(request.params);
         const [friendship] = await db
           .select()
           .from(friendshipsTable)
@@ -213,6 +215,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
         await db.delete(friendshipsTable).where(eq(friendshipsTable.id, friendshipId));
         return reply.code(200).send({ ok: true });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         reply.code(500).send({ error: 'Internal error' });
       }
     },
@@ -223,7 +226,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const userId = request.user.sub;
-        const friendshipId = request.params.id;
+        const { id: friendshipId } = idParamSchema.parse(request.params);
         const [friendship] = await db
           .select()
           .from(friendshipsTable)
@@ -236,6 +239,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
         await db.delete(friendshipsTable).where(eq(friendshipsTable.id, friendshipId));
         return reply.code(200).send({ ok: true });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         reply.code(500).send({ error: 'Internal error' });
       }
     },

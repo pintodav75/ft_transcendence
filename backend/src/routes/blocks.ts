@@ -2,6 +2,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/index.js';
 import { blocksTable, friendshipsTable, usersTable } from '../db/schema.js';
 import { eq, or, and } from 'drizzle-orm';
+import z from 'zod';
+
+const userIdParamSchema = z.object({ userId: z.uuid() });
 
 export const blocksRoutes: FastifyPluginAsync = async (server) => {
   server.post<{ Params: { userId: string } }>(
@@ -10,7 +13,7 @@ export const blocksRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const blockerId = request.user.sub;
-        const blockedId = request.params.userId;
+        const { userId: blockedId } = userIdParamSchema.parse(request.params);
         if (blockerId === blockedId)
           return reply.code(400).send({ error: 'cannot block yourself' });
         const [user] = await db.select().from(usersTable).where(eq(usersTable.id, blockedId));
@@ -32,6 +35,7 @@ export const blocksRoutes: FastifyPluginAsync = async (server) => {
         await db.insert(blocksTable).values({ blockerId: blockerId, blockedId: blockedId });
         return reply.code(201).send({ ok: true });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         if (
           typeof error === 'object' &&
           error !== null &&
@@ -53,12 +57,13 @@ export const blocksRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const blockerId = request.user.sub;
-        const blockedId = request.params.userId;
+        const { userId: blockedId } = userIdParamSchema.parse(request.params);
         await db
           .delete(blocksTable)
           .where(and(eq(blocksTable.blockerId, blockerId), eq(blocksTable.blockedId, blockedId)));
         return reply.code(200).send({ ok: true });
       } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         reply.code(500).send({ error: 'Internal error' });
       }
     },

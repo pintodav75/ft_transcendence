@@ -3,6 +3,9 @@ import { db } from '../db/index.js';
 import { usersTable, friendshipsTable, messagesTable } from '../db/schema.js';
 import { eq, and, or, desc } from 'drizzle-orm';
 import { isBlocked } from '../utils/blocks.js';
+import z from 'zod';
+
+const friendIdParamSchema = z.object({ friendId: z.uuid() });
 
 export const messagesRoutes: FastifyPluginAsync = async (server) => {
   server.get<{ Params: { friendId: string } }>(
@@ -11,7 +14,7 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const userId = request.user.sub;
-        const friendId = request.params.friendId;
+        const { friendId } = friendIdParamSchema.parse(request.params);
         const [friend] = await db.select().from(usersTable).where(eq(usersTable.id, friendId));
         if (!friend) return reply.code(404).send({ error: 'friend not found' });
         if (await isBlocked(userId, friendId)) {
@@ -49,7 +52,8 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
           .limit(100);
         const messages = result.reverse();
         return reply.code(200).send({ messages });
-      } catch {
+      } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         reply.code(500).send({ error: 'Internal error' });
       }
     },

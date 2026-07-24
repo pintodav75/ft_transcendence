@@ -3,6 +3,9 @@ import { db } from '../db/index.js';
 import { eq, desc, asc } from 'drizzle-orm';
 import { laddersTable, gamesTable, rankingsTable, usersTable, teamsTable } from '../db/schema.js';
 import { shapeRankings } from '../utils/leaderboard.js';
+import z from 'zod';
+
+const idParamSchema = z.object({ id: z.uuid() });
 
 export const laddersRoutes: FastifyPluginAsync = async (server) => {
   server.get<{ Querystring: { gameId?: string } }>('/', async (request, reply) => {
@@ -19,7 +22,7 @@ export const laddersRoutes: FastifyPluginAsync = async (server) => {
   });
   server.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
     try {
-      const id = request.params.id;
+      const { id } = idParamSchema.parse(request.params);
       const [row] = await db
         .select()
         .from(laddersTable)
@@ -28,12 +31,13 @@ export const laddersRoutes: FastifyPluginAsync = async (server) => {
       if (!row) return reply.code(404).send({ error: 'Ladder not found' });
       return { ladder: row.ladders, game: row.games };
     } catch (err) {
+      if (err instanceof z.ZodError) return reply.code(400).send({ errors: err.issues });
       reply.code(500).send({ error: 'Internal error' });
     }
   });
   server.get<{ Params: { id: string } }>('/:id/rankings', async (request, reply) => {
     try {
-      const id = request.params.id;
+      const { id } = idParamSchema.parse(request.params);
       const [ladder] = await db.select().from(laddersTable).where(eq(laddersTable.id, id));
       if (!ladder) return reply.code(404).send({ error: 'Ladder not found' });
       const rows = await db
@@ -62,6 +66,7 @@ export const laddersRoutes: FastifyPluginAsync = async (server) => {
       const rankings = shapeRankings(rows);
       return reply.code(200).send({ rankings });
     } catch (error) {
+      if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
       reply.code(500).send({ error: 'Internal error' });
     }
   });
