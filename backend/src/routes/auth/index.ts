@@ -105,7 +105,13 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
     try {
       const refreshToken = request.cookies.refresh;
       if (!refreshToken) return reply.code(401).send({ error: 'Missing refresh token' });
-      const payload = server.jwt.verify<{ sub: string }>(refreshToken);
+      const payload = server.jwt.verify<{ sub: string; type?: 'access' | 'refresh' }>(
+        refreshToken,
+      );
+      // Un access token (ou un refresh d'avant le claim `type`) n'échange pas de session.
+      // Même message que les autres échecs : aucun oracle « mauvais type » vs « invalide ».
+      if (payload.type !== 'refresh')
+        return reply.code(401).send({ error: 'Invalid refresh token' });
       const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.sub));
       if (!user) return reply.code(401).send({ error: 'Invalid refresh token' });
       const accessToken = signAccessToken(request.server, { sub: user.id });

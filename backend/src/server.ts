@@ -66,7 +66,10 @@ await server.register(oauth2, {
 server.decorate('authenticate', async function (request, reply) {
   try {
     await request.jwtVerify();
-    if ('pending' in request.user)
+    // Seul un token d'ACCÈS ouvre les routes protégées. Un refresh (7 j), un tempToken 2FA
+    // ou un token émis avant l'ajout du claim `type` n'ont pas `type: 'access'` → rejet.
+    // La garde `pending` reste explicite (héritée de la review B9) : défense en profondeur.
+    if ('pending' in request.user || request.user.type !== 'access')
       return reply.code(401).send({ error: 'Token cannot be used here' });
   } catch (err) {
     reply.code(401).send({ error: 'Unauthorized' });

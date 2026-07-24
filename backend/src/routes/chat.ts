@@ -73,12 +73,17 @@ export const chatRoutes: FastifyPluginAsync = async (server) => {
       const token = req.query.token;
       let userId: string;
       try {
-        const payload = server.jwt.verify<{ sub: string; pending?: 'totp' }>(token);
+        const payload = server.jwt.verify<{
+          sub: string;
+          type?: 'access' | 'refresh';
+          pending?: 'totp';
+        }>(token);
         // Même garde que `server.authenticate` (server.ts) : un tempToken 2FA (émis après
         // mot de passe correct, AVANT le code TOTP) est un JWT valide — sans ce contrôle,
         // il ouvrirait le socket comme un vrai accessToken (chat + notifications live)
         // pour quiconque possède juste le mot de passe. Review B9 (Walid, 20/07).
-        if (payload.pending) {
+        // Idem pour le refresh token (7 j) depuis T2 : seul `type: 'access'` ouvre le socket.
+        if (payload.pending || payload.type !== 'access') {
           socket.close(1008, 'Invalid token');
           return;
         }
