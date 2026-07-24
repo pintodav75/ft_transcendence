@@ -49,6 +49,17 @@ def of_type(body, ntype, match_id=None):
     return out
 
 
+def of_match(body, match_id):
+    """TOUTES les notifs liées à un match, quel que soit leur type.
+
+    Sert aux assertions « ce joueur ne reçoit RIEN sur ce match » (typiquement le banc).
+    ⚠️ Ne PAS compter `notifications` en entier pour ça : un joueur ajouté à une équipe reçoit
+    un `team_member_added` parfaitement légitime depuis B11 — le test tomberait sur une notif
+    qui n'a rien à voir avec le match. C'est exactement le faux rouge corrigé le 24/07.
+    """
+    return [n for n in body.get("notifications", []) if n.get("data", {}).get("matchId") == match_id]
+
+
 def start_match(tok_creator, tok_acceptor, ladder, at=None):
     """Crée un slot 1v1 et le fait accepter -> in_progress. Renvoie l'id du match."""
     _, b = req("POST", "/matches", tok_creator, {"ladderId": ladder, "scheduledAt": at or future()})
@@ -302,7 +313,7 @@ def run():
 
     s.check("alice (alignée A) reçoit match_accepted", len(of_type(get_notifs(tokA)[1], "match_accepted", M3)), 1)
     s.check("carol (alignée A) reçoit match_accepted", len(of_type(get_notifs(tokC)[1], "match_accepted", M3)), 1)
-    s.check("dave1 (BANC de A) ne reçoit rien", len(get_notifs(tokD1)[1].get("notifications", [])), 0)
+    s.check("dave1 (BANC de A) ne reçoit rien sur ce match", len(of_match(get_notifs(tokD1)[1], M3)), 0)
     s.check("bob (capitaine accepteur = acteur) rien", len(of_type(get_notifs(tokB)[1], "match_accepted", M3)), 0)
     s.check("dave2 (aligné B, camp de l'acteur) rien", len(of_type(get_notifs(tokD2)[1], "match_accepted", M3)), 0)
 
@@ -318,7 +329,7 @@ def run():
     s.check("bob reçoit result_confirmed", len(of_type(get_notifs(tokB)[1], "result_confirmed", M3)), 1)
     s.check("dave2 reçoit result_confirmed", len(of_type(get_notifs(tokD2)[1], "result_confirmed", M3)), 1)
     s.check("alice (actrice) ne le reçoit pas", len(of_type(get_notifs(tokA)[1], "result_confirmed", M3)), 0)
-    s.check("dave1 (banc) toujours rien", len(get_notifs(tokD1)[1].get("notifications", [])), 0)
+    s.check("dave1 (banc) toujours rien sur ce match", len(of_match(get_notifs(tokD1)[1], M3)), 0)
 
     # ─────────────────────────────────────────────── jobs 24 h (opt-in, +65 s)
     if os.environ.get("B9_JOBS"):
