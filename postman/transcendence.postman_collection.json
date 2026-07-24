@@ -80,22 +80,6 @@
 					}
 				},
 				{
-					"name": "Me",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"auth": {
-							"type": "bearer",
-							"bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
-						},
-						"url": {
-							"raw": "{{baseUrl}}/auth/me",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "me"]
-						}
-					}
-				},
-				{
 					"name": "Refresh",
 					"event": [
 						{

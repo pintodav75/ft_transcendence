@@ -4,7 +4,7 @@ Collection complète pour tester l'API REST + WebSocket de ft_transcendence.
 
 ## 📦 Fichiers
 
-- `transcendence.postman_collection.json` — la collection (20 requêtes REST)
+- `transcendence.postman_collection.json` — la collection (19 requêtes REST)
 - `transcendence-local.postman_environment.json` — l'environnement local
 
 ## 🚀 Import dans Postman
@@ -29,7 +29,7 @@ Sinon toutes les requêtes échoueront avec "SELF_SIGNED_CERT_IN_CHAIN" ou simil
 
 ### Login simple (sans 2FA)
 1. Lancer **Auth/Login** → `accessToken` stocké automatiquement
-2. Lancer **Auth/Me** → vérifier la session
+2. Lancer **Users/Get Me** → vérifier la session
 3. Toutes les requêtes protégées utilisent `Authorization: Bearer {{accessToken}}`
 
 ### Login avec 2FA activée

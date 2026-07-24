@@ -90,17 +90,6 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
     }
   },
   );
-  server.get('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
-    try {
-      const userId = request.user.sub;
-      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
-      if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return reply.code(200).send({ user: userSafe });
-    } catch (err) {
-      reply.code(500).send({ error: 'internal error' });
-    }
-  });
   server.post('/refresh', async (request, reply) => {
     try {
       const refreshToken = request.cookies.refresh;
