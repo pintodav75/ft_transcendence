@@ -1249,13 +1249,13 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Déjà amis (status non pending) */
+                /** @description Param :id non-uuid (ValidationError) ou déjà amis — status non pending (Error) */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["Error"];
                     };
                 };
                 /** @description Non autorisé (pas l'addressee) */
@@ -1318,13 +1318,13 @@ export interface paths {
                         "application/json": components["schemas"]["Ok"];
                     };
                 };
-                /** @description Status non pending */
+                /** @description Param :id non-uuid (ValidationError) ou status non pending (Error) */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["Error"];
                     };
                 };
                 /** @description Non autorisé */
@@ -1388,13 +1388,13 @@ export interface paths {
                         "application/json": components["schemas"]["Ok"];
                     };
                 };
-                /** @description Pas d'amitié active à supprimer */
+                /** @description Param :id non-uuid (ValidationError) ou pas d'amitié active à supprimer (Error) */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["Error"];
                     };
                 };
                 /** @description Non autorisé */
@@ -1454,6 +1454,15 @@ export interface paths {
                         "application/json": {
                             messages?: components["schemas"]["Message"][];
                         };
+                    };
+                };
+                /** @description Param :friendId non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
                     };
                 };
                 /** @description Pas amis */
@@ -1558,13 +1567,13 @@ export interface paths {
                         "application/json": components["schemas"]["Ok"];
                     };
                 };
-                /** @description Auto-blocage tenté ou déjà bloqué (SQLSTATE 23505) */
+                /** @description Param :userId non-uuid (ValidationError) ; auto-blocage tenté ou déjà bloqué — SQLSTATE 23505 (Error) */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["Error"];
                     };
                 };
                 401: components["responses"]["Unauthorized"];
@@ -1602,6 +1611,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Ok"];
+                    };
+                };
+                /** @description Param :userId non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
                     };
                 };
                 401: components["responses"]["Unauthorized"];
@@ -1686,6 +1704,15 @@ export interface paths {
                         "application/json": {
                             game: components["schemas"]["Game"];
                         };
+                    };
+                };
+                /** @description Param :id hors bornes — 1 à 50 caractères (ValidationError). `games.id` est un slug `text`, pas un uuid : un slug bien formé mais inconnu reste un 404. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
                     };
                 };
                 /** @description Jeu inconnu ou inactif */
@@ -1787,6 +1814,15 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Param :id non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
                 /** @description Ladder inconnu */
                 404: {
                     headers: {
@@ -1857,6 +1893,15 @@ export interface paths {
                                 };
                             }[];
                         };
+                    };
+                };
+                /** @description Param :id non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
                     };
                 };
                 /** @description Ladder inconnu */
