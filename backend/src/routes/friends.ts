@@ -9,6 +9,11 @@ const friendsSchema = z.object({
   addresseeId: z.uuid(),
 });
 const idParamSchema = z.object({ id: z.uuid() });
+// Défaut `received` : préserve exactement le comportement + la forme historiques
+// pour les appelants existants (non-régression). `sent` liste mes demandes envoyées.
+const requestsQuerySchema = z.object({
+  direction: z.enum(['sent', 'received']).default('received'),
+});
 
 export const friendsRoutes: FastifyPluginAsync = async (server) => {
   server.post('/', { onRequest: [server.authenticate] }, async (request, reply) => {
@@ -128,6 +133,30 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
   server.get('/requests', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
       const userId = request.user.sub;
+      const { direction } = requestsQuerySchema.parse(request.query);
+      if (direction === 'sent') {
+        // Envoyées : je suis le requester, on joint l'ADDRESSEE (le destinataire).
+        // Forme en miroir de l'existant, mais clé `to:` au lieu de `from:`.
+        const res = await db
+          .select()
+          .from(friendshipsTable)
+          .innerJoin(usersTable, eq(usersTable.id, friendshipsTable.addresseeId))
+          .where(
+            and(eq(friendshipsTable.requesterId, userId), eq(friendshipsTable.status, 'pending')),
+          );
+        const requests = res.map((row) => ({
+          id: row.friendships.id,
+          sentAt: row.friendships.createdAt,
+          to: {
+            id: row.users.id,
+            pseudo: row.users.pseudo,
+            displayName: row.users.displayName,
+            avatarUrl: row.users.avatarUrl,
+          },
+        }));
+        return reply.code(200).send({ requests });
+      }
+      // received (défaut) — comportement + forme historiques, inchangés.
       const res = await db
         .select()
         .from(friendshipsTable)
@@ -147,6 +176,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
       }));
       return reply.code(200).send({ requests });
     } catch (error) {
+      if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
       reply.code(500).send({ error: 'Internal error' });
     }
   });
@@ -234,8 +264,16 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
         if (!friendship) return reply.code(404).send({ error: 'friendship not found' });
         if (friendship.requesterId !== userId && friendship.addresseeId !== userId)
           return reply.code(403).send({ error: 'not authorized' });
-        if (friendship.status !== 'accepted')
-          return reply.code(400).send({ error: 'no active friendship to delete' });
+        // Deux suppressions légitimes par ce DELETE :
+        //  - amitié acceptée -> unfriend (les deux parties le peuvent) — inchangé ;
+        //  - demande pending dont JE suis le requester -> j'annule MA demande envoyée.
+        // Une pending où je suis l'addressee ne passe PAS par ici : le refus est
+        // POST /:id/reject. D'où le 400 final.
+        const canDelete =
+          friendship.status === 'accepted' ||
+          (friendship.status === 'pending' && friendship.requesterId === userId);
+        if (!canDelete)
+          return reply.code(400).send({ error: 'no deletable friendship for this action' });
         await db.delete(friendshipsTable).where(eq(friendshipsTable.id, friendshipId));
         return reply.code(200).send({ ok: true });
       } catch (error) {
