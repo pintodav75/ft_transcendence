@@ -1467,7 +1467,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            conversations?: components["schemas"]["ConversationSummary"][];
+                            conversations: components["schemas"]["ConversationSummary"][];
                         };
                     };
                 };
@@ -3861,8 +3861,8 @@ export interface components {
             createdAt?: string;
         };
         ConversationSummary: {
-            friend?: components["schemas"]["FriendSummary"];
-            lastMessage?: {
+            friend: components["schemas"]["FriendSummary"];
+            lastMessage: {
                 /** Format: uuid */
                 id: string;
                 /** Format: uuid */

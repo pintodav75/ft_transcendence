@@ -6,6 +6,7 @@ via helpers.sql() pour contrôler les timestamps (et donc l'ordre attendu).
 """
 
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -46,16 +47,22 @@ def run():
     s.check("setup ids présents", all([fs_ab, fs_ac, fs_da, fs_ae]), True)
 
     # --- Insérer des DM (SQL direct, timestamps contrôlés) -----------------
-    # bob : dernier message il y a 10 min ; carol : dernier il y a 1 min
-    # => carol doit sortir EN PREMIER (tri décroissant sur lastMessage.createdAt).
+    # Les derniers messages bob/carol ont volontairement le MÊME timestamp :
+    # l'id départage à la fois le dernier message par partenaire et l'ordre final.
+    # Les UUID partagent un préfixe aléatoire et ont des suffixes croissants :
+    # aucune collision entre runs, mais un ordre PostgreSQL prévisible.
     # dave : un message MAIS amitié non acceptée => ne doit PAS apparaître.
+    id_base = uuid.uuid4().int & ~0xFFFF
+    message_ids = [str(uuid.UUID(int=id_base + n)) for n in range(1, 7)]
+    bob_old_id, bob_tie_low_id, bob_last_id, carol_old_id, carol_last_id, dave_id = message_ids
     sql(
-        f"INSERT INTO messages (sender_id, receiver_id, content, created_at) VALUES "
-        f"('{a_id}','{b_id}','hey bob old', now() - interval '20 minutes'),"
-        f"('{b_id}','{a_id}','last from bob', now() - interval '10 minutes'),"
-        f"('{c_id}','{a_id}','carol older', now() - interval '5 minutes'),"
-        f"('{a_id}','{c_id}','last to carol', now() - interval '1 minutes'),"
-        f"('{d_id}','{a_id}','ghost dave', now() - interval '2 minutes');"
+        f"INSERT INTO messages (id, sender_id, receiver_id, content, created_at) VALUES "
+        f"('{bob_old_id}','{a_id}','{b_id}','hey bob old', now() - interval '20 minutes'),"
+        f"('{bob_tie_low_id}','{a_id}','{b_id}','bob tie low', now() - interval '1 minute'),"
+        f"('{bob_last_id}','{b_id}','{a_id}','last from bob', now() - interval '1 minute'),"
+        f"('{carol_old_id}','{c_id}','{a_id}','carol older', now() - interval '5 minutes'),"
+        f"('{carol_last_id}','{a_id}','{c_id}','last to carol', now() - interval '1 minute'),"
+        f"('{dave_id}','{d_id}','{a_id}','ghost dave', now() - interval '2 minutes');"
     )
 
     # --- Cas 2 & 3 : liste triée, lastMessage correct, dave absent ---------
@@ -66,59 +73,37 @@ def run():
     s.check("2. exactement 2 conversations", len(conv), 2)
     ids = [c["friend"]["id"] for c in conv]
     s.check("3. dave (non-ami) absent", d_id not in ids, True)
-    s.check("2. carol en premier (plus récent)", ids[0] if ids else None, c_id)
+    s.check("2. carol en premier (timestamp égal, id supérieur)", ids[0] if ids else None, c_id)
     s.check("2. bob en second", ids[1] if len(ids) > 1 else None, b_id)
     # lastMessage correct par ami
     first = conv[0] if conv else {}
+    s.check("2. carol.lastMessage.id", first.get("lastMessage", {}).get("id"), carol_last_id)
     s.check("2. carol.lastMessage.content", first.get("lastMessage", {}).get("content"), "last to carol")
     s.check("2. carol.lastMessage.senderId == alice", first.get("lastMessage", {}).get("senderId"), a_id)
-    # receiverId = l'AUTRE partie que le sender ; ici alice a écrit à carol
     s.check("2. carol.lastMessage.receiverId == carol", first.get("lastMessage", {}).get("receiverId"), c_id)
-    s.check("2. carol.lastMessage.id présent", bool(first.get("lastMessage", {}).get("id")), True)
     s.check("2. carol.friend.pseudo", first.get("friend", {}).get("pseudo"), c_pseudo)
     second = conv[1] if len(conv) > 1 else {}
+    s.check("2. bob.lastMessage.id départage le tie", second.get("lastMessage", {}).get("id"), bob_last_id)
     s.check("2. bob.lastMessage.content", second.get("lastMessage", {}).get("content"), "last from bob")
     s.check("2. bob.lastMessage.senderId == bob", second.get("lastMessage", {}).get("senderId"), b_id)
-    # ici bob a écrit à alice => receiverId == alice
     s.check("2. bob.lastMessage.receiverId == alice", second.get("lastMessage", {}).get("receiverId"), a_id)
-    s.check("2. bob.lastMessage.id présent", bool(second.get("lastMessage", {}).get("id")), True)
     # aucune fuite de champ sensible
     friend_keys = set(first.get("friend", {}).keys())
     s.check("2. friend keys exactes", friend_keys, {"id", "pseudo", "displayName", "avatarUrl"})
     lm_keys = set(first.get("lastMessage", {}).keys())
-    s.check("2. lastMessage keys exactes", lm_keys, {"id", "senderId", "receiverId", "content", "createdAt"})
+    s.check(
+        "2. lastMessage keys exactes",
+        lm_keys,
+        {"id", "content", "senderId", "receiverId", "createdAt"},
+    )
     raw = str(bd)
     s.check("2. pas d'email dans la réponse", "@t.io" not in raw, True)
     s.check("2. pas de password_hash/passwordHash", ("passwordHash" not in raw and "password_hash" not in raw), True)
 
-    # --- Cas 3bis : ordre stable quand deux derniers messages ont le MÊME
-    # created_at -> départage déterministe par id (ORDER BY created_at DESC, id
-    # DESC). Deux nouveaux amis acceptés, un dernier message chacun au MÊME
-    # instant, avec des ids de message contrôlés (q > p). q doit toujours passer
-    # avant p, et deux appels successifs donnent le même ordre.
-    s.section("Cas 3bis — ordre stable sur created_at égal (départage par id)")
-    p_tok, p_id, _ = register("erin")
-    q_tok, q_id, _ = register("bob")
-    st, bd = req("POST", "/friends", a_tok, {"addresseeId": p_id})
-    fs_ap = bd["friendship"]["id"]
-    req("POST", f"/friends/{fs_ap}/accept", p_tok)
-    st, bd = req("POST", "/friends", a_tok, {"addresseeId": q_id})
-    fs_aq = bd["friendship"]["id"]
-    req("POST", f"/friends/{fs_aq}/accept", q_tok)
-    # Même created_at (now()), ids de message contrôlés : q (2000…) > p (1000…).
-    sql(
-        f"INSERT INTO messages (id, sender_id, receiver_id, content, created_at) VALUES "
-        f"('10000000-0000-0000-0000-000000000000','{p_id}','{a_id}','tie from p', now()),"
-        f"('20000000-0000-0000-0000-000000000000','{q_id}','{a_id}','tie from q', now());"
-    )
+    # Un deuxième appel doit produire exactement le même ordre.
     st, bd = req("GET", "/messages/conversations", a_tok)
     ids2 = [c["friend"]["id"] for c in bd.get("conversations", [])]
-    # q et p ont le created_at le plus récent -> en tête ; q (id sup) avant p.
-    s.check("3bis. q en tête (id sup)", ids2[0] if ids2 else None, q_id)
-    s.check("3bis. p juste après q", ids2[1] if len(ids2) > 1 else None, p_id)
-    st, bd = req("GET", "/messages/conversations", a_tok)
-    ids3 = [c["friend"]["id"] for c in bd.get("conversations", [])]
-    s.check("3bis. ordre identique au 2e appel", ids3, ids2)
+    s.check("3. ordre identique au 2e appel", ids2, ids)
 
     # --- Cas 4 : requests reçues (défaut), forme from: ---------------------
     s.section("Cas 4 — requests reçues (non-régression)")

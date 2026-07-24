@@ -243,6 +243,7 @@ components:
     # ---------- Conversation summary ----------
     ConversationSummary:
       type: object
+      required: [friend, lastMessage]
       properties:
         friend:
           $ref: '#/components/schemas/FriendSummary'
@@ -1526,6 +1527,7 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [conversations]
                 properties:
                   conversations:
                     type: array
