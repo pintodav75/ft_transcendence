@@ -3,7 +3,7 @@ import { db } from '../db/index.js';
 import { usersTable } from '../db/schema.js';
 import { eq, sql } from 'drizzle-orm';
 import z from 'zod';
-import { minioClient, BUCKET_NAME, buildPublicUrl } from '../storage/minio.js';
+import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { isBlocked } from '../utils/blocks.js';
 import { randomUUID } from 'node:crypto';
 import { verifyPassword, hashPassword } from '../auth/password.js';
@@ -153,31 +153,72 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
     '/me/avatar',
     {
       onRequest: [server.authenticate],
-      config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
+      // 20/min PAR COMPTE — le `keyGenerator` global (`rateLimitKey`) est hérité par les
+      // quotas de route, et cette route est authentifiée : la clé est le `sub` du JWT, pas
+      // l'IP. 3/min était intenable même pour un seul utilisateur qui recadre son avatar deux
+      // ou trois fois. 20 borne toujours le trafic MinIO (20 × 2 Mo = 40 Mo/min par compte)
+      // sans gêner personne. ⚠️ Ce plafond est désormais par COMPTE : une IP disposant de N
+      // comptes obtient N × 40 Mo/min — contrepartie assumée du changement de clé (server.ts).
+      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
       if (!request.isMultipart())
         return reply.code(400).send({ error: 'expected multipart/form-data' });
+      // Hissée hors du try (comme dans POST /teams/:id/logo) : si l'objet est uploadé mais
+      // qu'un échec survient ensuite, le catch le retire → aucun orphelin.
+      let uploadedUrl: string | undefined;
       try {
         const file = await request.file();
         if (!file) return reply.code(400).send({ error: 'no file uploaded' });
         if (!(file.mimetype in IMAGE_MIME))
           return reply.code(400).send({ error: 'unsupported file type' });
+
+        // L'ancien avatar est lu AVANT l'UPDATE, qui va écraser la valeur : c'est la dernière
+        // occasion de savoir quel objet devient orphelin. Projection explicite (invariant : pas
+        // de `select()` nu sur `users`).
+        const [before] = await db
+          .select({ avatarUrl: usersTable.avatarUrl })
+          .from(usersTable)
+          .where(eq(usersTable.id, request.user.sub));
+
+        // ⚠️ On lit le fichier EN MÉMOIRE (`toBuffer`) au lieu de streamer `file.file` vers
+        // MinIO. Ce n'est PAS un détail de style : branché directement sur `putObject`, busboy
+        // coupe le flux à la limite et range l'erreur dans un `lastError` que seul l'itérateur
+        // de parts consulte → un fichier de 2 Mo + 100 octets était stocké AMPUTÉ à exactement
+        // 2 097 152 octets, la route répondait **200**, et l'image corrompue devenait l'avatar
+        // de l'utilisateur (mesuré). `toBuffer()` LÈVE `FST_REQ_FILE_TOO_LARGE` (→ 413 dans le
+        // catch) et rien n'est écrit dans le bucket. Coût mémoire borné : 2 Mo (limite globale)
+        // × 20 requêtes/min/compte (rate limit de la route).
+        const buffer = await file.toBuffer();
         const id = randomUUID();
         const ext = IMAGE_MIME[file.mimetype as keyof typeof IMAGE_MIME];
         const filename = `${id}.${ext}`;
-        await minioClient.putObject(BUCKET_NAME, filename, file.file, undefined, {
+        // Taille connue → un seul PUT côté MinIO, au lieu d'un upload multipart à l'aveugle.
+        await minioClient.putObject(BUCKET_NAME, filename, buffer, buffer.length, {
           'Content-Type': file.mimetype,
         });
+        uploadedUrl = buildPublicUrl(filename);
+
         const [user] = await db
           .update(usersTable)
-          .set({ avatarUrl: buildPublicUrl(filename) })
+          .set({ avatarUrl: uploadedUrl })
           .where(eq(usersTable.id, request.user.sub))
           .returning();
-        if (!user) return reply.code(401).send({ error: 'Unauthorized' });
+        if (!user) {
+          await removeHostedObject(request.log, uploadedUrl, 'avatar');
+          uploadedUrl = undefined;
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+
+        // L'avatar précédent n'est plus référencé : sans ça le bucket accumulait un fichier
+        // mort à CHAQUE changement d'avatar — seul DELETE /me/avatar nettoyait quoi que ce soit.
+        // APRÈS l'UPDATE : le supprimer avant aurait détruit l'avatar courant si l'UPDATE échouait.
+        await removeHostedObject(request.log, before?.avatarUrl, 'avatar');
+
         const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
         return { user: userSafe };
       } catch (error) {
+        await removeHostedObject(request.log, uploadedUrl, 'avatar');
         if (
           typeof error === 'object' &&
           error !== null &&
@@ -199,14 +240,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       if (!user) return reply.code(401).send({ error: 'Unauthorized' });
 
       if (user.avatarUrl) {
-        const filename = user.avatarUrl.split('/').pop();
-        if (filename) {
-          try {
-            await minioClient.removeObject(BUCKET_NAME, filename);
-          } catch (err) {
-            request.log.warn({ err }, 'Failed to remove avatar from MinIO');
-          }
-        }
+        await removeHostedObject(request.log, user.avatarUrl, 'avatar');
         const [updated] = await db
           .update(usersTable)
           .set({ avatarUrl: null })
@@ -246,16 +280,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         if (!verified) return reply.code(401).send({ error: 'invalid code' });
       }
 
-      if (user.avatarUrl) {
-        const filename = user.avatarUrl.split('/').pop();
-        if (filename) {
-          try {
-            await minioClient.removeObject(BUCKET_NAME, filename);
-          } catch (err) {
-            request.log.warn({ err }, 'Failed to remove avatar from MinIO');
-          }
-        }
-      }
+      await removeHostedObject(request.log, user.avatarUrl, 'avatar');
       await db.delete(usersTable).where(eq(usersTable.id, userId));
       clearRefreshCookie(reply);
       return reply.code(200).send({ ok: true });

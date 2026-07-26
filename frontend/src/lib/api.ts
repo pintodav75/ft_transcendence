@@ -106,7 +106,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return text as T
 }
 
-function getErrorMessage(status: number, payload: unknown) {
+// Exported so upload.ts (XMLHttpRequest, not fetch) can build an ApiError the
+// exact same way as apiFetch for a non-2xx response.
+export function getErrorMessage(status: number, payload: unknown) {
   if (
     typeof payload === 'object' &&
     payload !== null &&
@@ -131,7 +133,9 @@ async function createApiError(response: Response) {
   return new ApiError(response.status, payload, getErrorMessage(response.status, payload))
 }
 
-async function refreshAccessToken() {
+// Exported so upload.ts can retry an upload once after a silent refresh, the
+// same way `request()` below does for a plain apiFetch call.
+export async function refreshAccessToken() {
   try {
     // Refresh uses raw fetch so apiFetch cannot recursively refresh itself.
     const response = await fetch(buildApiUrl('/auth/refresh'), {
@@ -152,7 +156,10 @@ async function refreshAccessToken() {
   }
 }
 
-async function logoutAfterAuthFailure() {
+// Exported for the same reason as refreshAccessToken above: upload.ts must clear the
+// session in the exact same case — refresh already attempted AND refused — otherwise the
+// auth store keeps believing the user is signed in with a dead access token.
+export async function logoutAfterAuthFailure() {
   useAuthStore.getState().clearSession()
 
   try {

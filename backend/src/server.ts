@@ -22,6 +22,7 @@ import { chatRoutes } from './routes/chat.js';
 import { redisClient } from './storage/redis.js';
 import fastifyCors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import { rateLimitKey } from './utils/rate-limit.js';
 import { laddersRoutes } from './routes/ladders.js';
 import { externalAccountsRoutes } from './routes/external-accounts.js';
 import { teamsRoutes } from './routes/teams.js';
@@ -85,9 +86,39 @@ await server.register(fastifyCors, {
   credentials: true,
 });
 
+// Limite GLOBALE : le filet anti-abus de toutes les routes qui ne déclarent pas leur propre
+// quota. ⚠️ Une route qui déclare `config.rateLimit` N'EST PLUS soumise à celle-ci :
+// @fastify/rate-limit installe SOIT le hook global, SOIT celui de la route (cf. son `onRoute`),
+// jamais les deux. Un quota de route REMPLACE le global, il ne le durcit pas. En revanche les
+// options non redéfinies par la route — dont `keyGenerator` — sont HÉRITÉES d'ici.
+//
+// ── Clé du compteur : l'utilisateur si authentifié, l'IP sinon (`rateLimitKey`) ───────────
+// POURQUOI : 100 req/min PAR IP, c'est le quota de l'IP, pas de la personne. Quatre
+// coéquipiers derrière le même NAT — le campus, une box — partagent 100 requêtes par minute
+// à eux quatre, et une simple navigation soutenue dans le SPA les épuise. Indexé sur le
+// `sub` du JWT, chacun a les siennes, et un attaquant authentifié ne s'échappe PAS en
+// changeant d'IP. Bug produit réel, découvert parce que les suites e2e, une fois passées de
+// 15 min à quelques secondes, saturaient ce compteur.
+//
+// CE QUI RESTE PAR IP : tout ce qui est ANONYME, puisque rien n'y peuple `request.user` —
+// donc `/auth/register` (3/min) et `/auth/login` (5/min) gardent exactement le comportement
+// qu'on veut d'elles, borner un attaquant non authentifié. Elles ne sont pas assouplies.
+//
+// CONTREPARTIE ASSUMÉE, ET SON COÛT RÉEL : une IP disposant de N comptes valides obtient
+// N×100 req/min. L'ancien modèle plafonnait une IP à 100/min AU TOTAL, quel que soit le
+// nombre de comptes détenus — c'est un vrai changement de posture, pas un détail.
+// ⚠️ Ne PAS se rassurer avec « /auth/register est à 3/min » : ce quota borne la VITESSE de
+// création, pas le STOCK accumulable (aucune vérification d'email), et il ne couvre pas la
+// création via OAuth — `/auth/oauth/google/callback` ne relève que du quota global (100/min),
+// et `/auth/oauth/google/start` d'aucun quota, `@fastify/oauth2` étant enregistré AVANT ce
+// plugin (pré-existant, déjà vrai sur master ; mesuré : aucun en-tête `x-ratelimit-*` sur
+// `/start`, `x-ratelimit-limit: 100` sur `/callback`, contre 3 sur `/auth/register`).
+// On l'accepte parce que l'alternative — 100 req/min partagées par tout un NAT — casse l'app
+// pour des utilisateurs légitimes : un risque certain contre un risque théorique.
 await server.register(rateLimit, {
   max: 100,
   timeWindow: '1 minute',
+  keyGenerator: rateLimitKey,
 });
 
 await server.register(websocket);

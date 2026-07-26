@@ -387,7 +387,14 @@ components:
         ladderId: { type: string, format: uuid }
         name: { type: string, maxLength: 50 }
         captainId: { type: string, format: uuid }
-        logoUrl: { type: string, nullable: true }
+        logoUrl:
+          type: string
+          nullable: true
+          description: >
+            **Deux formes possibles** — le front doit accepter les deux : un chemin RELATIF
+            `/media/avatars/<uuid>.<ext>` quand le logo a été uploadé via
+            `POST /teams/{id}/logo`, ou une URL absolue `https://…` quand il a été saisi via
+            `POST /teams` / `PATCH /teams/{id}`. `null` = pas de logo.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
       required: [id, ladderId, name, captainId, logoUrl, createdAt, updatedAt]
@@ -419,7 +426,12 @@ components:
         format: { type: string, enum: [1v1, 2v2, 3v3, 5v5] }
         gameId: { type: string }
         isCaptain: { type: boolean }
-        logoUrl: { type: string, nullable: true }
+        logoUrl:
+          type: string
+          nullable: true
+          description: >
+            Chemin relatif `/media/avatars/…` (upload) **ou** URL absolue `https://…`
+            (saisie) — cf. `Team.logoUrl`.
       required: [id, name, ladderId, ladder, format, gameId, isCaptain, logoUrl]
 
     TeamDetail:
@@ -439,7 +451,12 @@ components:
             Le provider imposé par le JEU de ce ladder (§5.1). Le front sait ainsi quel
             message afficher (« compte Riot non lié ») pour les membres non sélectionnables.
         captainId: { type: string, format: uuid }
-        logoUrl: { type: string, nullable: true }
+        logoUrl:
+          type: string
+          nullable: true
+          description: >
+            Chemin relatif `/media/avatars/…` (upload) **ou** URL absolue `https://…`
+            (saisie) — cf. `Team.logoUrl`.
       required:
         [id, name, ladderId, ladderName, format, gameId, requiredProvider, captainId, logoUrl]
 
@@ -2186,6 +2203,96 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Team inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /teams/{id}/logo:
+    post:
+      tags: [Teams]
+      summary: Uploader le logo d'une équipe
+      description: >
+        **Capitaine only.** Upload multipart (limite **2 MB**, globale). MIME autorisés :
+        image/jpeg, image/png, image/webp — **pas** de PDF (contrairement aux preuves de
+        dispute : un logo est forcément une image). Stocke l'objet dans le bucket **public
+        `avatars`** (le même que les avatars utilisateurs : un logo d'équipe est tout aussi
+        public, et un bucket dédié coûterait de l'env + du compose pour zéro gain) puis écrit
+        `logo_url`.
+
+
+        Complète `PATCH /teams/{id}`, qui n'accepte qu'une URL **https** déjà hébergée
+        ailleurs. ⚠️ Le `logoUrl` renvoyé ici est un **chemin RELATIF**
+        `/media/avatars/<uuid>.<ext>`, il ne commence donc **pas** par `https://` : il est
+        fabriqué par le serveur, pas saisi par un client (la règle https ne protège que les
+        URL saisies). Le front doit accepter les deux formes.
+
+
+        L'ancien logo est supprimé de MinIO s'il était hébergé chez nous ; s'il s'agissait
+        d'une URL externe héritée, il n'y a rien à supprimer. Un échec de suppression est
+        **loggé, pas propagé** (même politique que `DELETE /users/me/avatar`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                logo:
+                  type: string
+                  format: binary
+                  description: >
+                    Le fichier image (jpeg/png/webp, ≤ 2 MB). ⚠️ Le serveur prend la
+                    **première partie fichier** de la requête (`request.file()`), comme
+                    `POST /users/me/avatar` : le nom `logo` est la convention du contrat,
+                    il n'est pas vérifié. Envoyer une seule partie fichier.
+              required: [logo]
+      responses:
+        '200':
+          description: Logo mis à jour (`team.logoUrl` pointe sur le nouvel objet)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    $ref: '#/components/schemas/Team'
+                required: [team]
+        '400':
+          description: >
+            Param `:id` non-uuid, corps non multipart, aucun fichier envoyé, ou type MIME
+            non supporté (`application/pdf` inclus).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Réservé au capitaine de l'équipe (un membre simple est refusé)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Équipe inconnue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Fichier trop volumineux (> 2 MB)
           content:
             application/json:
               schema:

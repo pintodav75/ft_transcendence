@@ -27,6 +27,12 @@ Thumbs.db
 # Contexte Claude — CLAUDE.md est versionné (contexte projet partagé)
 CLAUDE.local.md
 .claude/
+.claudeignore
+.tokensave/
+
+# Maquette HTML de référence pour /home : outil de travail local, pas un livrable.
+# La version qui fait foi vit hors du dépôt (voir docs/frontend.md).
+vsmode-home-demo.html
 
 # TypeScript
 *.tsbuildinfo

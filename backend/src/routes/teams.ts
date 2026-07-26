@@ -10,6 +10,9 @@ import {
 } from '../db/schema.js';
 import { eq, and, asc, count, inArray } from 'drizzle-orm';
 import { notify, pushNotifications } from '../utils/notifications.js';
+import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
+import { IMAGE_MIME } from './users.js';
+import { randomUUID } from 'node:crypto';
 import z from 'zod';
 
 // `logoUrl` est optionnel à la création : même règle HTTPS qu'à l'édition (voir le
@@ -242,6 +245,16 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           .where(eq(teamsTable.id, teamId))
           .returning();
         if (!updated) return reply.code(404).send({ error: 'team not found' });
+
+        // Le logo hébergé qui vient d'être DÉRÉFÉRENCÉ (remplacé par une URL externe, ou
+        // retiré via `logoUrl: null`) n'a plus aucun porteur : sans ça il resterait dans le
+        // bucket pour toujours. Même raisonnement que dans POST /:id/logo, et même ordre —
+        // APRÈS l'UPDATE, sinon un UPDATE en échec laisserait l'équipe pointer sur un objet
+        // qu'on aurait déjà détruit. Le test `updated.logoUrl !== team.logoUrl` couvre le cas
+        // où `data` ne touche QUE le nom : rien n'est déréférencé, rien n'est supprimé.
+        if (updated.logoUrl !== team.logoUrl)
+          await removeHostedObject(request.log, team.logoUrl, 'team logo');
+
         return reply.code(200).send({ team: updated });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
@@ -253,6 +266,117 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
             return reply.code(409).send({ error: 'team name already taken on this ladder' });
           return reply.code(409).send({ error: 'conflict' });
         }
+        return reply.code(500).send({ error: 'Internal error' });
+      }
+    },
+  );
+  // POST /teams/:id/logo — UPLOADER le logo de l'équipe (capitaine only). Calqué sur
+  // `POST /users/me/avatar`. Complète `PATCH /teams/:id`, qui n'accepte qu'une URL https DÉJÀ
+  // hébergée ailleurs : inutilisable en pratique pour un capitaine qui a juste un fichier.
+  //
+  // Le logo va dans le bucket PUBLIC `avatars` existant : un logo d'équipe est exactement aussi
+  // public qu'un avatar (il s'affiche dans les listes de teams, les ladders, les matchs). Un
+  // bucket dédié coûterait une variable d'env + du compose + de l'init MinIO pour zéro gain.
+  //
+  // ⚠️ `buildPublicUrl()` rend un chemin RELATIF `/media/avatars/<uuid>.<ext>`, qui ne satisfait
+  // PAS la règle Zod `^https://` de `PATCH /teams/:id` — et c'est VOULU : cette valeur est
+  // FABRIQUÉE par la route, jamais reçue d'un client. La règle https ne protège que les URL
+  // SAISIES (contenu mixte, `javascript:`…) ; il n'y a rien à valider dans notre propre chemin.
+  server.post<{ Params: { id: string } }>(
+    '/:id/logo',
+    {
+      onRequest: [server.authenticate],
+      // Même quota que l'avatar : 20 uploads/min PAR COMPTE (le `keyGenerator` global est
+      // hérité, et la route est authentifiée → la clé est le `sub` du JWT, pas l'IP). Borne
+      // le trafic MinIO sans jamais gêner un capitaine qui hésite entre trois logos.
+      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    },
+    async (request, reply) => {
+      // Hissée hors du try (comme `key` dans POST /disputes/:id/evidence) : si l'objet est
+      // uploadé mais qu'un échec survient ensuite, le catch le retire → aucun orphelin.
+      let uploadedUrl: string | undefined;
+      try {
+        const me = request.user.sub;
+        // Zod APRÈS `authenticate` : un anonyme sort en 401, jamais en 400 (invariant repo).
+        const { id: teamId } = idParamSchema.parse(request.params);
+
+        // Exactement la garde de PATCH /teams/:id : membre non-capitaine ET non-membre → 403.
+        // Elle passe AVANT la lecture du corps : inutile d'avaler 2 Mo pour finir en 403.
+        const [team] = await db
+          .select({ captainId: teamsTable.captainId, logoUrl: teamsTable.logoUrl })
+          .from(teamsTable)
+          .where(eq(teamsTable.id, teamId));
+        if (!team) return reply.code(404).send({ error: 'team not found' });
+        if (team.captainId !== me)
+          return reply.code(403).send({ error: 'only the captain can edit the team' });
+
+        if (!request.isMultipart())
+          return reply.code(400).send({ error: 'expected multipart/form-data' });
+        const file = await request.file();
+        if (!file) return reply.code(400).send({ error: 'no file uploaded' });
+        // IMAGE_MIME, surtout PAS EVIDENCE_MIME : un logo est une image, seule une preuve de
+        // dispute peut être un PDF. Les deux allowlists restent séparées (invariant repo).
+        if (!(file.mimetype in IMAGE_MIME))
+          return reply.code(400).send({ error: 'unsupported file type' });
+
+        // ⚠️ On lit le fichier EN MÉMOIRE (`toBuffer`) au lieu de streamer `file.file` vers
+        // MinIO, comme le fait déjà POST /disputes/:id/evidence. Ce n'est pas un détail de
+        // style : brancher `file.file` directement sur `putObject` fait TRONQUER SANS BRUIT le
+        // fichier à la limite (busboy coupe le flux, `@fastify/multipart` range l'erreur dans
+        // un `lastError` que seul l'itérateur de parts consulte) → un fichier de 3 Mo était
+        // stocké tel quel, amputé à exactement 2 097 152 octets, et la route répondait 200
+        // avec une image corrompue. `toBuffer()` LÈVE `FST_REQ_FILE_TOO_LARGE` (→ 413 dans le
+        // catch), et rien n'est écrit dans le bucket. Coût mémoire borné : 2 Mo (limite
+        // globale) × 20 requêtes/min/IP (rate limit de la route).
+        const buffer = await file.toBuffer();
+        const ext = IMAGE_MIME[file.mimetype as keyof typeof IMAGE_MIME];
+        const key = `${randomUUID()}.${ext}`;
+        // Taille connue → un seul PUT côté MinIO, au lieu d'un upload multipart à l'aveugle.
+        await minioClient.putObject(BUCKET_NAME, key, buffer, buffer.length, {
+          'Content-Type': file.mimetype,
+        });
+        uploadedUrl = buildPublicUrl(key);
+
+        const [updated] = await db
+          .update(teamsTable)
+          .set({ logoUrl: uploadedUrl })
+          .where(eq(teamsTable.id, teamId))
+          .returning({
+            id: teamsTable.id,
+            ladderId: teamsTable.ladderId,
+            name: teamsTable.name,
+            captainId: teamsTable.captainId,
+            logoUrl: teamsTable.logoUrl,
+            createdAt: teamsTable.createdAt,
+            updatedAt: teamsTable.updatedAt,
+          });
+        // Équipe dissoute entre la garde et l'UPDATE : on retire l'objet fraîchement uploadé
+        // au lieu de le laisser orphelin, et on sort en 404 (rien n'a planté, la cible a disparu).
+        if (!updated) {
+          await removeHostedObject(request.log, uploadedUrl, 'team logo');
+          uploadedUrl = undefined;
+          return reply.code(404).send({ error: 'team not found' });
+        }
+
+        // L'ancien logo, s'il était hébergé CHEZ NOUS, n'est plus référencé : on le supprime,
+        // sinon le bucket accumule un fichier mort à chaque changement de logo. Une URL externe
+        // héritée de l'ancien modèle n'a rien à supprimer (removeHostedObject → no-op).
+        // APRÈS l'UPDATE : le supprimer avant aurait détruit le logo courant si l'UPDATE échouait.
+        await removeHostedObject(request.log, team.logoUrl, 'team logo');
+
+        return reply.code(200).send({ team: updated });
+      } catch (error) {
+        await removeHostedObject(request.log, uploadedUrl, 'team logo');
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
+        // La limite de 2 Mo est GLOBALE (server.ts) : le dépassement jette pendant la lecture
+        // du flux par putObject. Sans ce mapping il remonterait en 500.
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'FST_REQ_FILE_TOO_LARGE'
+        )
+          return reply.code(413).send({ error: 'File too large' });
         return reply.code(500).send({ error: 'Internal error' });
       }
     },
@@ -444,7 +568,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           // Sous verrou ce cas ne peut plus se produire ; le garde reste pour que la
           // règle « on ne notifie jamais une dissolution qui n'a pas eu lieu » soit
           // portée par le code et pas seulement par le raisonnement.
-          if (deleted.length === 0) return { ok: true as const, notifs: [] };
+          if (deleted.length === 0) return { ok: true as const, notifs: [], logoUrl: null };
 
           // Tout le roster SAUF le capitaine : c'est lui qui dissout, il le sait déjà.
           const recipients = members.map((m) => m.userId).filter((id) => id !== me);
@@ -455,11 +579,17 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
             byUserId: actor.id,
             byPseudo: actor.pseudo,
           });
-          return { ok: true as const, notifs };
+          // `logoUrl` est LU SOUS VERROU et remonté hors de la transaction : l'équipe n'existe
+          // plus après le commit, c'est la dernière occasion de savoir quel objet elle portait.
+          return { ok: true as const, notifs, logoUrl: team.logoUrl };
         });
 
         if (!outcome.ok) return reply.code(outcome.status).send({ error: outcome.error });
         pushNotifications(outcome.notifs);
+        // APRÈS le commit, jamais dedans : un rollback tardif ressusciterait une équipe dont on
+        // aurait déjà détruit le logo. L'inverse — l'équipe disparaît, l'objet reste une seconde
+        // de plus — est sans conséquence. Une URL externe n'a rien à supprimer (no-op).
+        await removeHostedObject(request.log, outcome.logoUrl, 'team logo');
         return reply.code(200).send({ ok: true });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });

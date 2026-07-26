@@ -12,7 +12,7 @@ Projet final du Common Core 42, équipe de 4, sujet libre : une web app validant
 
 > 🚨 **PAS de file d'attente, PAS de worker de matchmaking automatique.** Modèle = **challenge/accept** : un camp ouvre un slot → un autre l'accepte → les deux entrent le score → l'ELO bouge. Aucun bouton « chercher une partie », aucun appariement par ELO. (Décision explicite de David, 13/07 — ne jamais la réintroduire.) Le cycle est **déjà implémenté** (B5b→B6).
 
-> 🚨 **Pas de jeu jouable dans l'app** (décision 13/07) : la plateforme *tracke* des jeux externes (LoL/CS2/chess.com via liaison de compte).
+> 🚨 **Pas de jeu jouable dans l'app** (décision 13/07) : la plateforme _tracke_ des jeux externes (LoL/CS2/chess.com via liaison de compte).
 
 **Statut** : équipe de 4 formée, deadline courte → focus.
 
@@ -52,13 +52,14 @@ Reste aussi la **préparation de la soutenance** (chaque module revendiqué doit
 
 - **Infra** : I2 + I3 + I4 mergés. Origine unique HTTPS, proxy, certs auto, migrations auto, validation d'env Zod. → `docs/infra.md`
 - **Backend** : **terminé et fonctionnel** — auth (JWT typés, OAuth Google, 2FA, profil, avatar), social (amis, blocks, chat WS, DM, conversations), teams (CRUD + membres + édition), matchmaking complet (créer/accepter/annuler/résultat/ELO), disputes + arbitrage, notifications (10 types), recherche avancée, jobs 24 h. → `docs/backend.md`
-- **Frontend** : F0, F0-A/B/C/D, FR1 Register, FR2 Login+2FA, F-Nav (teams + ranking), FL landing publique — **mergés**. Restent à remplir : `/home`, `/games`, `/profile`, `/privacy`, `/terms`. → `docs/frontend.md`
-- **Tests** : Vitest 21/21 (helpers purs) + **14 suites e2e Python / ~506 cas** (`cd backend/tests && python3 run_all.py`), sans mocks, sur la vraie base de dev.
+- **Frontend** : F0, F0-A/B/C/D, FR1 Register, FR2 Login+2FA, F-Nav (teams + ranking), FL landing publique, **FT-1 + FT-1B** (`/teams` : grille d'affiches + formulaire de création, mergés le 26/07 dans `640248b`) — **mergés**. Restent à remplir : `/home`, `/games`, `/profile`, `/privacy`, `/terms`. → `docs/frontend.md`
+- **Tests** : Vitest 27/27 (helpers purs) + **18 suites e2e Python / 569 cas en ~1 min 25** (`cd backend/tests && python3 run_all.py`), sans mocks, sur la vraie base de dev. ⚠️ Les users de test sont **semés en SQL** avec un token forgé (la route `register` reste à 3/min, rien n'est désactivé) : `test_sentinel.py` garde ce couplage, `test_auth_contract.py` couvre la vraie route. → `backend/tests/README.md`
 
 📄 Historique des merges et décisions datées → **`docs/journal.md`**
 
 ### Prochaines actions
 
+- **En cours** : **FT-1C** — logo d'équipe par **upload de fichier** (`POST /teams/{id}/logo`) + `ImagePicker` réutilisable qui porte les puces front du module File upload. A embarqué au passage : rate-limit **indexé sur l'utilisateur** (le NAT du campus partageait 100 req/min), avatar >2 Mo qui répondait **200 avec une image tronquée**, et le nettoyage MinIO sur les 5 chemins qui déréférencent un média. Édition du logo → page détail (FT-2). → `docs/backend.md`
 - **Front** : puces file upload, `/profile`, câbler `SearchBar` sur **`GET /search?q=`** (⚠️ pas `GET /users?search=`, réponse `{ results }` taggée `type`) → débloque « Add member » dans `team-detail.tsx` ; liaison de compte (`LinkAccountBanner`) ; pages match + notifications ; rail social (voir mémoire F-Social).
 - **Back** : vérification des comptes externes (OAuth Steam/Riot → `verified=true`), présence chat vers Redis (optionnel).
 - **Branche en attente** : `feature/b10-player-count` (`80c675b`) — code **fini et vert**, non mergé. **Ne pas recoder**, rebaser puis merger.
@@ -86,6 +87,8 @@ Reste aussi la **préparation de la soutenance** (chaque module revendiqué doit
 
 **Code** — TS strict partout, ESM, Node 24 (`nvm use`, `.nvmrc`). Imports nommés > default. Validation **Zod** systématique côté API. Front : tokens depuis `frontend/src/index.css` (aucune couleur/police/radius/shadow en dur dans les pages), composants de `components/ui`, imports `@/...`, icônes `lucide-react`. Lancer `npm run build` **et** `npm run lint` avant review.
 
+**Tests** — côté **front**, la console sans warning est un motif de rejet : chaque ticket front a son scénario dans `frontend/tests/console-audit/scenarios/`, et `npm run audit` doit sortir **0** avant la review (⚠️ un code 2 = harnais en échec, pas un vert). Côté **back**, le scratchpad (`/tmp/claude-*/`) est réservé au vrai jetable : one-liner de debug, inspection ponctuelle. Dès qu'un script est relancé une 2ᵉ fois ou valide un comportement durable de l'API, il est **promu** dans `backend/tests/` : nom `test_<domaine>.py`, réutilisation de `helpers.py` (ne jamais réécrire login / création d'user / gestion de token), enregistrement dans `run_all.py`, ligne ajoutée dans le README. ⚠️ **Lire `backend/tests/README.md` avant d'écrire un test** : les suites existantes couvrent déjà largement l'API — le README liste ce que couvre chacune. Si le comportement y est, on l'exécute, on ne le recrée pas.
+
 **Git** — dépôt de travail = **Git vogsphere 42** (pas de PR : review en local via `git diff master..<branche>`, jamais sa propre branche). Branches `feature/<code-ticket>-<sujet>` / `fix/<sujet>` en kebab-case. Commits **Conventional Commits**, atomiques, un ticket = un commit (squash). Pas de force push sur `master`. Identité git = identité 42. ⚠️ **Pas de trailer `Co-Authored-By: Claude`.**
 
 **Docker** — env uniquement dans `.env` (`${VAR}` dans compose), bind mounts sous `./data/`, polling pour le hot reload (WSL2), images avec registre complet + version figée (jamais `latest`), `npm ci`.
@@ -112,7 +115,7 @@ Board 4 colonnes **Todo / In Progress / Review / Done**. Une carte = ~1-3 j = un
 ## 🔗 Commandes utiles
 
 ```bash
-cd ~/transcendence
+cd ~/ft_transcendence
 nvm use                                 # Node 24 (.nvmrc)
 docker compose up -d --build            # build + démarrage complet
 docker compose ps / logs -f <service>   # état / logs
@@ -129,15 +132,17 @@ cd backend/tests && python3 run_all.py  # e2e (vraie base de dev)
 
 ## 📚 Index de la doc (lire à la demande)
 
-| Fichier | Contenu |
-| --- | --- |
-| `docs/schema.md` | Design complet du domaine jeu (§5.1→§5.4, tables, state machine) |
-| `docs/backend.md` | Détail par domaine : auth, social, teams, matchmaking, disputes, notifications, search, jobs + reste à faire |
-| `docs/frontend.md` | Détail par ticket : F0/F0-A/B/C/D, FR1, FR2, F-Nav, FL + règles front et dette |
-| `docs/infra.md` | I2/I3/I4 : proxy, certs, env, cookie, OAuth, médias |
-| `docs/modules.md` | Les 11 modules, exigences PDF, candidats de réserve |
-| `docs/stack.md` | Versions des libs + arborescence réelle du repo |
-| `docs/pieges.md` | Les 20 pièges rencontrés, version longue |
-| `docs/journal.md` | Historique daté des merges et décisions |
+| Fichier                   | Contenu                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `docs/schema.md`          | Design complet du domaine jeu (§5.1→§5.4, tables, state machine)                                             |
+| `docs/backend.md`         | Détail par domaine : auth, social, teams, matchmaking, disputes, notifications, search, jobs + reste à faire |
+| `docs/frontend.md`        | Détail par ticket : F0/F0-A/B/C/D, FR1, FR2, F-Nav, FL + règles front et dette                               |
+| `docs/infra.md`           | I2/I3/I4 : proxy, certs, env, cookie, OAuth, médias                                                          |
+| `docs/modules.md`         | Les 11 modules, exigences PDF, candidats de réserve                                                          |
+| `docs/stack.md`           | Versions des libs + arborescence réelle du repo                                                              |
+| `docs/pieges.md`          | Les 20 pièges rencontrés, version longue                                                                     |
+| `docs/journal.md`         | Historique daté des merges et décisions                                                                      |
+| `backend/tests/README.md` | Les suites e2e Python : ce que couvre chacune, helpers disponibles                                           |
+| `frontend/tests/console-audit/README.md` | Audit console Chrome automatisé : lancer, écrire le scénario d'un ticket, la dette connue |
 
 _Refacto du 25 juillet 2026 : CLAUDE.md est passé de 116 Ko à ~9 Ko ; rien n'a été perdu, tout le détail est dans `docs/`._
