@@ -20,6 +20,11 @@ type LadderSelectProps = {
   value: string | undefined;
   // Add an "All" button; selecting it emits '' (empty filter) and is the default.
   all?: boolean;
+  // Restrict the game buttons to this subset of game ids — used by a filter bar
+  // over an existing collection ("my teams"), where offering a game the user
+  // owns nothing in can only lead to an empty list. Omitted = every game.
+  // "All" is never affected: it shows even when this is empty.
+  gameIds?: string[];
 } & (
   | {
       // Default: pick a game, then a format inside it. `excludeSolo` drops 1v1
@@ -37,7 +42,7 @@ type LadderSelectProps = {
 );
 
 export function LadderSelect(props: LadderSelectProps) {
-  const { value, onChange, all = false } = props;
+  const { value, onChange, all = false, gameIds } = props;
   const onlyGame = props.mode === 'game';
   const excludeSolo = props.excludeSolo;
   const [games, setGames] = useState<Game[]>([]);
@@ -90,6 +95,11 @@ export function LadderSelect(props: LadderSelectProps) {
     [ladders, gameId],
   );
 
+  // Narrowed here rather than in the fetch above: `gameIds` usually comes from
+  // a query that resolves after this one, so the list has to re-narrow on every
+  // render instead of once. Four games — filtering them costs nothing.
+  const shownGames = gameIds ? games.filter((game) => gameIds.includes(game.id)) : games;
+
   function selectGame(nextGameId: string) {
     setGameId(nextGameId);
     onChange(onlyGame ? nextGameId : ladders.find((ladder) => ladder.gameId === nextGameId)?.id);
@@ -132,7 +142,7 @@ export function LadderSelect(props: LadderSelectProps) {
             All
           </button>
         )}
-        {games.map((game) => (
+        {shownGames.map((game) => (
           <button
             key={game.id}
             type="button"
@@ -145,7 +155,9 @@ export function LadderSelect(props: LadderSelectProps) {
         ))}
       </div>
 
-      {!onlyGame && gameLadders.length > 1 && (
+      {/* Shown from a single ladder up: even with only one format (e.g. LoL's
+          5v5), the user must see which ladder their team is being created on. */}
+      {!onlyGame && gameLadders.length > 0 && (
         <div className="flex flex-wrap gap-4">
           {gameLadders.map((ladder) => (
             <button
