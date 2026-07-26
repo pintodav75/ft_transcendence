@@ -5,6 +5,9 @@ de dev. Ils créent leurs propres utilisateurs (préfixés + suffixe hexa) et le
 nettoient à la fin : les données de l'équipe ne sont jamais touchées.
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -50,6 +53,44 @@ def req(method, path, token=None, body=None):
         return e.code, _parse(e.read().decode())
 
 
+def req_multipart(method, path, token=None, files=(), fields=()):
+    """Comme `req()`, mais en **multipart/form-data** — `req()` n'encode que du JSON.
+
+    `files`  : itérable de (fieldname, filename, contenu_bytes, mimetype)
+    `fields` : itérable de (fieldname, valeur_str)
+
+    Renvoie (status, json). Résilient : si le serveur coupe la connexion en cours d'envoi
+    (fichier rejeté avant la fin du corps), on renvoie (-1, ...) plutôt que de crasher.
+    Sert aux uploads d'avatar, de logo d'équipe et de preuve de dispute.
+    """
+    boundary = "----b" + uuid.uuid4().hex
+    body = b""
+    for fieldname, filename, content, mimetype in files:
+        body += (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{fieldname}"; filename="{filename}"\r\n'
+            f"Content-Type: {mimetype}\r\n\r\n"
+        ).encode() + content + b"\r\n"
+    for fieldname, value in fields:
+        body += (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{fieldname}"\r\n\r\n{value}\r\n'
+        ).encode()
+    body += f"--{boundary}--\r\n".encode()
+
+    r = urllib.request.Request(BASE + path, data=body, method=method)
+    r.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    if token:
+        r.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(r, context=CTX) as resp:
+            return resp.status, _parse(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        return e.code, _parse(e.read().decode())
+    except (urllib.error.URLError, OSError):
+        return -1, {"raw": "connection aborted"}
+
+
 def _parse(raw):
     """Toutes les routes ne renvoient pas du JSON (ex. /ping renvoie du texte)."""
     if not raw:
@@ -60,24 +101,68 @@ def _parse(raw):
         return {"raw": raw}
 
 
+# Mot de passe unique des users de test, et son hash bcrypt figé. Le COST 12 est celui de
+# `hashPassword()` (backend/src/auth/password.ts) : un user semé en SQL est ainsi
+# INDISCERNABLE d'un user inscrit par l'API, jusqu'au coût de vérification. Sa capacité à se
+# logger et son équivalence colonne par colonne sont vérifiées par `test_auth_contract.py`.
+# Régénérer avec (aligner le cost sur celui de hashPassword) :
+#   docker compose exec backend node -e "console.log(require('bcryptjs').hashSync('Test1234!',12))"
+FIXTURE_PASSWORD = "Test1234!"
+FIXTURE_HASH = "$2b$12$fw2ngYMEiBbg5XgJkTG4.ujHTa5M0g3FrITvdpTtzqVKxp8aPnuI."
+
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def forge_token(sub, kind="access", ttl=900, secret=None):
+    """Forge un JWT identique à ceux de `signAccessToken` (backend/src/auth/tokens.ts).
+
+    ⚠️ COUPLAGE ASSUMÉ, ET SURVEILLÉ : HS256, secret `JWT_SECRET`, claims
+    `{sub, type, iat, exp}`, TTL 15 min. Si `tokens.ts` change, c'est `test_sentinel.py`
+    qui le dit — en une seconde, au tout début du run, et non à travers 17 suites rouges.
+
+    `kind`, `ttl` et `secret` ne servent qu'à la sentinelle, pour forger les tokens qui
+    doivent être REFUSÉS (mauvais type, expiré, mauvaise signature).
+    """
+
+    def seg(obj):
+        raw = json.dumps(obj, separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).rstrip(b"=")
+
+    now = int(time.time())
+    key = (secret if secret is not None else _env("JWT_SECRET")).encode()
+    msg = seg({"alg": "HS256", "typ": "JWT"}) + b"." + seg(
+        {"sub": sub, "type": kind, "iat": now, "exp": now + ttl}
+    )
+    sig = base64.urlsafe_b64encode(hmac.new(key, msg, hashlib.sha256).digest()).rstrip(b"=")
+    return (msg + b"." + sig).decode()
+
+
 def register(tag):
-    """Crée un user de test. `register` est rate-limité à 3/min → on attend et on
-    réessaie sur 429, pour pouvoir enchaîner les suites sans sleep manuel."""
-    for attempt in range(6):
-        u = uuid.uuid4().hex[:8]
-        s, b = req(
-            "POST",
-            "/auth/register",
-            body={"pseudo": f"{tag}{u}", "email": f"{tag}{u}@t.io", "password": "Test1234!"},
-        )
-        if s == 201:
-            return b["accessToken"], b["user"]["id"], f"{tag}{u}"
-        if s == 429:
-            print(f"   ⏳ rate-limit register — attente 20s ({attempt + 1}/6)")
-            time.sleep(20)
-            continue
-        raise SystemExit(f"register a échoué : {s} {b}")
-    raise SystemExit("register : rate-limit jamais levé")
+    """Crée un user de test **directement en base**, et forge son access token.
+
+    Pourquoi pas `POST /auth/register` ? Parce que la route est rate-limitée à 3/min par IP,
+    et qu'elle le RESTE : rien n'est désactivé ni configuré côté serveur, un checkout propre
+    reste strict, et il n'existe aucun interrupteur pour l'affaiblir. Les suites créent des
+    dizaines d'users : passer par la route coûtait ~15 min d'attente par run, à chaque
+    itération du codeur PUIS du reviewer.
+
+    Le contrat de la route est couvert, lui, par `test_auth_contract.py`, qui l'appelle pour
+    de vrai — 429 compris — et qui vérifie que l'user semé ici est ÉQUIVALENT à un user
+    inscrit par l'API (mêmes colonnes, mêmes effets de bord dans les autres tables).
+
+    Renvoie le même triplet qu'avant — `(token, id, pseudo)` : aucune suite ne change.
+    """
+    u = uuid.uuid4().hex[:8]
+    pseudo = f"{tag}{u}"
+    uid = sql(
+        "insert into users (pseudo, email, password_hash) values "
+        f"('{pseudo}', '{pseudo}@t.io', '{FIXTURE_HASH}') returning id;"
+    )
+    # Garde-fou : un insert refusé rend "" (ou du bruit) → on s'arrête AVEC la cause, plutôt
+    # que de forger un token sur un sub invalide et de voir 17 suites tomber en 401.
+    if not _UUID_RE.match(uid):
+        raise SystemExit(f"seed de l'user {pseudo} : insert inattendu → {uid!r}")
+    return forge_token(uid), uid, pseudo
 
 
 def link(token, provider):
@@ -117,22 +202,34 @@ def past():
 
 
 # ---------------------------------------------------------------- SQL (dev only)
-def _pg():
-    env = {}
+def _env(key):
+    """Lit une variable du `.env` de la racine. Jamais de valeur en dur : le secret JWT et
+    les identifiants postgres diffèrent sur chaque machine de l'équipe."""
     with open(f"{ROOT}/.env") as f:
         for line in f:
             if "=" in line and not line.startswith("#"):
                 k, v = line.strip().split("=", 1)
-                env[k] = v
-    return env["POSTGRES_USER"], env["POSTGRES_DB"]
+                if k == key:
+                    return v
+    raise SystemExit(f"{key} absent de {ROOT}/.env")
+
+
+def _pg():
+    return _env("POSTGRES_USER"), _env("POSTGRES_DB")
 
 
 def sql(query):
     """Exécute du SQL dans le conteneur postgres. Sert à forcer des états que l'API
-    ne permet pas encore d'atteindre (ex. passer un match en `in_progress` avant B5c)."""
+    ne permet pas encore d'atteindre (ex. passer un match en `in_progress` avant B5c).
+
+    ⚠️ `-q` est INDISPENSABLE, pas cosmétique : sans lui, psql fait suivre le résultat du
+    TAG DE COMMANDE sur les requêtes mutantes (`INSERT ... RETURNING id` rend
+    « <uuid>\\nINSERT 0 1 », un `UPDATE` rend « UPDATE 3 »). Les appels qui jettent leur
+    retour ne le voyaient pas ; le premier qui a lu la valeur d'un RETURNING s'est pris le
+    tag collé derrière. `-t -A` seuls ne suppriment ce tag que pour les SELECT."""
     user, dbname = _pg()
     out = subprocess.run(
-        ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", user, "-d", dbname, "-tA", "-c", query],
+        ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", user, "-d", dbname, "-tAq", "-c", query],
         cwd=ROOT,
         capture_output=True,
         text=True,

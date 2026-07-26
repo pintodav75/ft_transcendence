@@ -4,7 +4,8 @@ Scripts Python qui tapent sur le **vrai backend** et la **vraie base de dev** �
 Ils créent leurs propres utilisateurs et **les suppriment à la fin** : les données de
 l'équipe (seed-dev, comptes perso) ne sont **jamais** touchées.
 
-**13 suites, 443 cas.** Aucune dépendance à installer : uniquement la stdlib Python 3.
+**18 suites** (run complet du 26/07). Aucune dépendance à installer : uniquement la
+stdlib Python 3.
 
 ## Lancer
 
@@ -20,9 +21,8 @@ python3 test_matches_concurrency.py  # une seule suite
 Les chemins sont déduits de l'emplacement des fichiers : ça tourne **depuis n'importe quel
 dossier, sur n'importe quelle machine**. `TEST_BASE_URL` permet de viser un autre backend.
 
-⚠️ **Le run complet prend ~15 min**, et c'est presque uniquement de l'**attente** : `register`
-est rate-limité à 3/min, et `helpers.py` patiente 20 s à chaque fois qu'il se le prend. Lance-le
-en tâche de fond plutôt que de le regarder tourner.
+**Le run complet ne dort plus** (il prenait ~15 min, presque uniquement d'attente sur le
+rate-limit de `register`). Voir « Détails utiles » pour le pourquoi et ses garde-fous.
 
 ## Les suites
 
@@ -37,19 +37,65 @@ en tâche de fond plutôt que de le regarder tourner.
 | `test_matches_concurrency.py` | B5c (review) | **Courses réelles, avec threads** : double accept, acceptation croisée (interblocage), double création, et la fuite d'autorisation du `DELETE` |
 | `test_matches_scheduling.py` | B5d | **Le temps** : grille horaire (quart fixe + 15 min), **fenêtres de disponibilité** (chevauchement interdit mais **dos à dos autorisé**), la « soirée gaming » (plusieurs slots qui coexistent), **l'option A resserrée** (les slots non chevauchants SURVIVENT à l'accept), l'expiration, le plafond de 5, et le **job** |
 | `test_teams_linked.py` | B5c | `hasLinkedAccount` par membre dans `GET /teams/:id` + `unlinkedPlayers` dans le 400 |
+| `test_teams_logo.py` | FT-1C | `POST /teams/:id/logo` : garde **capitaine only** (un membre simple est refusé), 401 **avant** 400, les 4 refus d'entrée (uuid, non-multipart, aucun fichier, **PDF refusé** — `IMAGE_MIME` ≠ `EVIDENCE_MIME`), cas nominal + **persistance**, et les **3 chemins qui déréférencent un logo** — remplacement par un nouvel upload, `PATCH {logoUrl: null}`, `DELETE /teams/:id` — dont on vérifie **dans le bucket** que l'objet a bien disparu (les 2 derniers fuyaient) |
 | `test_matches_result.py` | B6 | `POST /matches/:id/result` : machine à états §5.4 (accord → `completed` + ELO, désaccord → `disputed`), §5.3, et les 2 jobs 24 h (`B6_JOBS=1`) |
 | `test_disputes.py` | B7 | Les 4 routes `/disputes` : dépôt de preuve (garde de camp **avant** de révéler l'état, bornes multipart, bucket privé + URL présignée), arbitrage admin, job d'annulation neutre (`B7_JOBS=1`) |
 | `test_notifications.py` | B9 | Les 8 déclencheurs et leurs **destinataires** (alignés sauf l'acteur, banc exclu, admins), la pagination par curseur, `read`/`read-all` idempotents (`B9_JOBS=1`) |
 | `test_search.py` | SEARCH | `GET /search` : **tri global entrelacé** (une team avant un joueur), pagination de la liste **fusionnée** sans trou ni doublon, filtre `type`, casse et **Unicode** (`İ`), échappement des jokers, blocages dans les 2 sens, projection |
+| `test_sentinel.py` | FT-1C | **Sentinelle : tourne en 1ʳᵉ et ARRÊTE le run si elle échoue.** Le token forgé par `helpers.forge_token()` est-il toujours accepté (200 sur `GET /users/me`, bon `sub`, bonne ligne SQL) — et la réciproque : mauvaise signature / type `refresh` / expiré → **401** |
+| `test_auth_contract.py` | FT-1C | `POST /auth/register` et `POST /auth/login` **par la vraie route** : nominal, projection, normalisation de l'email, les 3 règles Zod en un appel, 409, 401 indistinct, les **vrais 429 des deux routes**, et l'**équivalence SQL** entre un user semé et un user inscrit (mêmes colonnes, mêmes effets de bord) |
 
 Il existe aussi des **tests unitaires Vitest** pour les helpers purs (sans DB ni HTTP) :
-`tests/unit/` (elo, leaderboard, password) → `cd backend && npm test`.
+`tests/unit/` (elo, leaderboard, notifications, password, **rate-limit**) → `cd backend && npm test`.
+
+⚠️ `rate-limit.test.ts` verrouille la **forme** de la clé de compteur (`u:<sub>` si authentifié,
+`ip:<ip>` sinon) ; les deux cas e2e de `test_auth_contract.py` prouvent, eux, qu'elle est
+**réellement branchée** sur le chemin global. Les deux sont nécessaires : l'un sans l'autre
+laisse passer un `keyGenerator` correct mais jamais appelé.
 
 ## Détails utiles
 
-- **`helpers.py`** contient le client HTTP, `register()` (qui **réessaie tout seul** sur le
-  rate-limit de 3/min), l'accès SQL et le nettoyage. `ROOT` est déduit de `__file__` — **jamais
-  de chemin en dur**, sinon les tests ne tournent que sur la machine de leur auteur.
+- **`helpers.py`** contient le client HTTP, `register()`, l'accès SQL et le nettoyage. `ROOT`
+  est déduit de `__file__` — **jamais de chemin en dur**, sinon les tests ne tournent que sur
+  la machine de leur auteur.
+- 🔑 **`register()` NE PASSE PLUS par `POST /auth/register`** : il insère l'user en SQL puis
+  **forge lui-même** son access token (`forge_token()`). Pourquoi : la route est à **3/min par
+  IP** et elle le **reste** — y faire passer les dizaines d'users des suites coûtait **~15 min
+  d'attente par run**, à chaque itération du codeur puis du reviewer. **Rien n'est désactivé ni
+  configuré côté serveur** : un checkout propre + `docker compose up` donne un rate limit
+  strict, et il n'existe aucun interrupteur pour l'affaiblir. Les tests ont simplement cessé
+  d'emprunter une route dont ils ne testaient pas le contrat.
+- ⚠️ **Le couplage que ça crée, et les DEUX garde-fous qui le surveillent.** `forge_token()`
+  duplique la forme du token de **`backend/src/auth/tokens.ts`** : HS256, secret `JWT_SECRET`
+  lu dans le `.env` de la racine, claims `{sub, type:'access', iat, exp}`, TTL 15 min. Si
+  `tokens.ts` change, **toutes** les suites tombent en 401.
+  1. **`test_sentinel.py` tourne en premier et interrompt le run** : le diagnostic est « le
+     helper a dérivé », en une seconde, au lieu de 17 suites rouges. **Si la sentinelle est
+     rouge, corrige `helpers.forge_token()` — pas les suites.**
+  2. La sentinelle ne valide que le TOKEN. L'**équivalence de l'USER** est vérifiée dans
+     `test_auth_contract.py`, qui compare **en SQL** un user inscrit par l'API et un user semé :
+     toutes les colonnes (en jsonb, donc une colonne ajoutée demain est couverte
+     automatiquement) **et** le nombre de lignes pointant sur lui dans **chaque** table ayant
+     une FK vers `users` (lue dans le catalogue postgres). Si `register` se met à créer une
+     ligne ailleurs — préférences, ELO initial, table de sessions — c'est ce cas qui le dit, et
+     c'est un **vrai positif** : on fait créer le même effet de bord à `helpers.register()`, on
+     n'ajoute pas une exclusion.
+  Les users semés portent `FIXTURE_HASH`, vrai hash bcrypt **cost 12** (celui de
+  `hashPassword()`) de `FIXTURE_PASSWORD` : ils peuvent se **logger** normalement, et
+  `test_auth_contract.py` le vérifie.
+- ⚠️ **Le rate-limit global est indexé sur l'UTILISATEUR** (100/min), plus sur l'IP — sauf pour
+  les routes anonymes, qui restent par IP. Sans ça, les suites devenues rapides saturaient
+  100 req/min à elles seules et se prenaient des 429 en cascade (symptôme trompeur : un
+  `TypeError` dans `ladder_id()`, parce qu'un corps de 429 n'a pas la forme attendue).
+- ⚠️ **`req()` n'encode QUE du JSON.** Pour un upload, utiliser **`req_multipart(method, path,
+  token, files=[(champ, nom, octets, mime)], fields=[(champ, valeur)])`** : même gestion du
+  Bearer et du contexte SSL, corps multipart encodé à la main (stdlib seule).
+- ⚠️ **Les routes d'upload sont rate-limitées à 20/min PAR COMPTE** (avatar, logo d'équipe) :
+  elles sont authentifiées, donc le `keyGenerator` global indexe sur le `sub` du JWT, et
+  répartir les uploads sur alice/bob/carol multiplie d'autant le budget. Au-delà, une suite
+  doit absorber les 429 (cf. `_post_logo()` dans `test_teams_logo.py`), sinon elle échoue sur
+  un 429 au lieu du code attendu. Les routes **anonymes** sont bien plus serrées —
+  `register` 3/min, `login` 5/min, `2fa/verify` 5/min, **par IP** — et c'est volontaire.
 - ⚠️ **`future()` arrondit AU QUART SUPÉRIEUR** depuis B5d. Le back refuse toute heure hors
   `:00`/`:15`/`:30`/`:45` (400) et à moins de 15 min du coup d'envoi. Une heure « naïve »
   (`now + 1h`) tombe presque toujours à côté de la grille → 400. **Toujours passer par

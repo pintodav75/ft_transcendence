@@ -18,18 +18,24 @@ export function Teams() {
   // Names the team just created for the success banner above the grid; a
   // stale name must not survive reopening the form for a second team.
   const [createdTeamName, setCreatedTeamName] = useState<string>();
+  // Non-blocking warning from TeamCreation (e.g. the logo upload failed even
+  // though the team was created) — TeamCreation unmounts the moment it calls
+  // onCreated, so this banner is the only place it can still be shown.
+  const [createdTeamWarning, setCreatedTeamWarning] = useState<string>();
   // The games the user has at least one team in. Empty while the query loads
   // and for a user with no team: only "All" shows, which is the point.
   const myGameIds = [...new Set(data?.teams.map((team) => team.gameId) ?? [])];
 
   function openForm() {
     setCreatedTeamName(undefined);
+    setCreatedTeamWarning(undefined);
     setFormOpen(true);
   }
 
-  async function handleCreated(teamName: string) {
+  async function handleCreated(teamName: string, warning?: string) {
     setFormOpen(false);
     setCreatedTeamName(teamName);
+    setCreatedTeamWarning(warning);
     await queryClient.invalidateQueries({ queryKey: ['teams'] });
   }
 
@@ -43,12 +49,22 @@ export function Teams() {
       </header>
 
       {createdTeamName && (
-        <p
-          role="status"
-          className="rounded-control border border-success/40 bg-success/10 px-4 py-3 text-sm text-success"
-        >
-          “{createdTeamName}” was created.
-        </p>
+        <div className="flex flex-col gap-2">
+          <p
+            role="status"
+            className="rounded-control border border-success/40 bg-success/10 px-4 py-3 text-sm text-success"
+          >
+            “{createdTeamName}” was created.
+          </p>
+          {createdTeamWarning && (
+            <p
+              role="status"
+              className="rounded-control border border-border-subtle bg-surface-card-strong/60 px-4 py-3 text-sm text-text-secondary"
+            >
+              {createdTeamWarning}
+            </p>
+          )}
+        </div>
       )}
 
       {formOpen ? (

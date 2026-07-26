@@ -5,16 +5,13 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { LadderSelect } from '@/components/home/LadderSelect';
 import { Button } from '@/components/ui/button';
 import { FormMessage } from '@/components/ui/form-message';
+import { ImagePicker } from '@/components/ui/image-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError, apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import {
-  createTeamSchema,
-  LOGO_URL_MAX_LENGTH,
-  NAME_MAX_LENGTH,
-  type CreateTeamFormValues,
-} from '@/lib/create-team-schema';
+import { uploadFile } from '@/lib/upload';
+import { createTeamSchema, NAME_MAX_LENGTH, type CreateTeamFormValues } from '@/lib/create-team-schema';
 
 import type { components } from '@/lib/api-types.gen';
 
@@ -33,16 +30,18 @@ function conflictOf(payload: unknown): TeamCreateConflict | undefined {
 
 type TeamCreationProps = {
   // Called after a successful create with the team's name, so the parent can
-  // refresh its list and name the team in its success banner.
-  onCreated: (teamName: string) => Promise<void>;
+  // refresh its list and name the team in its success banner. `warning`
+  // carries a non-blocking message (logo upload failure) the parent must show
+  // even though the create itself succeeded — TeamCreation unmounts as soon
+  // as this resolves, so it cannot display it itself.
+  onCreated: (teamName: string, warning?: string) => Promise<void>;
   // Closes the form without creating anything — lives inside the form now.
   onCancel: () => void;
 };
 
 export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
-  // The "https:// URL that just doesn't resolve to an image" case: reset on
-  // every keystroke so fixing the URL gives the preview another try.
-  const [logoPreviewFailed, setLogoPreviewFailed] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoUploadProgress, setLogoUploadProgress] = useState<number | null>(null);
 
   const {
     control,
@@ -55,30 +54,21 @@ export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
     resolver: zodResolver(createTeamSchema),
     mode: 'onTouched',
     reValidateMode: 'onChange',
-    defaultValues: { ladderId: '', name: '', logoUrl: '' },
+    defaultValues: { ladderId: '', name: '' },
   });
 
   // `useWatch` rather than the form's `watch()` method: the latter breaks the
   // React Compiler's memoization guarantees (flagged by
   // react-hooks/incompatible-library).
   const name = useWatch({ control, name: 'name' });
-  const logoUrl = useWatch({ control, name: 'logoUrl' });
 
   const ladderError = dirtyFields.ladderId || isSubmitted ? errors.ladderId?.message : undefined;
   const nameError = dirtyFields.name || isSubmitted ? errors.name?.message : undefined;
-  const logoUrlError = dirtyFields.logoUrl || isSubmitted ? errors.logoUrl?.message : undefined;
-
-  // Independent from the field's own validation timing (`onTouched`): the
-  // preview should appear the moment the URL looks right, not only once the
-  // user has blurred the field.
-  const trimmedLogoUrl = logoUrl.trim();
-  const showLogoPreview =
-    trimmedLogoUrl.startsWith('https://') &&
-    trimmedLogoUrl.length <= LOGO_URL_MAX_LENGTH &&
-    !logoPreviewFailed;
 
   const submitValidatedForm = handleSubmit(async (values) => {
     clearErrors('root.server');
+
+    let createdTeam: Team;
 
     try {
       // The 201 carries the raw team row, which lacks the ladder and game
@@ -86,15 +76,9 @@ export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
       // rebuilding them here.
       const response = await apiFetch<{ team: Team }>('/teams', {
         method: 'POST',
-        body: {
-          ladderId: values.ladderId,
-          name: values.name,
-          // Never send an empty (or null) key: both are rejected by POST
-          // /teams the same way a malformed URL is.
-          ...(values.logoUrl ? { logoUrl: values.logoUrl } : {}),
-        },
+        body: { ladderId: values.ladderId, name: values.name },
       });
-      await onCreated(response.team.name);
+      createdTeam = response.team;
     } catch (creationError) {
       if (creationError instanceof ApiError && creationError.status === 409) {
         // Two distinct causes share the 409: name already taken on this ladder
@@ -121,7 +105,29 @@ export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
       }
 
       setError('root.server', { type: 'server', message: 'Could not create the team.' });
+      return;
     }
+
+    // The team exists from this point on no matter what happens below: a
+    // failed logo upload must never look like a failed team creation.
+    let logoUploadWarning: string | undefined;
+
+    if (logoFile) {
+      try {
+        setLogoUploadProgress(0);
+        await uploadFile(`/teams/${createdTeam.id}/logo`, logoFile, {
+          field: 'logo',
+          onProgress: setLogoUploadProgress,
+        });
+      } catch {
+        logoUploadWarning =
+          'Team created, but the logo could not be uploaded — please try again in a moment.';
+      } finally {
+        setLogoUploadProgress(null);
+      }
+    }
+
+    await onCreated(createdTeam.name, logoUploadWarning);
   });
 
   return (
@@ -178,41 +184,19 @@ export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
       <div className="flex flex-col gap-3 rounded-control border border-border-subtle bg-surface-card-strong/40 p-3">
         <p className="label-caps text-xs text-text-muted">Optional</p>
 
-        <div className="relative space-y-2">
-          <Label htmlFor="team-logo-url">Logo URL</Label>
-          <Input
-            id="team-logo-url"
-            type="url"
-            inputMode="url"
-            placeholder="https://example.com/logo.png"
-            aria-invalid={Boolean(logoUrlError)}
-            aria-describedby={logoUrlError ? 'team-logo-url-error' : 'team-logo-url-hint'}
-            {...register('logoUrl', { onChange: () => setLogoPreviewFailed(false) })}
+        <div className="space-y-2">
+          <Label>Team logo</Label>
+          <ImagePicker
+            label="team logo"
+            value={logoFile}
+            onChange={setLogoFile}
+            progress={logoUploadProgress}
+            disabled={isSubmitting}
           />
-          <p id="team-logo-url-hint" className="text-xs text-text-muted">
+          <p className="text-xs text-text-muted">
             Not required — you can leave it empty and add a logo later from the team page.
           </p>
-          {logoUrlError ? (
-            <FormMessage id="team-logo-url-error" className="absolute left-0 top-full mt-1">
-              {logoUrlError}
-            </FormMessage>
-          ) : null}
         </div>
-
-        {showLogoPreview && (
-          <div className="flex items-center gap-3">
-            <img
-              src={trimmedLogoUrl}
-              alt=""
-              className="size-14 rounded-full border border-border-subtle object-cover"
-              onError={() => setLogoPreviewFailed(true)}
-            />
-            <p className="text-xs text-text-muted">Logo preview</p>
-          </div>
-        )}
-        {logoPreviewFailed && trimmedLogoUrl && !logoUrlError && (
-          <p className="text-xs text-text-muted">Could not load a preview for this image.</p>
-        )}
       </div>
 
       {errors.root?.server ? <FormMessage>{errors.root.server.message}</FormMessage> : null}

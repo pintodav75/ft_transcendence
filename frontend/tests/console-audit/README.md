@@ -1,0 +1,106 @@
+# Audit console — un scénario par ticket front
+
+Le sujet fait de **« zéro warning ET zéro erreur dans la console Chrome »** un motif de
+**rejet du projet**, au même titre qu'une ToS vide. Ce harnais transforme ce critère en
+commande : il pilote un vrai Chromium, déroule le parcours du ticket, et **échoue si la
+console dit quoi que ce soit** d'imputable à ce ticket.
+
+## Lancer
+
+```bash
+docker compose up -d                     # la stack doit tourner
+cd frontend/tests/console-audit
+npm install                              # une seule fois (playwright-core, ~3 Mo)
+npm run audit                            # tous les scénarios
+npm run audit ft1c                       # un seul (filtre sur le nom de fichier)
+```
+
+Codes de sortie : **0** console propre et tous les checks verts · **1** au moins un
+problème imputable au périmètre · **2** le harnais lui-même a échoué (stack éteinte,
+sélecteur obsolète). ⚠️ Un **2** ne veut **pas** dire « console propre ».
+
+### Le navigateur
+
+`playwright-core` ne télécharge aucun navigateur : le runner cherche, dans l'ordre,
+`$AUDIT_CHROMIUM`, puis `~/.cache/ms-playwright/chromium-*`, puis un Chrome/Chromium
+système. Si rien n'est trouvé :
+
+```bash
+npx playwright install chromium
+```
+
+## Pourquoi trois sources d'écoute
+
+Le panneau Console de DevTools agrège **trois** flux, et un audit qui n'en écoute qu'un
+donne un faux vert :
+
+| Flux | Capté par | Ce qu'il apporte |
+| --- | --- | --- |
+| `Runtime.consoleAPICalled` | `page.on('console')` | les `console.*` du code |
+| `Runtime.exceptionThrown` | `page.on('pageerror')` | les exceptions non attrapées |
+| `Log.entryAdded` (CDP) | session CDP explicite | **les messages du navigateur** : « Failed to load resource: 404 », CORS, contenu mixte, dépréciations |
+
+La troisième n'a **aucun équivalent** dans l'API haut niveau de Playwright. C'est
+pourtant elle qui produit les lignes rouges de 404 d'images — donc précisément ce
+qu'un correcteur voit en premier sur une page de teams.
+
+## Écrire le scénario de son ticket
+
+Un fichier dans `scenarios/`, exportant `name`, `surface` et `run()` :
+
+```js
+export const name = 'ft2-team-detail';
+export const surface = '/teams/:id + édition du logo';
+
+export async function run({ page, setPhase, step, countRequests, fixtures, user, ORIGIN }) {
+  setPhase('1. chargement');            // étiquette les entrées console captées ensuite
+  await page.goto(`${ORIGIN}/teams`, { waitUntil: 'networkidle' });
+
+  const n = await page.locator('…').count();
+  step('1.1', n === 1, `détail : ${n} (1 attendu)`);   // un check nommé = une ligne du rapport
+}
+```
+
+Ce que le runner fournit :
+
+| Outil | Rôle |
+| --- | --- |
+| `setPhase(label)` | étiquette les entrées console suivantes → le rapport dit **où** ça a parlé |
+| `step(id, ok, detail)` | un check nommé, repris dans le décompte final |
+| `countRequests(fn, filter?)` | prouve qu'une action n'a déclenché **aucun** aller-retour réseau |
+| `fixtures.ok / .big / .bad` | PNG valide · PNG > 2 Mo · GIF (type refusé), **générés à l'exécution** |
+| `user` | compte neuf du run (`pseudo`, `email`, `password`, `accessToken`, `stamp`) |
+
+Le runner se charge seul du reste : compte de test créé par l'API, connexion via l'UI
+(étiquetée hors périmètre), suppression du compte via `DELETE /users/me` à la fin,
+fixtures supprimées.
+
+### ⚠️ Les numéros de ligne du rapport ne sont pas ceux de la source
+
+Une entrée émise par le navigateur (`Log.entryAdded`) porte la position dans le fichier
+**transformé servi par Vite**, pas dans le `.tsx` d'origine — et l'index est à 0. Exemple
+constaté : le `console.log` de `pages/teams/team-detail.tsx` est signalé `:39` alors qu'il
+est **ligne 51** dans la source.
+
+Conséquence : **ne jamais recopier un `fichier:ligne` du rapport dans un compte rendu**.
+Le fichier est fiable, la ligne non — la retrouver au `grep` avant de la citer.
+
+### Deux pièges à connaître avant d'écrire un scénario
+
+1. **`page.goto` recharge toute la SPA.** Le bandeau du serveur de dev est alors
+   recompté à chaque tour : tu mesurerais Vite, pas l'application. Pour tester un cycle
+   de montage/démontage, utilise une interaction **client** (ouvrir/fermer un
+   formulaire, cliquer un lien du routeur).
+2. **Les fixtures ne sont pas versionnées.** `big.png` fait 5,6 Mo de bruit aléatoire —
+   il est régénéré à chaque run parce qu'une image unie se compresserait à quelques Ko
+   et ne testerait plus la limite de 2 Mo.
+
+## La dette connue
+
+`OUT_OF_SCOPE` dans `runner.mjs` liste le bruit que l'audit **constate sans l'imputer**
+au ticket en cours. Chaque entrée porte sa raison et son ticket d'origine, et reste
+**affichée** dans le rapport — c'est ce qui l'empêche de pourrir en silence. Quand la
+dette est payée, on retire la ligne.
+
+Au 27/07/2026 : le bandeau React DevTools + le serveur de dev (absents du build de
+prod), et le **401 sur `POST /auth/refresh`** à chaque chargement anonyme (F0 / FR2).

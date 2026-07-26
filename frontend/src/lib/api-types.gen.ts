@@ -2271,6 +2271,101 @@ export interface paths {
         };
         trace?: never;
     };
+    "/teams/{id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uploader le logo d'une équipe
+         * @description **Capitaine only.** Upload multipart (limite **2 MB**, globale). MIME autorisés : image/jpeg, image/png, image/webp — **pas** de PDF (contrairement aux preuves de dispute : un logo est forcément une image). Stocke l'objet dans le bucket **public `avatars`** (le même que les avatars utilisateurs : un logo d'équipe est tout aussi public, et un bucket dédié coûterait de l'env + du compose pour zéro gain) puis écrit `logo_url`.
+         *
+         *     Complète `PATCH /teams/{id}`, qui n'accepte qu'une URL **https** déjà hébergée ailleurs. ⚠️ Le `logoUrl` renvoyé ici est un **chemin RELATIF** `/media/avatars/<uuid>.<ext>`, il ne commence donc **pas** par `https://` : il est fabriqué par le serveur, pas saisi par un client (la règle https ne protège que les URL saisies). Le front doit accepter les deux formes.
+         *
+         *     L'ancien logo est supprimé de MinIO s'il était hébergé chez nous ; s'il s'agissait d'une URL externe héritée, il n'y a rien à supprimer. Un échec de suppression est **loggé, pas propagé** (même politique que `DELETE /users/me/avatar`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description Le fichier image (jpeg/png/webp, ≤ 2 MB). ⚠️ Le serveur prend la **première partie fichier** de la requête (`request.file()`), comme `POST /users/me/avatar` : le nom `logo` est la convention du contrat, il n'est pas vérifié. Envoyer une seule partie fichier.
+                         */
+                        logo: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Logo mis à jour (`team.logoUrl` pointe sur le nouvel objet) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            team: components["schemas"]["Team"];
+                        };
+                    };
+                };
+                /** @description Param `:id` non-uuid, corps non multipart, aucun fichier envoyé, ou type MIME non supporté (`application/pdf` inclus). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"] | components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Réservé au capitaine de l'équipe (un membre simple est refusé) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Équipe inconnue */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Fichier trop volumineux (> 2 MB) */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/teams/{id}/members": {
         parameters: {
             query?: never;
@@ -3959,6 +4054,7 @@ export interface components {
             name: string;
             /** Format: uuid */
             captainId: string;
+            /** @description **Deux formes possibles** — le front doit accepter les deux : un chemin RELATIF `/media/avatars/<uuid>.<ext>` quand le logo a été uploadé via `POST /teams/{id}/logo`, ou une URL absolue `https://…` quand il a été saisi via `POST /teams` / `PATCH /teams/{id}`. `null` = pas de logo. */
             logoUrl: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -3988,6 +4084,7 @@ export interface components {
             format: "1v1" | "2v2" | "3v3" | "5v5";
             gameId: string;
             isCaptain: boolean;
+            /** @description Chemin relatif `/media/avatars/…` (upload) **ou** URL absolue `https://…` (saisie) — cf. `Team.logoUrl`. */
             logoUrl: string | null;
         };
         /** @description Détail d'une team (GET /teams/{id}), infos ladder aplaties. */
@@ -4008,6 +4105,7 @@ export interface components {
             requiredProvider: "riot" | "steam" | "epic" | "chess_com";
             /** Format: uuid */
             captainId: string;
+            /** @description Chemin relatif `/media/avatars/…` (upload) **ou** URL absolue `https://…` (saisie) — cf. `Team.logoUrl`. */
             logoUrl: string | null;
         };
         /** @description Un membre d'une team (le capitaine y figure avec isCaptain=true). */

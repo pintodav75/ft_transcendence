@@ -1,4 +1,5 @@
 import { Client } from 'minio';
+import type { FastifyBaseLogger } from 'fastify';
 
 const ENDPOINT = process.env.MINIO_ENDPOINT;
 const PORT = Number(process.env.MINIO_PORT);
@@ -168,6 +169,48 @@ export async function ensureBucket() {
 // le proxy /media → MinIO. Relatif = pas de contenu mixte, pas d'hôte codé en dur.
 export function buildPublicUrl(filename: string): string {
   return `${MEDIA_PREFIX}/${BUCKET_NAME}/${filename}`;
+}
+
+// Préfixe des médias HÉBERGÉS PAR NOUS : `/media/<bucket>/`. Dérivé de `buildPublicUrl` plutôt
+// que recopié en dur — le jour où le bucket ou le préfixe `/media` change, ce code suit tout seul.
+const HOSTED_PREFIX = buildPublicUrl('');
+
+/**
+ * Clé d'objet MinIO derrière une URL de média, ou `undefined` si ce média n'est PAS hébergé
+ * chez nous.
+ *
+ * `teams.logo_url` peut contenir une URL EXTERNE `https://…` (modèle historique, toujours
+ * accepté par `POST /teams` et `PATCH /teams/:id`) : il n'y a alors rien à supprimer dans le
+ * bucket. On matche donc le préfixe EXACT — jamais un `split('/').pop()` qui, sur
+ * `https://cdn.example.com/logo.png`, rendrait `logo.png` et ferait tenter la suppression
+ * d'un objet homonyme dans NOTRE bucket. On refuse aussi toute clé contenant un `/` : pas
+ * question qu'une valeur bricolée en base fasse supprimer un objet d'un autre préfixe.
+ */
+export function hostedObjectKey(url: string | null | undefined): string | undefined {
+  if (!url || !url.startsWith(HOSTED_PREFIX)) return undefined;
+  const key = url.slice(HOSTED_PREFIX.length);
+  return key.length > 0 && !key.includes('/') ? key : undefined;
+}
+
+/**
+ * Supprime le média hébergé derrière `url` — sans JAMAIS faire échouer la requête HTTP
+ * appelante : on préfère un objet orphelin dans MinIO à un utilisateur bloqué.
+ *
+ * No-op si l'URL est nulle ou pointe ailleurs que sur notre bucket, ce qui permet aux
+ * appelants de l'invoquer sans garde préalable.
+ */
+export async function removeHostedObject(
+  log: FastifyBaseLogger,
+  url: string | null | undefined,
+  label: string,
+): Promise<void> {
+  const key = hostedObjectKey(url);
+  if (!key) return;
+  try {
+    await minioClient.removeObject(BUCKET_NAME, key);
+  } catch (err) {
+    log.warn({ err, key }, `Failed to remove ${label} from MinIO`);
+  }
 }
 
 // URL présignée en lecture (GET) sur une preuve du bucket privé, valable `expirySeconds`.
