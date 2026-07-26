@@ -8,13 +8,17 @@ import {
   gamesTable,
   userExternalAccountsTable,
 } from '../db/schema.js';
-import { eq, and, count, inArray } from 'drizzle-orm';
+import { eq, and, asc, count, inArray } from 'drizzle-orm';
 import { notify, pushNotifications } from '../utils/notifications.js';
 import z from 'zod';
 
+// `logoUrl` est optionnel à la création : même règle HTTPS qu'à l'édition (voir le
+// commentaire d'`updateTeamSchema` plus bas). Non fourni → la colonne reste `null`.
+// Pas de `.nullable()` ici : on ne « retire » pas un logo sur une team qui n'existe pas.
 const createTeamSchema = z.object({
   ladderId: z.uuid(),
   name: z.string().trim().min(1).max(50),
+  logoUrl: z.url({ protocol: /^https$/ }).max(2048).optional(),
 });
 const addMemberSchema = z.object({ userId: z.uuid() });
 const idParamSchema = z.object({ id: z.uuid() });
@@ -75,7 +79,12 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       const team = await db.transaction(async (tx) => {
         const [created] = await tx
           .insert(teamsTable)
-          .values({ ladderId: data.ladderId, name: data.name, captainId: userId })
+          .values({
+            ladderId: data.ladderId,
+            name: data.name,
+            captainId: userId,
+            logoUrl: data.logoUrl ?? null,
+          })
           .returning();
         if (!created) throw new Error('team insert returned no row');
         await tx.insert(teamMembersTable).values({
@@ -99,11 +108,17 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       ) {
         const constraint =
           'constraint_name' in error.cause ? error.cause.constraint_name : undefined;
+        // Code structuré en plus du message : le front route l'erreur vers le bon
+        // champ sans parser de prose (un changement de wording ne doit rien casser).
         if (constraint === 'teams_ladder_name_unique')
-          return reply.code(409).send({ error: 'team name already taken on this ladder' });
+          return reply
+            .code(409)
+            .send({ error: 'team name already taken on this ladder', code: 'name_taken' });
         if (constraint === 'team_members_user_ladder_unique')
-          return reply.code(409).send({ error: 'already in a team on this ladder' });
-        return reply.code(409).send({ error: 'conflict' });
+          return reply
+            .code(409)
+            .send({ error: 'already in a team on this ladder', code: 'already_in_team' });
+        return reply.code(409).send({ error: 'conflict', code: 'conflict' });
       }
       return reply.code(500).send({ error: 'Internal error' });
     }
@@ -116,7 +131,10 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         .from(teamMembersTable)
         .innerJoin(teamsTable, eq(teamsTable.id, teamMembersTable.teamId))
         .innerJoin(laddersTable, eq(laddersTable.id, teamsTable.ladderId))
-        .where(eq(teamMembersTable.userId, userId));
+        .where(eq(teamMembersTable.userId, userId))
+        // Without an explicit sort Postgres is free to return the rows in any
+        // order, so the team grid could reshuffle between two loads.
+        .orderBy(asc(teamsTable.name));
       const teams = rows.map((row) => ({
         id: row.teams.id,
         name: row.teams.name,

@@ -2037,6 +2037,11 @@ export interface paths {
                         ladderId: string;
                         /** @example Bisounours */
                         name: string;
+                        /**
+                         * Format: uri
+                         * @description **Optionnel.** URL **https** du logo, posée dès la création. Mêmes règles qu'au `PATCH /teams/{id}` : `http://` et les autres schémas d'URI (`javascript:`, `ftp:`…) sont refusés (400). Absent → `logo_url` reste `null`. `null` n'est **pas** accepté ici (on ne retire pas un logo sur une team qui n'existe pas encore). C'est une **URL**, pas un upload de fichier.
+                         */
+                        logoUrl?: string;
                     };
                 };
             };
@@ -2077,7 +2082,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["TeamCreateConflict"];
                     };
                 };
                 500: components["responses"]["InternalError"];
@@ -3959,6 +3964,16 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        /** @description Conflit renvoyé par POST /teams. Le client doit tester `code`, pas parser `error` : `error` est un texte d'affichage susceptible de changer, `code` est stable. */
+        TeamCreateConflict: {
+            /** @description Message lisible, destiné à l’affichage. */
+            error: string;
+            /**
+             * @description Valeur stable à tester par le client.
+             * @enum {string}
+             */
+            code: "name_taken" | "already_in_team" | "conflict";
         };
         /** @description Une de mes teams (GET /teams), infos ladder aplaties. */
         TeamListItem: {
