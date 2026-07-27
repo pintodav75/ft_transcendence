@@ -2025,7 +2025,9 @@ export interface paths {
         put?: never;
         /**
          * Créer une équipe
-         * @description Crée une team sur un ladder d'équipe (2v2+). Le créateur devient capitaine ET premier membre (transaction). Refusé sur un ladder 1v1 (solo). Roster plafonné à 10 (enforcé au fil des ajouts).
+         * @description Crée une team sur un ladder d'équipe (2v2+). Le créateur devient capitaine ET premier membre (transaction). Refusé sur un ladder 1v1 (solo). Roster plafonné à 10 (membres + invitations en attente).
+         *
+         *     ⚠️ **Effet de bord (B-INV)** : dans la **même transaction**, les invitations encore `pending` que le créateur avait reçues **sur ce ladder** passent à `cancelled` — exactement comme à l'acceptation d'une invitation, et pour la même raison : il a désormais une équipe, elles ne pourraient plus aboutir (`409 already_in_team`). Les laisser vivantes les afficherait encore dans `GET /teams/invitations/me` **et occuperait une place du plafond de 10 des équipes émettrices**. Aucune notification (personne n'a rien refusé).
          */
         post: {
             parameters: {
@@ -2108,6 +2110,8 @@ export interface paths {
         /**
          * Détail d'une équipe
          * @description Team + ladder aplati + liste des membres (le capitaine y figure avec isCaptain=true).
+         *
+         *     **Divulgation progressive (B-INV)** : `isMember` dit si l'appelant fait partie de l'équipe, et le tableau `invitations` (les sollicitations encore `pending`) n'est présent **que pour un membre**. Un visiteur ne doit pas apprendre qui a été sollicité — le champ est alors **absent**, pas vide (même choix que `lineup` sur `GET /teams/{id}/matches`).
          */
         get: {
             parameters: {
@@ -2129,6 +2133,10 @@ export interface paths {
                         "application/json": {
                             team: components["schemas"]["TeamDetail"];
                             members: components["schemas"]["TeamMember"][];
+                            /** @description L'appelant fait-il partie de cette équipe ? */
+                            isMember: boolean;
+                            /** @description Invitations encore **en attente**, les plus anciennes d'abord. **Présent uniquement si `isMember` est vrai.** */
+                            invitations?: components["schemas"]["TeamInvitation"][];
                         };
                     };
                 };
@@ -2149,7 +2157,9 @@ export interface paths {
         post?: never;
         /**
          * Dissoudre une équipe
-         * @description Supprime la team (capitaine only). Les membres partent en cascade DB.
+         * @description Supprime la team (capitaine only). Les membres **et les invitations en attente** partent en **cascade DB** — les invités ne sont pas notifiés (l'équipe qui les sollicitait n'existe plus).
+         *
+         *     ⚠️ Écrit sous le **même verrou consultatif d'équipe** que les routes d'invitation, pris **avant** le `SELECT … FOR UPDATE`. La cascade fait de cette route une écrivaine de `team_invitations` — sans ce verrou elle s'interbloquait avec une acceptation concurrente (elle tient la ligne `teams`, l'acceptation tient la ligne d'invitation, chacune veut celle de l'autre), et c'est le **capitaine** qui recevait un `500` sur une dissolution parfaitement légitime.
          */
         delete: {
             parameters: {
@@ -2491,7 +2501,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/teams/{id}/members": {
+    "/teams/{id}/invitations": {
         parameters: {
             query?: never;
             header?: never;
@@ -2501,8 +2511,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ajouter un membre
-         * @description Ajoute un membre (capitaine only). Gardes : roster < 10, user existant, pas déjà membre, pas déjà dans une autre team du même ladder.
+         * Inviter un joueur dans l'équipe
+         * @description **Capitaine only.** Crée une invitation `pending` : le joueur **ne devient PAS membre** ici, il doit accepter. Gardes : le joueur existe, n'est pas déjà membre, n'a pas déjà une équipe sur ce ladder, n'a pas déjà une invitation en attente de cette équipe, et `membres + invitations en attente < 10`.
+         *
+         *     Le plafond est vérifié **sous verrous consultatifs** (`pg_advisory_xact_lock`) : deux invitations simultanées ne peuvent pas le franchir ensemble. Deux clés sont prises, **triées** — celle de l'équipe (le plafond) et celle du couple (joueur, ladder) (la règle « une seule équipe par ladder »), le même jeu que l'acceptation.
+         *
+         *     Plusieurs équipes **peuvent** inviter le même joueur sur un même ladder : seule l'**acceptation** est exclusive. Le client doit tester `code`, pas la prose de `error`.
          */
         post: {
             parameters: {
@@ -2522,16 +2536,18 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Membre ajouté */
+                /** @description Invitation créée (le joueur est notifié, il n'est pas encore membre) */
                 201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Ok"];
+                        "application/json": {
+                            invitation: components["schemas"]["TeamInvitation"];
+                        };
                     };
                 };
-                /** @description Body invalide */
+                /** @description Param `:id` non-uuid, ou `userId` absent/non-uuid */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2541,31 +2557,317 @@ export interface paths {
                     };
                 };
                 401: components["responses"]["Unauthorized"];
-                /** @description Seul le capitaine peut ajouter */
+                /** @description Réservé au capitaine (`code: not_captain`) */
                 403: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["TeamInvitationError"];
                     };
                 };
-                /** @description Team ou user inconnu */
+                /** @description Équipe (`team_not_found`) ou joueur (`user_not_found`) inconnu */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["TeamInvitationError"];
                     };
                 };
-                /** @description Team pleine (10), déjà membre, ou déjà dans une team sur ce ladder */
+                /** @description Refus métier : `already_member` (déjà dans l'équipe, couvre l'auto-invitation), `already_in_team_on_ladder` (le joueur a déjà une équipe sur ce ladder), `already_invited` (invitation déjà en attente pour ce couple), `roster_full` (membres + invitations en attente = 10). */
                 409: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Error"];
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{id}/invitations/{invitationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Annuler une invitation en attente
+         * @description **Capitaine only.** Passe l'invitation à `cancelled` et **libère la place** du roster : une nouvelle invitation vers le même joueur redevient possible (l'index d'unicité est **partiel**, restreint aux `pending`).
+         *
+         *     ⚠️ À ne pas confondre avec `DELETE /teams/{id}/members/{userId}` (le **kick**), qui retire un joueur **déjà membre**. Ici le joueur n'a jamais rejoint l'équipe. Aucune notification n'est émise (le capitaine est l'acteur).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Invitation annulée */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Ok"];
+                    };
+                };
+                /** @description Param non-uuid */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Réservé au capitaine (`code: not_captain`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                /** @description Équipe inconnue (`team_not_found`), ou aucune invitation **en attente** avec cet id dans cette équipe (`invitation_not_found` — couvre l'invitation déjà répondue, déjà annulée, ou appartenant à une autre équipe). */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/invitations/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Mes invitations en attente
+         * @description Les invitations **que j'ai reçues** et qui sont encore `pending`, la plus récente d'abord. Les invitations acceptées, refusées ou annulées n'y figurent pas.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Mes invitations en attente (liste vide si aucune) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            invitations: components["schemas"]["MyTeamInvitation"][];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/invitations/{invitationId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accepter une invitation
+         * @description **Réservé au joueur invité.** Crée l'appartenance **et**, dans la **même transaction**, passe à `cancelled` les autres invitations `pending` du joueur **sur ce ladder** (elles ne pourraient plus aboutir : une seule équipe par ladder).
+         *
+         *     Le plafond des 10 est **re-vérifié sous verrou** ici : entre l'invitation et l'acceptation, l'équipe a pu se remplir. Le capitaine est notifié (`team_invitation_accepted`).
+         *
+         *     ⚠️ **DEUX verrous consultatifs, pris dans un ordre trié** : celui de l'équipe (le plafond, un agrégat) **et** celui du couple (joueur, ladder). Le second n'est pas décoratif : cette route écrit deux ressources dont la portée est le joueur et **pas** l'équipe — l'index unique `team_members_user_ladder_unique`, et l'annulation en cascade qui met à jour des invitations **d'autres équipes**. Avec le seul verrou d'équipe, deux acceptations du **même joueur** sur **deux équipes du même ladder** prennent des clés disjointes, se croisent sur les verrous de ligne et **s'interbloquent** : Postgres tue une transaction et ce conflit métier sortait en **500** au lieu de `409 already_in_team` (reproduit 8 fois sur 8).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Invitation acceptée, le joueur est désormais membre */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @example true */
+                            ok: boolean;
+                            /**
+                             * Format: uuid
+                             * @description L'équipe rejointe (le front peut y naviguer directement).
+                             */
+                            teamId: string;
+                        };
+                    };
+                };
+                /** @description Param `:invitationId` non-uuid */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Cette invitation est adressée à quelqu'un d'autre (`not_your_invitation`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                /** @description Invitation inconnue (`invitation_not_found`) ou équipe dissoute (`team_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                /** @description `not_pending` (déjà acceptée, refusée ou annulée entre-temps), `roster_full` (l'équipe s'est remplie depuis l'invitation), `already_in_team` (j'ai rejoint une autre équipe de ce ladder entre-temps). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/invitations/{invitationId}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refuser une invitation
+         * @description **Réservé au joueur invité.** Passe l'invitation à `declined` et **libère la place** du roster. Le capitaine est notifié (`team_invitation_declined`) et peut réinviter.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Invitation refusée */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Ok"];
+                    };
+                };
+                /** @description Param `:invitationId` non-uuid */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Cette invitation est adressée à quelqu'un d'autre (`not_your_invitation`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                /** @description Invitation inconnue (`invitation_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
+                    };
+                };
+                /** @description Invitation déjà acceptée, refusée ou annulée (`not_pending`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamInvitationError"];
                     };
                 };
                 500: components["responses"]["InternalError"];
@@ -4254,6 +4556,72 @@ export interface components {
             isCaptain: boolean;
             /** @description §5.1 — ce membre a-t-il un compte lié pour le `requiredProvider` du jeu ? `false` = **non sélectionnable dans une lineup** → le front le grise AVANT que le capitaine ne compose son équipe (prévenir plutôt que refuser). */
             hasLinkedAccount: boolean;
+        };
+        /** @description Le joueur porté par une invitation (projection publique, jamais l'email). */
+        TeamInvitationUser: {
+            /** Format: uuid */
+            id: string;
+            pseudo: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+        };
+        /** @description Vue **côté équipe** d'une invitation (B-INV) : QUI a été sollicité. Servie par `POST /teams/{id}/invitations` et par le bloc `invitations` de `GET /teams/{id}` (membres uniquement) — la forme est volontairement **identique** dans les deux. */
+        TeamInvitation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            teamId: string;
+            /** Format: uuid */
+            ladderId: string;
+            /**
+             * @description `cancelled` couvre **deux** cas : l'annulation par le capitaine ET l'annulation automatique quand le joueur accepte ailleurs sur le même ladder. C'est ce qui évite d'afficher « a refusé » à un capitaine qui a lui-même annulé.
+             * @enum {string}
+             */
+            status: "pending" | "accepted" | "declined" | "cancelled";
+            /**
+             * Format: uuid
+             * @description Le capitaine à l'origine de l'invitation.
+             */
+            invitedBy: string;
+            /** Format: date-time */
+            createdAt: string;
+            user: components["schemas"]["TeamInvitationUser"];
+        };
+        /** @description Vue **côté joueur** d'une invitation (`GET /teams/invitations/me`) : QUELLE équipe me sollicite. Le joueur, lui, c'est moi — d'où l'absence de champ `user`. */
+        MyTeamInvitation: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description Toujours `pending` — la route ne liste que les invitations vivantes.
+             * @enum {string}
+             */
+            status: "pending";
+            /** Format: date-time */
+            createdAt: string;
+            team: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                /** @description Chemin relatif `/media/avatars/…` ou URL absolue — cf. `Team.logoUrl`. */
+                logoUrl: string | null;
+                /** Format: uuid */
+                ladderId: string;
+                ladderName: string;
+                /** @enum {string} */
+                format: "1v1" | "2v2" | "3v3" | "5v5";
+                gameId: string;
+            };
+            invitedBy: components["schemas"]["TeamInvitationUser"];
+        };
+        /** @description Erreur des routes d'invitation. Le client doit tester `code`, **pas** parser `error` : `error` est un texte d'affichage susceptible de changer, `code` est stable. */
+        TeamInvitationError: {
+            /** @description Message lisible, destiné à l’affichage. */
+            error: string;
+            /**
+             * @description Valeur stable à tester par le client.
+             * @enum {string}
+             */
+            code: "not_captain" | "team_not_found" | "user_not_found" | "invitation_not_found" | "not_your_invitation" | "already_member" | "already_invited" | "already_in_team_on_ladder" | "already_in_team" | "roster_full" | "not_pending" | "conflict";
         };
         /** @description 400 spécifique au §5.1 en 2v2+ : un ou plusieurs joueurs de la lineup n'ont pas de compte lié. `unlinkedPlayers` dit **lesquels** — sans lui, le capitaine devrait deviner parmi ses 5 sélectionnés. */
         UnlinkedPlayersError: {

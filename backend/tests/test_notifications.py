@@ -18,7 +18,7 @@ import os
 import time
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req, sql
+from helpers import Suite, future, join_team, ladder_id, link, register, req, sql
 
 NOTIF_KEYS = {"id", "type", "data", "readAt", "createdAt"}
 PRIVATE_FIELDS = ("email", "passwordHash", "password_hash", "totpSecret", "totp_secret", "userId")
@@ -53,9 +53,11 @@ def of_match(body, match_id):
     """TOUTES les notifs liées à un match, quel que soit leur type.
 
     Sert aux assertions « ce joueur ne reçoit RIEN sur ce match » (typiquement le banc).
-    ⚠️ Ne PAS compter `notifications` en entier pour ça : un joueur ajouté à une équipe reçoit
-    un `team_member_added` parfaitement légitime depuis B11 — le test tomberait sur une notif
-    qui n'a rien à voir avec le match. C'est exactement le faux rouge corrigé le 24/07.
+    ⚠️ Ne PAS compter `notifications` en entier pour ça : une notif d'équipe parfaitement
+    légitime (B11 `team_member_removed`, B-INV `team_invitation_*`) ferait tomber le test sur
+    quelque chose qui n'a rien à voir avec le match. C'est le faux rouge corrigé le 24/07 ;
+    il resterait possible même si `helpers.join_team()` sème désormais les rosters en SQL
+    (donc SANS notification) — le filtre par `matchId` reste la bonne défense.
     """
     return [n for n in body.get("notifications", []) if n.get("data", {}).get("matchId") == match_id]
 
@@ -300,10 +302,10 @@ def run():
     VAL2 = ladder_id(tokA, "val", "2v2")
 
     ta = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "A" + uuid.uuid4().hex[:6]})[1]["team"]["id"]
-    req("POST", f"/teams/{ta}/members", tokA, {"userId": idC})
-    req("POST", f"/teams/{ta}/members", tokA, {"userId": idD1})
+    join_team(ta, idC)
+    join_team(ta, idD1)
     tb = req("POST", "/teams", tokB, {"ladderId": VAL2, "name": "B" + uuid.uuid4().hex[:6]})[1]["team"]["id"]
-    req("POST", f"/teams/{tb}/members", tokB, {"userId": idD2})
+    join_team(tb, idD2)
 
     _, b = req("POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future(), "lineup": [idA, idC]})
     M3 = b["match"]["id"]

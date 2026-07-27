@@ -1,6 +1,6 @@
 # Pièges déjà rencontrés (détaillé)
 
-> Extrait de CLAUDE.md (refacto 25/07). Version longue des 20 pièges ; CLAUDE.md n'en garde que les titres.
+> Extrait de CLAUDE.md (refacto 25/07). Version longue des 21 pièges ; CLAUDE.md n'en garde que les titres.
 
 ## 🚨 Pièges déjà rencontrés
 
@@ -24,6 +24,8 @@
 18. **Tester une course sans barrière ne prouve RIEN.** Deux threads lancés à la suite démarrent en décalé et ne se croisent jamais : le test **passe** alors que le bug est bien là. Faux négatif — pire qu'aucun test. Utiliser `threading.Barrier` et **répéter** (une course ne se déclenche pas à tous les coups). L'interblocage ci-dessus a été masqué comme ça au premier essai.
 19. **Un typage `server.get<{ Params: { id: string } }>` ne valide RIEN à l'exécution.** Le générique TypeScript ne fait que *décrire* la forme attendue : à l'exécution, `request.params.id` contient ce que l'URL a envoyé. Passer cette chaîne à une requête Drizzle sur une colonne `uuid` fait échouer Postgres (`22P02 invalid input syntax for type uuid`) → le catch générique rend **500 alors que la bonne réponse est 400**. Seul un `.parse()` Zod valide réellement (**T4**, 24/07 : 9 points d'appel corrigés). Corollaire : ne jamais se sentir rassuré par un type sur une entrée qui vient du réseau.
 20. **`npx tsc --noEmit` dans `frontend/` ne vérifie RIEN — faux vert.** `frontend/tsconfig.json` est un fichier *solution* (`"files": []` + `references` vers `tsconfig.app.json`/`tsconfig.node.json`), et **en mode non-build `tsc` ne suit pas les `references`** : il type 0 fichier et sort 0. Mesuré (review T3, 24/07). ✅ `npm run build` (= `tsc -b && vite build`) type-check **réellement**, donc toutes les recettes de l'équipe qui disent « build ✓ » restent valides. **Commande correcte pour un type-check seul : `npx tsc -b --noEmit`** (ou `npx tsc -p tsconfig.app.json --noEmit`).
+
+21. **Une BARRIÈRE ne teste QU'UN SEUL point d'alignement — certaines courses n'existent qu'en DÉCALÉ.** Le piège #18 dit « pas de course sans barrière » ; il est incomplet. Deux requêtes lâchées au même instant se croisent toujours **au même endroit** : si la fenêtre dangereuse s'ouvre 5 ms après le départ de la première, la barrière ne la touche **jamais** et le test est vert à 100 %. Mesuré sur B-INV (28/07) : l'interblocage `DELETE /teams/:id` × `POST /teams/invitations/:id/accept` est **invisible sur 12 tours à 0 ms**, et tombe dès qu'on **balaie un décalage** (`0 → 11 ms`, un tour par pas). Sortie du balayage, avant correctif — une seule colonne fautive, et c'est le **capitaine** qui prend le 500 sur une dissolution légitime : `(0,404,200) (1,404,200) … (4,409,200) (5,200,500) (6,200,200) … (11,200,200)`. ✅ Recette : `threading.Barrier` **pour aligner**, puis `time.sleep(step)` dans **un seul** des deux threads, avec `step` qui balaie quelques millisecondes. Barrière **et** balayage, pas l'un ou l'autre. ⚠️ Corollaire de conception, même ticket : une route peut écrire une table **sans que ça se voie dans son code** — la dissolution écrivait `team_invitations` **par `ON DELETE CASCADE`**. L'inventaire « qui écrit cette table ? » doit inclure les cascades, sinon une route reste hors du verrou et referme un cycle (`grep insert|update|delete` ne suffit pas).
 
 ---
 

@@ -85,7 +85,7 @@ Reste aussi la **préparation de la soutenance** (chaque module revendiqué doit
 10. **`npm run audit` sort 0 sans filtre** depuis FT-2A : une entrée console nouvelle est donc **imputable au ticket en cours**, plus noyée dans le bruit. Une erreur réseau *provoquée volontairement* par un scénario se déclare avec `expectHttp(motif, raison)` — cloisonnée à sa phase, flux réseau uniquement. ⚠️ Un `exit 2` = harnais en échec, **jamais** « console propre ».
 11. **`routeTree.gen.ts` et `api-types.gen.ts` sont générés, jamais édités à la main** — mais leur statut git diffère : `routeTree.gen.ts` est **gitignoré** (régénéré au build) ; `api-types.gen.ts` est **tracké** et doit être **committé à chaque régénération** (invariant #8). ⚠️ Erreur vécue : cette ligne affirmait à tort les deux gitignorés, ce qui a fait sauter la régénération sur B14 — vérifier avec `git ls-files`/`git check-ignore` avant de faire confiance à un souvenir sur le statut d'un fichier généré.
 
-📄 Les 20 pièges rencontrés, version longue et expliquée → **`docs/pieges.md`** (TOCTOU/verrous, ordre des verrous, tests de course sans barrière, slots périmés, `.env`, WSL2, Drizzle…)
+📄 Les 21 pièges rencontrés, version longue et expliquée → **`docs/pieges.md`** (TOCTOU/verrous, ordre des verrous, tests de course **sans barrière ET sans balayage de décalage**, écritures par **cascade** hors inventaire, slots périmés, `.env`, WSL2, Drizzle…)
 
 ---
 
@@ -146,7 +146,7 @@ cd backend/tests && python3 run_all.py  # e2e (vraie base de dev)
 | `docs/infra.md`           | I2/I3/I4 : proxy, certs, env, cookie, OAuth, médias                                                          |
 | `docs/modules.md`         | Les 11 modules, exigences PDF, candidats de réserve                                                          |
 | `docs/stack.md`           | Versions des libs + arborescence réelle du repo                                                              |
-| `docs/pieges.md`          | Les 20 pièges rencontrés, version longue                                                                     |
+| `docs/pieges.md`          | Les 21 pièges rencontrés, version longue                                                                     |
 | `docs/journal.md`         | Historique daté des merges et décisions                                                                      |
 | `backend/tests/README.md` | Les suites e2e Python : ce que couvre chacune, helpers disponibles                                           |
 | `frontend/tests/console-audit/README.md` | Audit console Chrome automatisé : lancer, écrire le scénario d'un ticket, la dette connue |

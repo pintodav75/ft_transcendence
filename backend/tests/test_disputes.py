@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from helpers import BASE, CTX, Suite, future, ladder_id, link, register, req, sql
+from helpers import BASE, CTX, Suite, future, join_team, ladder_id, link, register, req, sql
 
 PRIVATE_FIELDS = ("email", "passwordHash", "password_hash", "totpSecret", "totp_secret")
 
@@ -151,9 +151,9 @@ def disputed_2v2(tok_cap_a, id_cap_a, id_mem_a, tok_cap_b, id_cap_b, id_mem_b, l
     """2v2 team A vs team B, backdate, désaccord des 2 CAPITAINES -> disputed.
     Renvoie (M, DISP, s0, s1, team_A_id). (Lineup A = [cap_a, mem_a], B = [cap_b, mem_b].)"""
     ta = (req("POST", "/teams", tok_cap_a, {"ladderId": ladder, "name": "A" + uuid.uuid4().hex[:6]})[1].get("team") or {}).get("id")
-    req("POST", f"/teams/{ta}/members", tok_cap_a, {"userId": id_mem_a})
+    join_team(ta, id_mem_a)
     tb = (req("POST", "/teams", tok_cap_b, {"ladderId": ladder, "name": "B" + uuid.uuid4().hex[:6]})[1].get("team") or {}).get("id")
-    req("POST", f"/teams/{tb}/members", tok_cap_b, {"userId": id_mem_b})
+    join_team(tb, id_mem_b)
     _, b = req("POST", "/matches", tok_cap_a, {"ladderId": ladder, "scheduledAt": future(), "lineup": [id_cap_a, id_mem_a]})
     m = b["match"]["id"]
     req("POST", f"/matches/{m}/accept", tok_cap_b, {"lineup": [id_cap_b, id_mem_b]})
@@ -368,7 +368,7 @@ def run():
     # ── Chemin ÉQUIPE (2v2) : dépôt = capitaine seul, lecture banc comprise ─
     s.section("2v2 — dépôt capitaine-seul, joueur aligné refusé, banc en lecture")
     M2, D2v2, s0t, s1t, TA = disputed_2v2(tokA, idA, idB, tokC, idC, idMemB, VAL2)
-    req("POST", f"/teams/{TA}/members", tokA, {"userId": idBench})  # banc de team A
+    join_team(TA, idBench)  # banc de team A
     st, _ = post_evidence(tokA, D2v2, "capitaine A depose")
     s.check("capitaine A depose -> 201", st, 201)
     st, _ = post_evidence(tokB, D2v2, "joueur aligne non-capitaine")

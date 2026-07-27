@@ -30,7 +30,7 @@ import os
 import time
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req, sql
+from helpers import Suite, future, join_team, ladder_id, link, register, req, sql
 
 
 def status_of(m):
@@ -216,10 +216,10 @@ def run():
     VAL2 = ladder_id(tokA, "val", "2v2")
     st, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "R" + uuid.uuid4().hex[:6]})
     T1 = (b.get("team") or b)["id"]
-    req("POST", f"/teams/{T1}/members", tokA, {"userId": idB})
+    join_team(T1, idB)
     st, b = req("POST", "/teams", tokC, {"ladderId": VAL2, "name": "K" + uuid.uuid4().hex[:6]})
     T2 = (b.get("team") or b)["id"]
-    req("POST", f"/teams/{T2}/members", tokC, {"userId": idD})
+    join_team(T2, idD)
 
     st, b = req(
         "POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future(), "lineup": [idA, idB]}

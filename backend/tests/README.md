@@ -4,7 +4,7 @@ Scripts Python qui tapent sur le **vrai backend** et la **vraie base de dev** �
 Ils créent leurs propres utilisateurs et **les suppriment à la fin** : les données de
 l'équipe (seed-dev, comptes perso) ne sont **jamais** touchées.
 
-**19 suites** (run complet du 27/07). Aucune dépendance à installer : uniquement la
+**20 suites** (run complet du 27/07). Aucune dépendance à installer : uniquement la
 stdlib Python 3.
 
 ## Lancer
@@ -37,6 +37,7 @@ rate-limit de `register`). Voir « Détails utiles » pour le pourquoi et ses ga
 | `test_matches_concurrency.py` | B5c (review) | **Courses réelles, avec threads** : double accept, acceptation croisée (interblocage), double création, et la fuite d'autorisation du `DELETE` |
 | `test_matches_scheduling.py` | B5d | **Le temps** : grille horaire (quart fixe + 15 min), **fenêtres de disponibilité** (chevauchement interdit mais **dos à dos autorisé**), la « soirée gaming » (plusieurs slots qui coexistent), **l'option A resserrée** (les slots non chevauchants SURVIVENT à l'accept), l'expiration, le plafond de 5, et le **job** |
 | `test_teams_linked.py` | B5c | `hasLinkedAccount` par membre dans `GET /teams/:id` + `unlinkedPlayers` dans le 400 |
+| `test_teams_invitations.py` | B-INV | Le cycle **invitation** qui remplace l'ajout forcé : `POST /teams/:id/members` **n'existe plus** (404), inviter / annuler (capitaine), accepter / refuser (l'invité), `GET /teams/invitations/me`. L'invité **n'est pas membre** tant qu'il n'a pas accepté ; l'acceptation **annule** ses autres invitations du ladder (`cancelled`, pas `declined`) — **et `POST /teams` aussi** (créer son équipe rend la place au plafond des équipes qui l'avaient sollicité) ; refus et annulation **libèrent la place** et une ré-invitation redevient possible (index unique **partiel**). Plafond `membres + en attente ≤ 10` refusé à l'invitation **et** re-vérifié **sous verrou** à l'acceptation. `GET /teams/:id` expose `invitations` aux **membres seulement** (`isMember`, champ absent pour un visiteur). Dissolution → cascade. Blocage honoré (`isBlocked` → 404 indistinguable, dans les 2 sens). Un invité **non acceptant n'est pas alignable** en match (400 + contrôle positif après acceptation). **4 courses à `threading.Barrier`, répétées** (une course ne se déclenche pas à tous les coups) : 2 **intra-équipe** — sans le verrou d'équipe le roster monte à **11** —, 1 **inter-équipes** (le même joueur accepté par 2 équipes du même ladder), qui **interbloquait 8/8** avant les verrous TRIÉS `team:` + `user:<id>:<ladder>` → 500 au lieu de 409, et 1 **dissolution × acceptation** qui ⚠️ **ne sort JAMAIS avec une barrière seule** : elle exige de **balayer un décalage** (0 → 11 ms, un tour par pas) et tombe à 5 ms, avec le **capitaine** en victime du 500 (piège #21). Les trois ont été **vues rouges avant d'être vertes**. Contient aussi le **tripwire de `helpers.join_team()`** (portée réelle décrite plus bas) |
 | `test_teams_logo.py` | FT-1C | `POST /teams/:id/logo` : garde **capitaine only** (un membre simple est refusé), 401 **avant** 400, les 4 refus d'entrée (uuid, non-multipart, aucun fichier, **PDF refusé** — `IMAGE_MIME` ≠ `EVIDENCE_MIME`), cas nominal + **persistance**, et les **3 chemins qui déréférencent un logo** — remplacement par un nouvel upload, `PATCH {logoUrl: null}`, `DELETE /teams/:id` — dont on vérifie **dans le bucket** que l'objet a bien disparu (les 2 derniers fuyaient) |
 | `test_teams_matches.py` | B15 | `GET /teams/:id/matches` : forme **membre** (tout, `lineup` inclus, slot ouvert visible) vs **non-membre** (seuls les matchs à 2 sides, `lineup` **absent**), `disputeId`/`disputeStatus` exposés **sans condition de statut** (badge litige qui survit à l'arbitrage admin), `score` qui reste `null` des 2 côtés après arbitrage (B14), tri `scheduledAt` DESC avec **`NULLS LAST`** (état forcé en SQL), gardes 401/400/404. Couvre aussi la garde **relâchée** de `GET /matches/:id` (403 sauf `completed` → 200) et `competitor.id` exploitable sur `GET /ladders/:id/rankings` (les 2 types `user`/`team`) |
 | `test_matches_result.py` | B6/B14 | `POST /matches/:id/result` : machine à états §5.4 (accord → `completed` + ELO, désaccord → `disputed`), §5.3, et les 2 jobs 24 h (`B6_JOBS=1`). **B14** : score Bo3 (`scoreSelf`/`scoreOpponent`, `WINS_REQUIRED=2`) hors bornes ou incohérent avec `winnerSideId` → 400 ; **même vainqueur, score différent (2-0 vs 2-1) → `disputed`** (vérifié RED avant le fix) ; `score`/`eloDelta`/`eloAfter` persistés sur les 2 `match_sides` à l'accord ; re-soumission qui écrase aussi les scores (le dernier score fait foi) ; le job d'auto-confirmation persiste le score du camp silencieux **dans les 2 sens** (soumetteur vainqueur ET soumetteur perdant — `submitterWon` remappé correctement des deux côtés, `jobs/index.ts`) |
@@ -56,9 +57,23 @@ laisse passer un `keyGenerator` correct mais jamais appelé.
 
 ## Détails utiles
 
-- **`helpers.py`** contient le client HTTP, `register()`, l'accès SQL et le nettoyage. `ROOT`
-  est déduit de `__file__` — **jamais de chemin en dur**, sinon les tests ne tournent que sur
-  la machine de leur auteur.
+- **`helpers.py`** contient le client HTTP, `register()`, `join_team()`, l'accès SQL et le
+  nettoyage. `ROOT` est déduit de `__file__` — **jamais de chemin en dur**, sinon les tests ne
+  tournent que sur la machine de leur auteur.
+- 🔑 **`join_team()` sème les rosters en SQL** (comme `register()` sème les users). Depuis
+  **B-INV**, `POST /teams/{id}/members` **n'existe plus** : peupler une équipe par l'API
+  demanderait `POST /teams/{id}/invitations` **puis** `POST /teams/invitations/{id}/accept`
+  avec le token du joueur — deux appels par membre et surtout **deux notifications parasites**
+  qui fausseraient les comptages de `test_notifications.py`. Les suites matchmaking ne testent
+  pas le recrutement : elles ont besoin d'un roster, pas d'un parcours. Le cycle d'invitation
+  est couvert **par l'API, pour de vrai**, dans `test_teams_invitations.py`. ⚠️ **Portée
+  honnête du tripwire** qui y compare la ligne née d'une **acceptation** à une ligne **semée** :
+  `team_members` n'ayant que 5 colonnes, dont 4 forcément différentes (`id`, `team_id`,
+  `user_id`, `ladder_id`), il ne prouve aujourd'hui que `joined_at` renseigné des deux côtés —
+  ce n'est **pas** l'équivalence complète que `test_auth_contract.py` établit pour
+  `register()`. Sa valeur est **future** : le jour où une colonne s'ajoute (rôle, `invited_by`,
+  statut…) et que seule l'API la remplit, il vire au rouge — et c'est le HELPER qu'on corrige,
+  pas une exclusion qu'on ajoute.
 - 🔑 **`register()` NE PASSE PLUS par `POST /auth/register`** : il insère l'user en SQL puis
   **forge lui-même** son access token (`forge_token()`). Pourquoi : la route est à **3/min par
   IP** et elle le **reste** — y faire passer les dizaines d'users des suites coûtait **~15 min

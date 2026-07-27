@@ -11,7 +11,7 @@ Et un match d'équipe où j'ai joué remonte des DEUX sources → le Set le déd
 
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req
+from helpers import Suite, future, join_team, ladder_id, link, register, req
 
 
 def my_match_ids(token):
@@ -63,8 +63,8 @@ def run():
     st, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "Mine" + uuid.uuid4().hex[:5]})
     TEAM_A = (b.get("team") or b).get("id")
     s.check("team A créée (alice capitaine) → 201", st, 201)
-    req("POST", f"/teams/{TEAM_A}/members", tokA, {"userId": idB})
-    req("POST", f"/teams/{TEAM_A}/members", tokA, {"userId": idC})
+    join_team(TEAM_A, idB)
+    join_team(TEAM_A, idC)
 
     # lineup = alice + bob → carol reste sur le banc
     st, b = req("POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future(), "lineup": [idA, idB]})
@@ -84,7 +84,7 @@ def run():
     s.section("Après l'accept — les deux camps voient le même match")
     st, b = req("POST", "/teams", tokD, {"ladderId": VAL2, "name": "Mine" + uuid.uuid4().hex[:5]})
     TEAM_B = (b.get("team") or b).get("id")
-    req("POST", f"/teams/{TEAM_B}/members", tokD, {"userId": idE})
+    join_team(TEAM_B, idE)
 
     st, b = req("POST", f"/matches/{M2}/accept", tokD, {"lineup": [idD, idE]})
     s.check("team B accepte → 200", st, 200, b.get("error", ""))

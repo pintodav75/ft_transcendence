@@ -200,6 +200,58 @@ export const teamMembersTable = pgTable(
   ],
 );
 
+// ⚠️ `export` obligatoire (piège #8) : un enum non exporté n'est pas vu par drizzle-kit.
+// `cancelled` couvre DEUX cas distincts et c'est volontaire : l'annulation par le capitaine
+// ET l'annulation automatique quand le joueur accepte ailleurs sur le même ladder (B-INV).
+// Sans elle, le capitaine lirait « refusée » là où le joueur n'a jamais rien refusé.
+export const teamInvitationStatusEnum = pgEnum('team_invitation_status', [
+  'pending',
+  'accepted',
+  'declined',
+  'cancelled',
+]);
+
+// B-INV — l'invitation est une table DÉDIÉE, surtout pas une colonne de statut sur
+// `team_members` : `team_members` est lu à ~40 endroits (matches, disputes, teams) et chacun
+// signifie « X est membre de Y ». Un statut sur cette table rendrait ces 40 lectures fausses
+// par défaut, et en oublier une ne se verrait pas (un joueur jamais accepté deviendrait
+// alignable en match). Ici, rien de ce qui existe ne change de sens.
+export const teamInvitationsTable = pgTable(
+  'team_invitations',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teamsTable.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    // Dénormalisé depuis la team : c'est la clé de la règle « une seule équipe par ladder ».
+    // La porter ici évite un join à chaque annulation en cascade métier (acceptation).
+    ladderId: uuid('ladder_id')
+      .notNull()
+      .references(() => laddersTable.id, { onDelete: 'cascade' }),
+    status: teamInvitationStatusEnum('status').notNull().default('pending'),
+    invitedBy: uuid('invited_by')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    respondedAt: timestamp('responded_at', { withTimezone: true }),
+  },
+  (table) => [
+    // Index unique PARTIEL (même patron que `rankings_ladder_user_unique`) : une seule
+    // invitation VIVANTE par (team, joueur), mais réinviter après un refus ou une annulation
+    // reste possible — un unique nu interdirait la 2e invitation pour toujours.
+    uniqueIndex('team_invitations_team_user_pending_unique')
+      .on(table.teamId, table.userId)
+      .where(sql`${table.status} = 'pending'`),
+    // ⚠️ AUCUNE unicité par ladder ici : plusieurs équipes doivent pouvoir solliciter le même
+    // joueur. Seule l'ACCEPTATION est exclusive, et elle bute alors sur la contrainte
+    // `team_members_user_ladder_unique` qui existe déjà.
+    index('team_invitations_user_status_idx').on(table.userId, table.status),
+  ],
+);
+
 export const matchesTable = pgTable(
   'matches',
   {
@@ -364,9 +416,19 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // Équipe (B11) — `teams.ts` était le seul fichier métier à ne jamais notifier.
   // ⚠️ Pas de `team_created` : personne d'autre que le créateur n'est concerné, et la
   // règle B9 est « jamais l'acteur ». Pas de notif d'édition non plus (trop cosmétique).
+  // ⚠️ `team_member_added` est MORT depuis B-INV (l'ajout forcé n'existe plus, on invite) :
+  // plus personne ne l'émet. La valeur RESTE dans l'enum — retirer une valeur d'enum
+  // Postgres est pénible, et des notifications historiques y font encore référence.
   'team_member_added',
   'team_member_removed',
   'team_disbanded',
+  // Invitations (B-INV) : le capitaine sollicite, le joueur répond. On notifie le camp
+  // concerné, jamais l'acteur → l'invité pour `received`, le capitaine pour les 2 réponses.
+  // Pas de notif à l'annulation par le capitaine (il est l'acteur) ni à l'annulation
+  // automatique d'une invitation concurrente (décision produit de la carte).
+  'team_invitation_received',
+  'team_invitation_accepted',
+  'team_invitation_declined',
 ]);
 
 export const notificationsTable = pgTable(
