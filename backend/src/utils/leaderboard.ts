@@ -19,8 +19,14 @@ export type RankingRow = {
 };
 
 export type Competitor =
-  | { type: 'user'; pseudo: string | null; displayName: string | null; avatarUrl: string | null }
-  | { type: 'team'; name: string | null; logoUrl: string | null };
+  | {
+      type: 'user';
+      id: string;
+      pseudo: string | null;
+      displayName: string | null;
+      avatarUrl: string | null;
+    }
+  | { type: 'team'; id: string; name: string | null; logoUrl: string | null };
 
 export type RankingEntry = {
   rank: number;
@@ -40,12 +46,20 @@ export function shapeRankings(rows: RankingRow[]): RankingEntry[] {
     if (row.userId) {
       competitor = {
         type: 'user',
+        id: row.userId,
         pseudo: row.userPseudo,
         displayName: row.userDisplayName,
         avatarUrl: row.userAvatarUrl,
       };
     } else {
-      competitor = { type: 'team', name: row.teamName, logoUrl: row.teamLogoUrl };
+      // `row` est toujours OU users OU teams non-null (garantie du SELECT joint) :
+      // si `userId` est absent, `teamId` l'est nécessairement.
+      competitor = {
+        type: 'team',
+        id: row.teamId as string,
+        name: row.teamName,
+        logoUrl: row.teamLogoUrl,
+      };
     }
     return { rank: index + 1, elo: row.elo, wins: row.wins, losses: row.losses, competitor };
   });

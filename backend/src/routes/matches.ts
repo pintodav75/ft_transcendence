@@ -567,7 +567,13 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             );
           allowed = !!teamMember;
         }
-        if (!allowed) return reply.code(403).send({ error: 'not a participant of this match' });
+        // Un tiers peut lire un match TERMINÉ (page match publique, FT-2) : la composition
+        // nominative des deux camps devient publique une fois le match `completed`. Tout
+        // autre statut (pending/in_progress/awaiting_confirmation/disputed/cancelled) reste
+        // réservé aux participants.
+        if (!allowed && match.status !== 'completed') {
+          return reply.code(403).send({ error: 'not a participant of this match' });
+        }
 
         // DEUX requêtes pour tout le monde, pas une par joueur (N+1) : on a déjà les ids.
         const teams = sideTeamIds.length

@@ -7,8 +7,12 @@ import {
   usersTable,
   gamesTable,
   userExternalAccountsTable,
+  matchesTable,
+  matchSidesTable,
+  matchParticipantsTable,
+  disputesTable,
 } from '../db/schema.js';
-import { eq, and, asc, count, inArray } from 'drizzle-orm';
+import { eq, and, asc, count, inArray, sql } from 'drizzle-orm';
 import { notify, pushNotifications } from '../utils/notifications.js';
 import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { IMAGE_MIME } from './users.js';
@@ -213,6 +217,199 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           logoUrl: team.teams.logoUrl,
         };
         return reply.code(200).send({ team: teamSafe, members: membersSafe });
+      } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
+        return reply.code(500).send({ error: 'Internal error' });
+      }
+    },
+  );
+  // GET /teams/:id/matches — historique de match d'une équipe (B15). 100 % lecture, aucune
+  // transaction, aucun verrou. Nombre de requêtes CONSTANT quel que soit le nombre de matchs
+  // (une par table + des Map d'index, jamais d'await dans une boucle de map).
+  //
+  // ⚠️ Confidentialité : un non-membre ne voit QUE les matchs à 2 sides (un adversaire a
+  // accepté). Filtrer sur le nombre de sides plutôt que sur `status !== 'pending'` est plus
+  // robuste : un slot ouvert périmé passe `cancelled` via le job 24 h et fuiterait sinon le
+  // créneau d'une équipe à un visiteur — ce que `GET /matches?ladderId=` anonymise déjà. Un
+  // membre voit tout, y compris ses slots en attente, et seul un membre reçoit les lineups.
+  server.get<{ Params: { id: string } }>(
+    '/:id/matches',
+    { onRequest: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const me = request.user.sub;
+        // Zod APRÈS `authenticate` (invariant repo) : anonyme → 401, malformé → 400.
+        const { id: teamId } = idParamSchema.parse(request.params);
+
+        // Team + appartenance en UNE requête (LEFT JOIN) : `memberId` non-null ⇔ membre.
+        const [row] = await db
+          .select({ teamId: teamsTable.id, memberId: teamMembersTable.id })
+          .from(teamsTable)
+          .leftJoin(
+            teamMembersTable,
+            and(eq(teamMembersTable.teamId, teamsTable.id), eq(teamMembersTable.userId, me)),
+          )
+          .where(eq(teamsTable.id, teamId));
+        if (!row) return reply.code(404).send({ error: 'team not found' });
+        const isMember = row.memberId !== null;
+
+        // Tous les matchs où CETTE équipe a un side (exploite l'index `(team_id, match_id)`).
+        const mySides = await db
+          .select({ matchId: matchSidesTable.matchId })
+          .from(matchSidesTable)
+          .where(eq(matchSidesTable.teamId, teamId));
+        const matchIds = [...new Set(mySides.map((s) => s.matchId))];
+        if (matchIds.length === 0) return reply.code(200).send({ isMember, matches: [] });
+
+        // Projection explicite : `winnerSideId` ne sert qu'à dériver `result` plus bas, il
+        // n'est jamais renvoyé brut (les scores par camp suffisent au front). `ladderId` et
+        // `maps` sont volontairement absents : les maps sont servies par `GET /matches/:id`
+        // au clic sur une ligne d'historique (décision produit), pas sur la ligne de liste.
+        const matches = await db
+          .select({
+            id: matchesTable.id,
+            status: matchesTable.status,
+            scheduledAt: matchesTable.scheduledAt,
+            completedAt: matchesTable.completedAt,
+            winnerSideId: matchesTable.winnerSideId,
+          })
+          .from(matchesTable)
+          .where(inArray(matchesTable.id, matchIds))
+          // `scheduledAt` est LA référence temporelle (invariant repo) et est NULLABLE en
+          // base : Postgres remonte les NULL en tête d'un DESC sans `NULLS LAST` explicite.
+          .orderBy(sql`${matchesTable.scheduledAt} desc nulls last`);
+
+        // Tous les sides des matchs sélectionnés (les nôtres ET ceux de l'adversaire) en UNE
+        // requête — pas une par match.
+        const allSides = await db
+          .select()
+          .from(matchSidesTable)
+          .where(inArray(matchSidesTable.matchId, matchIds));
+        const sidesByMatch = new Map<string, (typeof allSides)[number][]>();
+        for (const s of allSides) {
+          const list = sidesByMatch.get(s.matchId) ?? [];
+          list.push(s);
+          sidesByMatch.set(s.matchId, list);
+        }
+
+        const visibleMatches = isMember
+          ? matches
+          : matches.filter((m) => (sidesByMatch.get(m.id)?.length ?? 0) === 2);
+
+        const opponentTeamIds = new Set<string>();
+        for (const m of visibleMatches) {
+          for (const s of sidesByMatch.get(m.id) ?? []) {
+            if (s.teamId && s.teamId !== teamId) opponentTeamIds.add(s.teamId);
+          }
+        }
+        const teams = opponentTeamIds.size
+          ? await db
+              .select({ id: teamsTable.id, name: teamsTable.name, logoUrl: teamsTable.logoUrl })
+              .from(teamsTable)
+              .where(inArray(teamsTable.id, [...opponentTeamIds]))
+          : [];
+        const teamById = new Map(teams.map((t) => [t.id, t]));
+
+        // Lineup : réservé aux membres. Deux requêtes de plus au total, jamais une par side.
+        const participantsBySide = new Map<string, string[]>();
+        const playerById = new Map<
+          string,
+          {
+            id: string;
+            pseudo: string | null;
+            displayName: string | null;
+            avatarUrl: string | null;
+          }
+        >();
+        if (isMember) {
+          const visibleSideIds = visibleMatches.flatMap((m) =>
+            (sidesByMatch.get(m.id) ?? []).map((s) => s.id),
+          );
+          const participants = visibleSideIds.length
+            ? await db
+                .select()
+                .from(matchParticipantsTable)
+                .where(inArray(matchParticipantsTable.matchSideId, visibleSideIds))
+            : [];
+          for (const p of participants) {
+            const list = participantsBySide.get(p.matchSideId) ?? [];
+            list.push(p.userId);
+            participantsBySide.set(p.matchSideId, list);
+          }
+          const userIds = [...new Set(participants.map((p) => p.userId))];
+          // Projection explicite : jamais de select() nu sur users (fuite email/passwordHash).
+          const players = userIds.length
+            ? await db
+                .select({
+                  id: usersTable.id,
+                  pseudo: usersTable.pseudo,
+                  displayName: usersTable.displayName,
+                  avatarUrl: usersTable.avatarUrl,
+                })
+                .from(usersTable)
+                .where(inArray(usersTable.id, userIds))
+            : [];
+          for (const p of players) playerById.set(p.id, p);
+        }
+
+        // Litige : id + statut exposés SANS condition de statut de match — copier le
+        // `if (status === 'disputed')` de GET /matches/:id ferait disparaître le badge
+        // « litige » dès qu'un admin arbitre (le match repasse completed/cancelled, la
+        // dispute reste `resolved`). `GET /disputes/:id` garde sa propre garde d'accès :
+        // exposer l'id ici ne fuite rien.
+        const visibleMatchIds = visibleMatches.map((m) => m.id);
+        const disputes = await db
+          .select({
+            id: disputesTable.id,
+            matchId: disputesTable.matchId,
+            status: disputesTable.status,
+          })
+          .from(disputesTable)
+          .where(inArray(disputesTable.matchId, visibleMatchIds));
+        const disputeByMatch = new Map(disputes.map((d) => [d.matchId, d]));
+
+        const shaped = visibleMatches.map((m) => {
+          const sides = sidesByMatch.get(m.id) ?? [];
+          const mySide = sides.find((s) => s.teamId === teamId);
+          const oppSide = mySide ? sides.find((s) => s.id !== mySide.id) : undefined;
+          const dispute = disputeByMatch.get(m.id);
+
+          let result: 'win' | 'loss' | null = null;
+          if (mySide && m.winnerSideId) result = m.winnerSideId === mySide.id ? 'win' : 'loss';
+
+          const lineupOf = (side: typeof mySide) =>
+            side
+              ? (participantsBySide.get(side.id) ?? [])
+                  .map((uid) => playerById.get(uid))
+                  .filter((p): p is NonNullable<typeof p> => p !== undefined)
+              : [];
+
+          return {
+            id: m.id,
+            status: m.status,
+            scheduledAt: m.scheduledAt,
+            completedAt: m.completedAt,
+            // null tant qu'aucun adversaire n'a accepté — n'arrive jamais pour un
+            // non-membre, `visibleMatches` ne garde que les matchs à 2 sides pour lui.
+            opponent: oppSide?.teamId ? (teamById.get(oppSide.teamId) ?? null) : null,
+            // Colonnes `match_sides.score` des deux camps : `null` avant clôture ET après
+            // un arbitrage admin (il tranche un vainqueur, pas un score) — le front doit
+            // gérer `null` sur un match pourtant `completed`.
+            score: { self: mySide?.score ?? null, opponent: oppSide?.score ?? null },
+            // Uniquement celui de l'équipe consultée : l'autre camp n'a aucun usage ici.
+            eloDelta: mySide?.eloDelta ?? null,
+            result,
+            disputeId: dispute?.id ?? null,
+            disputeStatus: dispute?.status ?? null,
+            // Composition nominative : uniquement si `isMember`, absente sinon (un
+            // non-membre ne doit voir AUCUNE lineup, même sur un match visible).
+            ...(isMember
+              ? { lineup: { self: lineupOf(mySide), opponent: lineupOf(oppSide) } }
+              : {}),
+          };
+        });
+
+        return reply.code(200).send({ isMember, matches: shaped });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
         return reply.code(500).send({ error: 'Internal error' });

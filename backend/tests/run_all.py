@@ -21,6 +21,7 @@ import test_matches_scheduling
 import test_matches_result
 import test_teams_linked
 import test_teams_logo
+import test_teams_matches
 import test_disputes
 import test_notifications
 import test_search
@@ -40,6 +41,7 @@ SUITES = [
     test_matches_result,
     test_teams_linked,
     test_teams_logo,
+    test_teams_matches,
     test_disputes,
     test_notifications,
     test_search,
