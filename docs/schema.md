@@ -297,6 +297,11 @@ Les 2 camps d'un match. Toujours exactement 2 lignes par match.
 | `team_id` | `uuid` | NULLABLE, FK → teams(id) ON DELETE SET NULL | NULL pour les matchs 1v1 (pas de team). SET NULL si team dissoute pour préserver l'historique |
 | `submitted_at` | `timestamp tz` | NULLABLE | Quand ce camp a soumis son résultat |
 | `submitted_winner_side_id` | `uuid` | NULLABLE, FK → match_sides(id) | Qui ce camp dit être le gagnant. NULL = pas encore soumis |
+| `submitted_score_self` | `smallint` | NULLABLE | **B14.** Le score que CE camp s'attribue (Bo3 : 0 à 2), tel que soumis. NULL = pas encore soumis |
+| `submitted_score_opponent` | `smallint` | NULLABLE | **B14.** Le score que ce camp attribue à l'adversaire. Relatif au SOUMETTEUR (« moi / lui »), délibérément **pas** indexé sur `side_index` : la comparaison croisée entre les 2 soumissions (§5.4) devient triviale |
+| `score` | `smallint` | NULLABLE | **B14.** Score final (manches gagnées : 0, 1 ou 2), écrit à la clôture du match. Reste `null` sur les matchs déjà `completed` avant B14 (aucun backfill), et sur un arbitrage admin (il tranche un vainqueur, pas un score) |
+| `elo_delta` | `smallint` | NULLABLE | **B14.** Gain/perte d'Elo pour ce camp sur CE match précis (ex. `+18`/`-12`). Dépend de l'écart d'Elo **au moment du match** → non recalculable a posteriori, doit être persisté ici (`rankings.elo` n'a que la valeur courante) |
+| `elo_after` | `integer` | NULLABLE | **B14.** Elo de ce camp immédiatement après ce match |
 
 **Contraintes** :
 - `UNIQUE(match_id, side_index)` : un match a exactement 2 sides (index 0 et 1).
@@ -306,6 +311,7 @@ Les 2 camps d'un match. Toujours exactement 2 lignes par match.
   - `matches.winner_side_id` = vérité **finale** (figée quand match completed)
   - `match_sides.submitted_winner_side_id` = ce que **ce camp a soumis** (peut différer entre les 2 sides en cas de dispute)
 - ON DELETE SET NULL sur `team_id` : permet de préserver l'historique d'un match même si une team est dissoute après.
+- **B14 — les 5 colonnes de score/Elo sont nullables, sans défaut, sans backfill** : migration additive pure. Un match `completed` avant B14 garde `score`/`elo_delta`/`elo_after` à `null` pour toujours — c'est un fait acquis, pas une donnée manquante à corriger.
 
 ---
 
@@ -548,11 +554,15 @@ Quand un side soumet son résultat sur un match M :
 
 C'est tout. On empêche de déclarer un vainqueur pour un match **non joué** ; on n'impose **aucune** durée minimale. La vraie protection contre la triche, c'est l'**accord des deux camps** (§5.4).
 
-### 5.4 Match consistent vs dispute
+### 5.4 Match consistent vs dispute (RÉÉCRIT le 27/07, ticket B14 — score Bo3)
 
-Quand les 2 sides ont soumis (`submitted_at NOT NULL` sur les 2) :
-- Si `sides[0].submitted_winner_side_id == sides[1].submitted_winner_side_id` → **accord**. `matches.winner_side_id = ça`, status = `'completed'`.
-- Sinon → **désaccord**. INSERT dans `disputes`, status = `'disputed'`.
+> ⚠️ **Tous les matchs, tous jeux et tous ladders confondus, sont en best-of-3** (constante nommée `WINS_REQUIRED = 2`, `utils/elo.ts` — pas de colonne `bestOf` par ladder tant que la règle reste globale). Seuls scores valides : `2-0`, `2-1`, `0-2`, `1-2`.
+
+Quand les 2 sides ont soumis (`submitted_at NOT NULL` sur les 2), l'accord porte désormais sur le vainqueur **ET** le score croisé — pas seulement le vainqueur :
+- Si `sides[0].submitted_winner_side_id == sides[1].submitted_winner_side_id` **ET** que le score de l'un croise exactement celui de l'autre (`sides[1].submitted_score_self == sides[0].submitted_score_opponent` et `sides[1].submitted_score_opponent == sides[0].submitted_score_self`) → **accord**. `matches.winner_side_id = ça`, `match_sides.score`/`elo_delta`/`elo_after` écrits sur les 2 sides, status = `'completed'`.
+- Sinon → **désaccord**. INSERT dans `disputes`, status = `'disputed'`. 🔥 Un cas neuf entre dans cette branche : **même vainqueur déclaré mais score différent** (ex. les deux disent que le side 0 a gagné, mais l'un dit `2-0` et l'autre `2-1`) — sans le croisement, le match se clôturait à tort sur un score arbitraire.
+
+Une re-soumission (le camp corrige son verdict avant que le match soit résolu) **écrase aussi les deux scores soumis**, pas seulement le vainqueur déclaré — sinon la comparaison croisée se ferait contre des valeurs périmées.
 
 ### 5.5 Dispute timeout
 

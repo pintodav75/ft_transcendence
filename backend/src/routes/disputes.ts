@@ -478,7 +478,9 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
                 ),
               );
             if (!winnerSide) return { ok: false, code: 500, error: 'Internal error' };
-            await completeMatchWithElo(tx, dispute.matchId, m.ladderId, winnerSide.id);
+            // L'admin tranche un vainqueur, PAS un score : `null` littéral et explicite ici,
+            // pas une valeur par défaut cachée dans le helper (B14).
+            await completeMatchWithElo(tx, dispute.matchId, m.ladderId, winnerSide.id, null, null);
           }
 
           await tx

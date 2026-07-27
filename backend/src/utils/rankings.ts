@@ -10,6 +10,11 @@ import { eq, and, SQL, sql } from 'drizzle-orm';
 
 export type Competitor = { teamId: string } | { userId: string };
 
+// Elo avant/après ce match précis pour un camp, et le delta appliqué. Le delta dépend de
+// l'écart d'Elo AU MOMENT du match : il n'est pas recalculable a posteriori, d'où le besoin
+// de le faire remonter à l'appelant pour persistance sur `match_sides`.
+export type EloOutcome = { before: number; after: number; delta: number };
+
 // Clé de verrou consultatif d'un compétiteur sur un ladder — sérialise les écritures ELO.
 function competitorKey(ladderId: string, c: Competitor): string {
   return 'teamId' in c ? `rank:${ladderId}:team:${c.teamId}` : `rank:${ladderId}:user:${c.userId}`;
@@ -20,7 +25,7 @@ export async function applyMatchElo(
   ladderId: string,
   winner: Competitor,
   loser: Competitor,
-): Promise<void> {
+): Promise<{ winner: EloOutcome; loser: EloOutcome }> {
   async function getOrCreateRanking(competitor: Competitor): Promise<{ id: string; elo: number }> {
     let filter: SQL;
     let values: typeof rankingsTable.$inferInsert;
@@ -72,6 +77,11 @@ export async function applyMatchElo(
     .update(rankingsTable)
     .set({ elo: newEloB, losses: sql`${rankingsTable.losses} + 1`, lastMatchAt: new Date() })
     .where(eq(rankingsTable.id, loserRanking.id));
+
+  return {
+    winner: { before: winnerRanking.elo, after: newEloA, delta: newEloA - winnerRanking.elo },
+    loser: { before: loserRanking.elo, after: newEloB, delta: newEloB - loserRanking.elo },
+  };
 }
 
 /**
@@ -85,6 +95,13 @@ export async function completeMatchWithElo(
   matchId: string,
   ladderId: string,
   winnerSideId: string,
+  // Score final (manches gagnées, Bo3 : 0/1/2) de chaque camp. **Obligatoires** (pas de
+  // défaut) : un futur appelant qui oublie les scores doit avoir une erreur de compilation,
+  // pas un `null` silencieux en base. Passer explicitement `null` pour l'arbitrage admin
+  // (B7) : l'admin tranche un vainqueur, pas un score — `match_sides.score` reste alors
+  // `null` tandis que l'Elo, lui, est bien appliqué.
+  winnerScore: number | null,
+  loserScore: number | null,
 ): Promise<void> {
   await tx
     .update(matchesTable)
@@ -108,5 +125,25 @@ export async function completeMatchWithElo(
     return { userId: p.userId };
   };
 
-  await applyMatchElo(tx, ladderId, await toCompetitor(winnerSide), await toCompetitor(loserSide));
+  const eloResult = await applyMatchElo(
+    tx,
+    ladderId,
+    await toCompetitor(winnerSide),
+    await toCompetitor(loserSide),
+  );
+
+  // Persistance sur `match_sides` : le delta d'Elo dépend de l'écart au moment de CE match
+  // précis, il serait perdu dès le match suivant si on ne l'écrivait pas ici.
+  await tx
+    .update(matchSidesTable)
+    .set({
+      score: winnerScore,
+      eloDelta: eloResult.winner.delta,
+      eloAfter: eloResult.winner.after,
+    })
+    .where(eq(matchSidesTable.id, winnerSide.id));
+  await tx
+    .update(matchSidesTable)
+    .set({ score: loserScore, eloDelta: eloResult.loser.delta, eloAfter: eloResult.loser.after })
+    .where(eq(matchSidesTable.id, loserSide.id));
 }

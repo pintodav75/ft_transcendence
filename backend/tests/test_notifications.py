@@ -122,14 +122,14 @@ def run():
     # ─────────────────────────────────────────────── result_submitted / result_confirmed (1v1)
     s.section("result_submitted (l'autre camp) / result_confirmed (tous sauf l'acteur)")
     backdate_sched(M1)
-    req("POST", f"/matches/{M1}/result", tokB, {"winnerSideId": s1_1})  # bob soumet le 1er
+    req("POST", f"/matches/{M1}/result", tokB, {"winnerSideId": s1_1, "scoreSelf": 2, "scoreOpponent": 0})  # bob soumet le 1er
 
     _, bA = get_notifs(tokA)
     s.check("alice (l'autre camp) reçoit result_submitted", len(of_type(bA, "result_submitted", M1)), 1)
     _, bB = get_notifs(tokB)
     s.check("bob (soumetteur) n'est pas notifié", len(bB.get("notifications", [])), 0)
 
-    req("POST", f"/matches/{M1}/result", tokA, {"winnerSideId": s1_1})  # alice confirme -> completed
+    req("POST", f"/matches/{M1}/result", tokA, {"winnerSideId": s1_1, "scoreSelf": 0, "scoreOpponent": 2})  # alice confirme -> completed
     s.check("le match est bien completed", status_of(M1), "completed")
     _, bB = get_notifs(tokB)
     conf = of_type(bB, "result_confirmed", M1)
@@ -146,16 +146,16 @@ def run():
     M4 = start_match(tokA, tokB, CHESS)
     s4_0, s4_1 = side_id(M4, 0), side_id(M4, 1)
     backdate_sched(M4)
-    req("POST", f"/matches/{M4}/result", tokA, {"winnerSideId": s4_0})  # 1re soumission
-    req("POST", f"/matches/{M4}/result", tokA, {"winnerSideId": s4_0})  # re-soumission, même vainqueur
-    req("POST", f"/matches/{M4}/result", tokA, {"winnerSideId": s4_1})  # re-soumission, alice change d'avis
+    req("POST", f"/matches/{M4}/result", tokA, {"winnerSideId": s4_0, "scoreSelf": 2, "scoreOpponent": 0})  # 1re soumission
+    req("POST", f"/matches/{M4}/result", tokA, {"winnerSideId": s4_0, "scoreSelf": 2, "scoreOpponent": 0})  # re-soumission, même vainqueur
+    req("POST", f"/matches/{M4}/result", tokA, {"winnerSideId": s4_1, "scoreSelf": 0, "scoreOpponent": 2})  # re-soumission, alice change d'avis
     _, bB = get_notifs(tokB)
     s.check(
         "bob a reçu 3 soumissions d'alice mais UNE seule notif result_submitted",
         len(of_type(bB, "result_submitted", M4)),
         1,
     )
-    st, b = req("POST", f"/matches/{M4}/result", tokB, {"winnerSideId": s4_1})  # bob confirme -> completed
+    st, b = req("POST", f"/matches/{M4}/result", tokB, {"winnerSideId": s4_1, "scoreSelf": 2, "scoreOpponent": 0})  # bob confirme -> completed
     s.check("le match se termine normalement malgré les re-soumissions", (st, b.get("status")), (200, "completed"))
 
     # ─────────────────────────────────────────────── dispute_opened + dispute_needs_admin
@@ -163,8 +163,8 @@ def run():
     M2 = start_match(tokA, tokB, CHESS)
     s2_0, s2_1 = side_id(M2, 0), side_id(M2, 1)
     backdate_sched(M2)
-    req("POST", f"/matches/{M2}/result", tokA, {"winnerSideId": s2_0})
-    req("POST", f"/matches/{M2}/result", tokB, {"winnerSideId": s2_1})  # bob crée le désaccord
+    req("POST", f"/matches/{M2}/result", tokA, {"winnerSideId": s2_0, "scoreSelf": 2, "scoreOpponent": 0})
+    req("POST", f"/matches/{M2}/result", tokB, {"winnerSideId": s2_1, "scoreSelf": 2, "scoreOpponent": 0})  # bob crée le désaccord
     s.check("le match est bien disputed", status_of(M2), "disputed")
     DISP = sql(f"select id from disputes where match_id='{M2}';")
 
@@ -318,12 +318,12 @@ def run():
     s.check("dave2 (aligné B, camp de l'acteur) rien", len(of_type(get_notifs(tokD2)[1], "match_accepted", M3)), 0)
 
     backdate_sched(M3)
-    req("POST", f"/matches/{M3}/result", tokB, {"winnerSideId": s3_0})  # bob (cap B) soumet le 1er
+    req("POST", f"/matches/{M3}/result", tokB, {"winnerSideId": s3_0, "scoreSelf": 0, "scoreOpponent": 2})  # bob (cap B) soumet le 1er
     s.check("alice (autre camp) reçoit result_submitted", len(of_type(get_notifs(tokA)[1], "result_submitted", M3)), 1)
     s.check("carol (autre camp) reçoit result_submitted", len(of_type(get_notifs(tokC)[1], "result_submitted", M3)), 1)
     s.check("dave2 (coéquipier du soumetteur) rien — seul l'AUTRE camp confirme", len(of_type(get_notifs(tokD2)[1], "result_submitted", M3)), 0)
 
-    req("POST", f"/matches/{M3}/result", tokA, {"winnerSideId": s3_0})  # alice confirme -> completed
+    req("POST", f"/matches/{M3}/result", tokA, {"winnerSideId": s3_0, "scoreSelf": 2, "scoreOpponent": 0})  # alice confirme -> completed
     s.check("match completed", status_of(M3), "completed")
     s.check("carol (coéquipière de l'actrice) reçoit result_confirmed", len(of_type(get_notifs(tokC)[1], "result_confirmed", M3)), 1)
     s.check("bob reçoit result_confirmed", len(of_type(get_notifs(tokB)[1], "result_confirmed", M3)), 1)
@@ -344,7 +344,7 @@ def run():
         # l'annuler en fantôme entre le backdate et le POST). Puis on vieillit la soumission.
         MC = start_match(tokA, tokB, CHESS)
         backdate_sched(MC, "1 hour")
-        req("POST", f"/matches/{MC}/result", tokA, {"winnerSideId": side_id(MC, 0)})
+        req("POST", f"/matches/{MC}/result", tokA, {"winnerSideId": side_id(MC, 0), "scoreSelf": 2, "scoreOpponent": 0})
         # Soumission faite -> on vieillit AUSSI scheduled_at : sinon la fenêtre §5.2 de MC
         # (récente) pourrait bloquer la création/accept de MD selon le lockout du ladder.
         backdate_sched(MC, "25 hours")
@@ -353,8 +353,8 @@ def run():
         # Dispute auto-annulée : désaccord -> disputed, puis on vieillit la dispute.
         MD = start_match(tokA, tokB, CHESS)
         backdate_sched(MD, "1 hour")
-        req("POST", f"/matches/{MD}/result", tokA, {"winnerSideId": side_id(MD, 0)})
-        req("POST", f"/matches/{MD}/result", tokB, {"winnerSideId": side_id(MD, 1)})
+        req("POST", f"/matches/{MD}/result", tokA, {"winnerSideId": side_id(MD, 0), "scoreSelf": 2, "scoreOpponent": 0})
+        req("POST", f"/matches/{MD}/result", tokB, {"winnerSideId": side_id(MD, 1), "scoreSelf": 2, "scoreOpponent": 0})
         sql(f"update disputes set created_at = now() - interval '25 hours' where match_id='{MD}';")
 
         print("   ⏳ attente du tick du planificateur (65 s)…")

@@ -16,6 +16,7 @@ import {
 import { eq, and, ne, or, gt, lt, gte, inArray, notInArray, sql, desc } from 'drizzle-orm';
 import z from 'zod';
 import { completeMatchWithElo } from '../utils/rankings.js';
+import { WINS_REQUIRED } from '../utils/elo.js';
 import {
   notify,
   pushNotifications,
@@ -356,7 +357,14 @@ const acceptMatchSchema = createMatchSchema.pick({ lineup: true });
 
 const listQuerySchema = z.object({ ladderId: z.uuid() });
 const idParamSchema = z.object({ id: z.uuid() });
-const winnerIdSchema = z.object({ winnerSideId: z.uuid() });
+// Bo3 (décision produit, WINS_REQUIRED = 2) : les scores soumis sont RELATIFS AU
+// SOUMETTEUR (« moi / lui »), délibérément pas indexés sur sideIndex — la comparaison
+// croisée avec l'autre soumission (voir plus bas) devient triviale.
+const resultBodySchema = z.object({
+  winnerSideId: z.uuid(),
+  scoreSelf: z.number().int().min(0).max(WINS_REQUIRED),
+  scoreOpponent: z.number().int().min(0).max(WINS_REQUIRED),
+});
 
 export const matchesRoutes: FastifyPluginAsync = async (server) => {
   // POST /matches — ouvrir un slot (team pour 2v2+, solo pour 1v1).
@@ -601,6 +609,13 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             // et calcule le temps restant (submittedAt + 24 h) côté client.
             submittedAt: s.submittedAt,
             submittedWinnerSideId: s.submittedWinnerSideId,
+            // Score final (manches gagnées, Bo3) et Elo de CE match — écrits seulement à la
+            // clôture (`completed`), `null` avant. `score` reste `null` après un arbitrage
+            // admin (il tranche un vainqueur, pas un score) ; `eloDelta`/`eloAfter` sont
+            // écrits dans tous les cas où l'ELO s'applique.
+            score: s.score,
+            eloDelta: s.eloDelta,
+            eloAfter: s.eloAfter,
             // solo : pas de team → null. Le front distingue les deux cas là-dessus.
             team: s.teamId ? (teamById.get(s.teamId) ?? null) : null,
             players: participants
@@ -983,7 +998,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const { id } = idParamSchema.parse(request.params);
-        const { winnerSideId } = winnerIdSchema.parse(request.body);
+        const { winnerSideId, scoreSelf, scoreOpponent } = resultBodySchema.parse(request.body);
         const me = request.user.sub;
 
         const [match] = await db.select().from(matchesTable).where(eq(matchesTable.id, id));
@@ -1027,9 +1042,27 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         // match_sides.id) -> violation de contrainte -> 500 au lieu d'un 400 propre.
         if (!sides.some((s) => s.id === winnerSideId))
           return reply.code(400).send({ error: 'winnerSideId is not a side of this match' });
+        // Bo3 : exactement un des deux scores doit valoir WINS_REQUIRED (victoire) — jamais
+        // les deux (deux vainqueurs), jamais aucun (nul ou série inachevée).
+        const selfReachedWins = scoreSelf === WINS_REQUIRED;
+        const opponentReachedWins = scoreOpponent === WINS_REQUIRED;
+        if (selfReachedWins === opponentReachedWins)
+          return reply.code(400).send({
+            error: `score must be a completed best-of series (exactly one side reaching ${WINS_REQUIRED} wins)`,
+          });
+        // Le camp à WINS_REQUIRED doit être celui déclaré vainqueur — sinon un score
+        // incohérent avec winnerSideId partirait en base (ex : je déclare l'adversaire
+        // vainqueur mais je m'attribue le score gagnant).
+        const winnerIsMe = winnerSideId === mySide.id;
+        if (winnerIsMe !== selfReachedWins)
+          return reply.code(400).send({ error: 'winnerSideId is inconsistent with the submitted score' });
         if (!match.scheduledAt) return reply.code(500).send({ error: 'Internal error' });
         if (new Date() < match.scheduledAt)
           return reply.code(400).send({ error: 'match not started yet' });
+        // Remappage « moi / lui » -> « vainqueur / perdant » pour le helper d'écriture. Les
+        // gardes ci-dessus garantissent déjà la cohérence (winnerIsMe <=> selfReachedWins).
+        const winnerScore = winnerIsMe ? scoreSelf : scoreOpponent;
+        const loserScore = winnerIsMe ? scoreOpponent : scoreSelf;
 
         // Toutes les écritures sous verrou + re-lecture : deux camps qui soumettent en
         // même temps courent sur la même ligne match (TOCTOU, piège #14). Le verrou
@@ -1060,7 +1093,12 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             // sous verrou, il ne peut donc pas valider un ancien vainqueur (cf. jobs/index.ts).
             await tx
               .update(matchSidesTable)
-              .set({ submittedAt: new Date(), submittedWinnerSideId: winnerSideId })
+              .set({
+                submittedAt: new Date(),
+                submittedWinnerSideId: winnerSideId,
+                submittedScoreSelf: scoreSelf,
+                submittedScoreOpponent: scoreOpponent,
+              })
               .where(eq(matchSidesTable.id, mySide.id));
             // L'AUTRE side est le point de bascule premier/deuxième soumetteur :
             //   - il n'a pas soumis (submittedAt null) -> je suis le 1er -> awaiting_confirmation
@@ -1072,6 +1110,8 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                 id: matchSidesTable.id,
                 submittedAt: matchSidesTable.submittedAt,
                 submittedWinnerSideId: matchSidesTable.submittedWinnerSideId,
+                submittedScoreSelf: matchSidesTable.submittedScoreSelf,
+                submittedScoreOpponent: matchSidesTable.submittedScoreOpponent,
               })
               .from(matchSidesTable)
               .where(and(eq(matchSidesTable.matchId, id), ne(matchSidesTable.id, mySide.id)));
@@ -1122,11 +1162,19 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                   : [];
               return { ok: true, status: 'awaiting_confirmation', notifs };
             } else {
-              if (otherSide.submittedWinnerSideId === winnerSideId) {
-                // ACCORD : les deux camps ont désigné le même vainqueur -> match clos + ELO,
-                // dans la MÊME transaction. Helper partagé avec le job d'auto-confirmation (B6)
-                // et l'arbitrage admin (B7) — la logique de clôture + ELO vit à un seul endroit.
-                await completeMatchWithElo(tx, id, match.ladderId, winnerSideId);
+              // ACCORD : même vainqueur ET score croisé cohérent — l'autre camp doit
+              // m'attribuer le score que je m'attribue, et réciproquement. Même vainqueur
+              // mais score différent (2-0 vs 2-1) = DÉSACCORD -> litige, pas un vainqueur
+              // arbitraire en base.
+              const agree =
+                otherSide.submittedWinnerSideId === winnerSideId &&
+                otherSide.submittedScoreSelf === scoreOpponent &&
+                otherSide.submittedScoreOpponent === scoreSelf;
+              if (agree) {
+                // Match clos + ELO, dans la MÊME transaction. Helper partagé avec le job
+                // d'auto-confirmation (B6) et l'arbitrage admin (B7) — la logique de clôture
+                // + ELO vit à un seul endroit.
+                await completeMatchWithElo(tx, id, match.ladderId, winnerSideId, winnerScore, loserScore);
                 const notifs = await notify(tx, bothSidesButMe, 'result_confirmed', {
                   matchId: id,
                   ladderId: match.ladderId,
@@ -1134,8 +1182,9 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                 });
                 return { ok: true, status: 'completed', notifs };
               } else {
-                // DÉSACCORD : vainqueurs différents -> le match part en litige, on ouvre une
-                // dispute et B7 (arbitrage admin / timeout 24 h) prend le relais. Aucun ELO ici.
+                // DÉSACCORD : vainqueur différent OU même vainqueur mais score différent
+                // (2-0 vs 2-1) -> le match part en litige, on ouvre une dispute et B7
+                // (arbitrage admin / timeout 24 h) prend le relais. Aucun ELO ici.
                 await tx
                   .update(matchesTable)
                   .set({ status: 'disputed' })

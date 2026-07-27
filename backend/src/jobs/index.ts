@@ -149,8 +149,11 @@ export async function autoConfirmMatches(): Promise<number> {
       // ignorerait la nouvelle fenêtre de 24 h (course signalée en review).
       const [sub] = await tx
         .select({
+          id: matchSidesTable.id,
           submittedAt: matchSidesTable.submittedAt,
           submittedWinnerSideId: matchSidesTable.submittedWinnerSideId,
+          submittedScoreSelf: matchSidesTable.submittedScoreSelf,
+          submittedScoreOpponent: matchSidesTable.submittedScoreOpponent,
         })
         .from(matchSidesTable)
         .where(and(eq(matchSidesTable.matchId, c.matchId), isNotNull(matchSidesTable.submittedAt)));
@@ -159,7 +162,22 @@ export async function autoConfirmMatches(): Promise<number> {
       // fenêtre de 24 h courir, on ne confirme pas ce tick-ci.
       if (sub.submittedAt >= cutoff) return null;
 
-      await completeMatchWithElo(tx, c.matchId, c.ladderId, sub.submittedWinnerSideId);
+      // Remappage « moi / lui » -> « vainqueur / perdant » : le camp silencieux ne soumet
+      // rien, seul `sub` (le camp qui a parlé) porte des scores, relatifs à LUI-MÊME. S'il
+      // s'est désigné vainqueur, son propre score est le score gagnant ; sinon c'est le
+      // score qu'il attribue à l'adversaire qui l'est.
+      const submitterWon = sub.submittedWinnerSideId === sub.id;
+      const winnerScore = submitterWon ? sub.submittedScoreSelf : sub.submittedScoreOpponent;
+      const loserScore = submitterWon ? sub.submittedScoreOpponent : sub.submittedScoreSelf;
+
+      await completeMatchWithElo(
+        tx,
+        c.matchId,
+        c.ladderId,
+        sub.submittedWinnerSideId,
+        winnerScore,
+        loserScore,
+      );
       // B9 — « score entériné » : les DEUX camps. Le soumetteur d'origine aussi — 24 h ont
       // passé, pour lui c'est la confirmation que son score est acté (pas d'acteur : robot).
       return notify(tx, await getMatchParticipantIds(tx, c.matchId), 'result_confirmed', {

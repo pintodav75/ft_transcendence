@@ -235,6 +235,18 @@ export const matchSidesTable = pgTable(
     submittedWinnerSideId: uuid('submitted_winner_side_id').references(
       (): any => matchSidesTable.id,
     ),
+    // Score Bo3 tel que soumis par CE camp, relatif au soumetteur (« moi / lui »),
+    // délibérément pas indexé sur sideIndex : la comparaison croisée entre les
+    // deux soumissions devient triviale et supprime toute confusion de camp.
+    submittedScoreSelf: smallint('submitted_score_self'),
+    submittedScoreOpponent: smallint('submitted_score_opponent'),
+    // Score final (nombre de manches gagnées : 0, 1 ou 2), écrit à la clôture du match.
+    score: smallint('score'),
+    // Gain/perte d'Elo pour ce camp sur CE match précis : dépend de l'écart d'Elo au
+    // moment du match, donc non recalculable a posteriori — doit être persisté ici.
+    eloDelta: smallint('elo_delta'),
+    // Elo de ce camp immédiatement après ce match.
+    eloAfter: integer('elo_after'),
   },
   (table) => [
     unique('match_sides_match_side_unique').on(table.matchId, table.sideIndex),

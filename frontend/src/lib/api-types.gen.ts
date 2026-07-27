@@ -2834,6 +2834,12 @@ export interface paths {
                                  * @description Vainqueur déclaré par CE camp ; `null` sans soumission.
                                  */
                                 submittedWinnerSideId?: string | null;
+                                /** @description Score final Bo3 (manches gagnées : 0, 1 ou 2) de ce camp, écrit uniquement à la clôture (`completed`). Reste `null` après un arbitrage admin (B7) : l'admin tranche un vainqueur, pas un score. */
+                                score?: number | null;
+                                /** @description Gain/perte d'Elo sur CE match précis (ex. `+18` / `-12`). Dépend de l'écart d'Elo au moment du match, donc non recalculable a posteriori — `null` tant que le match n'est pas `completed`. */
+                                eloDelta?: number | null;
+                                /** @description Elo de ce camp immédiatement après ce match ; `null` sinon. */
+                                eloAfter?: number | null;
                                 /** @description `null` en 1v1 (le côté est un joueur, pas une team). */
                                 team?: {
                                     /** Format: uuid */
@@ -3077,12 +3083,13 @@ export interface paths {
         put?: never;
         /**
          * Soumettre le résultat d'un match (déclarer le vainqueur)
-         * @description Un camp déclare le **side gagnant** (`winnerSideId` = l'id d'un `match_sides`, PAS l'id du match). Qui peut soumettre : **capitaine** en 2v2+, **le joueur** en 1v1 (même règle que créer/accepter). Le match doit être `in_progress` ou `awaiting_confirmation`.
+         * @description Un camp déclare le **side gagnant** (`winnerSideId` = l'id d'un `match_sides`, PAS l'id du match) **et le score** de la série. Qui peut soumettre : **capitaine** en 2v2+, **le joueur** en 1v1 (même règle que créer/accepter). Le match doit être `in_progress` ou `awaiting_confirmation`.
+         *     🏆 **Tous les matchs sont en best-of-3** (décision produit, tous jeux/ladders confondus) : `scoreSelf`/`scoreOpponent` sont le nombre de manches gagnées (0 à 2), **relatifs au soumetteur** (« moi / lui »). Seuls scores valides : `2-0`, `2-1`, `0-2`, `1-2` — exactement un des deux camps doit atteindre 2 manches, et ce camp doit être celui déclaré vainqueur par `winnerSideId` (sinon 400).
          *     **§5.3** : impossible de soumettre **avant** l'heure prévue (`now() < scheduled_at` → 400) — la partie doit avoir commencé.
-         *     **Machine à états (§5.4)**, selon la soumission de l'AUTRE camp : • l'autre n'a pas encore soumis → **1re soumission** : `status → awaiting_confirmation`. • l'autre a soumis le **même** vainqueur → **accord** : `status → completed`, `winner_side_id` + `completed_at` posés, et **ELO appliqué** (K=32 ; la ligne `rankings` du compétiteur est créée à 1000 à son 1er match). Tout dans la même transaction. • l'autre a soumis un vainqueur **différent** → **désaccord** : `status → disputed` et une ligne `disputes` est ouverte (B7 prend le relais). Aucun ELO.
-         *     **Re-soumission** : tant que le match n'est pas résolu (`in_progress` ou `awaiting_confirmation`), un camp peut re-soumettre — sa précédente déclaration est **écrasée** et `submitted_at` est remis à maintenant, ce qui **redémarre sa fenêtre d'auto-confirmation de 24 h**.
+         *     **Machine à états (§5.4)**, selon la soumission de l'AUTRE camp : • l'autre n'a pas encore soumis → **1re soumission** : `status → awaiting_confirmation`. • l'autre a soumis le **même** vainqueur **ET** un score croisé cohérent (son `scoreSelf`/`scoreOpponent` correspond exactement à mon `scoreOpponent`/`scoreSelf`) → **accord** : `status → completed`, `winner_side_id` + `completed_at` posés, **le score final et l'ELO écrits sur les deux `match_sides`** (`score`, `eloDelta`, `eloAfter` — K=32 ; la ligne `rankings` du compétiteur est créée à 1000 à son 1er match). Tout dans la même transaction. • l'autre a soumis un vainqueur **différent**, OU le **même vainqueur avec un score différent** (ex. `2-0` contre `2-1`) → **désaccord** : `status → disputed` et une ligne `disputes` est ouverte (B7 prend le relais). Aucun ELO, aucun score écrit.
+         *     **Re-soumission** : tant que le match n'est pas résolu (`in_progress` ou `awaiting_confirmation`), un camp peut re-soumettre — sa précédente déclaration (vainqueur **et scores**) est **écrasée** et `submitted_at` est remis à maintenant, ce qui **redémarre sa fenêtre d'auto-confirmation de 24 h**.
          *     Écritures sous **verrou consultatif** (clé = matchId) + re-lecture du statut **dans** la transaction : deux soumissions simultanées sont sérialisées.
-         *     ⏰ **Jobs 24 h liés** (planificateur) : un match `in_progress` sans aucune soumission 24 h après `scheduled_at` passe à `cancelled` ; un match `awaiting_confirmation` dont l'unique soumission date de +24 h (horloge sur `submitted_at`) est auto-confirmé (`completed` + ELO) sur ce score.
+         *     ⏰ **Jobs 24 h liés** (planificateur) : un match `in_progress` sans aucune soumission 24 h après `scheduled_at` passe à `cancelled` ; un match `awaiting_confirmation` dont l'unique soumission date de +24 h (horloge sur `submitted_at`) est auto-confirmé (`completed` + ELO, score du camp qui a soumis) sur ce score.
          */
         post: {
             parameters: {
@@ -3101,6 +3108,10 @@ export interface paths {
                          * @description Id du **side** déclaré vainqueur — doit être l'un des deux sides de CE match. « Mon side » et le side vainqueur sont indépendants (on peut déclarer la victoire de l'adversaire).
                          */
                         winnerSideId: string;
+                        /** @description Manches que JE (le soumetteur) me suis attribuées (best-of-3, 0 à 2). */
+                        scoreSelf: number;
+                        /** @description Manches que j'attribue à l'adversaire (best-of-3, 0 à 2). */
+                        scoreOpponent: number;
                     };
                 };
             };
@@ -3117,7 +3128,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Body/param invalide (ValidationError) ; **§5.3** le match n'a pas encore commencé (`match not started yet`) ; ou `winnerSideId` n'est **pas un side de ce match**. */
+                /** @description Body/param invalide (ValidationError) ; score hors best-of-3 (ni `2-0`, `2-1`, `0-2` ni `1-2`) ; score incohérent avec le `winnerSideId` déclaré ; **§5.3** le match n'a pas encore commencé (`match not started yet`) ; ou `winnerSideId` n'est **pas un side de ce match**. */
                 400: {
                     headers: {
                         [name: string]: unknown;
