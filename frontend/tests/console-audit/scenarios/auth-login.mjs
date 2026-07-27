@@ -9,7 +9,7 @@ export const name = 'auth-login';
 export const surface = '/login — validation client, bascule mot de passe, 401';
 export const auth = false;
 
-export async function run({ page, setPhase, step, countRequests, user, ORIGIN }) {
+export async function run({ page, setPhase, step, countRequests, expectHttp, user, ORIGIN }) {
   setPhase('1. /login, chargement anonyme');
   await page.goto(`${ORIGIN}/login`, { waitUntil: 'networkidle' });
   step('C1', (await page.locator('#email').count()) === 1, 'formulaire de connexion rendu');
@@ -22,7 +22,11 @@ export async function run({ page, setPhase, step, countRequests, user, ORIGIN })
     await page.waitForTimeout(600);
   });
   const emptyMsgs = await page.locator('p[role="alert"]').count();
-  step('C2', emptyReqs === 0 && emptyMsgs > 0, `${emptyMsgs} message(s), ${emptyReqs} requête(s) (0 attendu)`);
+  step(
+    'C2',
+    emptyReqs === 0 && emptyMsgs > 0,
+    `${emptyMsgs} message(s), ${emptyReqs} requête(s) (0 attendu)`,
+  );
 
   setPhase('3. email malformé (aucune requête attendue)');
   const badMailReqs = await countRequests(async () => {
@@ -43,6 +47,10 @@ export async function run({ page, setPhase, step, countRequests, user, ORIGIN })
   setPhase('5. mot de passe faux -> 401 (chemin nominal)');
   // UNE seule fois : c'est le geste utilisateur le plus banal qui soit, et il peint la
   // console en rouge. C'est précisément ce que l'audit doit chiffrer.
+  // Le 401 est L'OBJET de cette phase : déclaré pour être listé à part plutôt qu'imputé au
+  // ticket. `/auth/login` ne discrimine pas à lui seul (le login réussi passe par la même
+  // route), c'est le cloisonnement PAR PHASE d'expectHttp qui restreint l'exemption ici.
+  expectHttp(/\/auth\/login/, 'mot de passe faux soumis volontairement -> 401 attendu');
   await page.fill('#email', user.email);
   await page.fill('#password', 'Mauvais-Mot-De-Passe-1!');
   await page.click('button:has-text("Sign in")');

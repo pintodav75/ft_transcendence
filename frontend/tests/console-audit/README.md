@@ -70,6 +70,37 @@ Ce que le runner fournit :
 | `countRequests(fn, filter?)` | prouve qu'une action n'a déclenché **aucun** aller-retour réseau |
 | `fixtures.ok / .big / .bad` | PNG valide · PNG > 2 Mo · GIF (type refusé), **générés à l'exécution** |
 | `user` | compte neuf du run (`pseudo`, `email`, `password`, `accessToken`, `stamp`) |
+| `expectHttp(motif, raison)` | déclare qu'un échec réseau est **l'objet du test** (id inexistant → écran 404) |
+
+### Tester un état d'erreur : `expectHttp`
+
+Chrome logge « Failed to load resource: … 404 » pour **tout** fetch non-2xx, et le runner
+enregistre en plus la réponse ≥ 400. Un scénario qui vérifie l'écran 404 d'une équipe
+inconnue ne pourrait donc **jamais** sortir 0. `expectHttp(/motif/, 'raison')`, appelé
+**avant** l'action, range ces entrées dans une section à part du rapport (« erreurs réseau
+PROVOQUÉES par le scénario ») au lieu de les imputer au ticket.
+
+Trois garde-fous, parce que c'est le **seul** mécanisme capable de faire taire le filet :
+
+1. **Seuls les flux réseau sont exemptables.** Une exception non attrapée ou un `console.*`
+   écrit par notre code reste imputé au ticket **même s'il cite l'URL visée** — sans ça, un
+   « Uncaught Error: failed to load /api/teams/&lt;uuid&gt; » sortirait vert. Exception à
+   l'exception : Chrome remonte le même échec de ressource sur DEUX flux (`Log.entryAdded`
+   **et** l'API console), donc le flux console est accepté sur la seule signature
+   `Failed to load resource` du navigateur.
+2. **L'exemption ne vaut que dans la phase où elle est déclarée** — appeler `expectHttp`
+   **après** le `setPhase` concerné, et avant l'action. Sinon elle courrait jusqu'à la fin du
+   run et couvrirait en silence des surfaces suivantes (le même uuid réutilisé plus loin comme
+   `matchId`, par exemple).
+3. **Le motif doit viser l'URL précise testée** (l'uuid bidon) plutôt qu'une route entière.
+   Quand la route seule ne discrimine pas (un 401 sur `/auth/login`, un 409 sur `/teams`),
+   c'est le cloisonnement par phase du point 2 qui fait le travail.
+
+Un motif déclaré mais **jamais déclenché** est signalé en fin de rapport : une faute de frappe
+ou une phase qui a bougé échoue du bon côté (rouge), mais ne doit pas le faire en silence.
+
+Ces entrées restent **comptées et affichées** (`6× raison`) : un motif trop large se voit au
+compteur. La dette héritée d'`OUT_OF_SCOPE`, elle, continue d'être comptée séparément.
 
 Le runner se charge seul du reste : compte de test créé par l'API, connexion via l'UI
 (étiquetée hors périmètre), suppression du compte via `DELETE /users/me` à la fin,

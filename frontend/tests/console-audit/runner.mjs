@@ -81,16 +81,12 @@ function resolveChromium() {
     }
   }
 
-  for (const bin of [
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-  ]) {
+  for (const bin of ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser']) {
     if (existsSync(bin)) return bin;
   }
 
   throw new Error(
-    "Aucun Chromium trouvé.\n" +
+    'Aucun Chromium trouvé.\n' +
       '  -> npx playwright install chromium   (télécharge dans ~/.cache/ms-playwright)\n' +
       '  -> ou AUDIT_CHROMIUM=/chemin/vers/chrome node run.mjs',
   );
@@ -295,6 +291,36 @@ export async function runScenario(scenario) {
   let phase = 'démarrage';
   const events = [];
   const steps = [];
+  /**
+   * Échecs réseau dont le scénario est VENU CHERCHER l'erreur (écran 404 d'une ressource
+   * inexistante). Le navigateur logge « Failed to load resource » pour tout fetch non-2xx :
+   * sans cette déclaration, un scénario qui teste un état d'erreur ne pourrait jamais
+   * sortir 0. Les entrées restent AFFICHÉES dans le rapport, dans leur propre section —
+   * on distingue « provoqué » de « subi », on ne masque rien.
+   */
+  const expectedFailures = [];
+  /**
+   * Deux garde-fous, parce qu'`expectHttp` est le seul mécanisme capable de faire taire le
+   * filet et qu'un mécanisme trop large ne protège plus rien :
+   *   - SEULS ces flux sont exemptables. `record()` est partagé par tous les flux, donc sans
+   *     ce filtre une exception non attrapée ou un console.error dont le message contient
+   *     l'URL visée serait exempté lui aussi — un « Uncaught Error: failed to load
+   *     /api/teams/<uuid> » sortirait vert.
+   *   - l'exemption ne vaut que dans la PHASE où elle a été déclarée, sinon elle court
+   *     jusqu'à la fin du run et couvre en silence des surfaces qu'on n'a pas voulu couvrir
+   *     (un même uuid réutilisé comme matchId dans une phase suivante, par exemple).
+   */
+  const EXPECTABLE_KINDS = new Set(['http', 'netfail', 'browser']);
+  /**
+   * Chrome remonte UN MÊME échec de ressource sur DEUX flux : `Log.entryAdded` (kind
+   * `browser`) et l'API console (kind `console`). Refuser tout `console` rendrait donc
+   * `expectHttp` inopérant sur la moitié des entrées — mesuré : 4 exemptées, 2 imputées à
+   * tort. On accepte donc le flux console UNIQUEMENT sur la signature du navigateur ; un
+   * `console.error` écrit par notre code reste imputé au ticket, même s'il cite l'URL visée.
+   */
+  const BROWSER_RESOURCE_ERROR = /^Failed to load resource/i;
+  const isExpectable = (kind, text) =>
+    EXPECTABLE_KINDS.has(kind) || (kind === 'console' && BROWSER_RESOURCE_ERROR.test(text));
 
   const setPhase = (p) => {
     phase = p;
@@ -314,8 +340,14 @@ export async function runScenario(scenario) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
 
-  const record = (kind, level, text, extra = {}) =>
-    events.push({ phase, kind, level, text, ...extra });
+  const record = (kind, level, text, extra = {}) => {
+    const haystack = `${extra.url ?? ''} ${text}`;
+    const declared = isExpectable(kind, text)
+      ? expectedFailures.find((f) => f.phase === phase && f.pattern.test(haystack))
+      : undefined;
+    if (declared) declared.hits += 1;
+    events.push({ phase, kind, level, text, ...extra, expected: declared?.reason });
+  };
 
   page.on('console', (msg) => {
     const loc = msg.location();
@@ -410,6 +442,20 @@ export async function runScenario(scenario) {
       setDialogResponse: (mode) => {
         dialogResponse = mode;
       },
+      /**
+       * Déclare qu'un échec RÉSEAU est l'OBJET du test (id inexistant -> écran 404).
+       * ⚠️ Trois règles :
+       *   1. le motif doit viser l'URL précise testée, jamais une route entière — sinon il
+       *      masquerait de vrais 4xx de la même famille ;
+       *   2. à appeler APRÈS le `setPhase` de la phase concernée et AVANT l'action :
+       *      l'exemption ne vaut que dans cette phase ;
+       *   3. seuls les flux réseau sont exemptables — une exception ou un `console.*` reste
+       *      imputé au ticket même si son message contient l'URL visée.
+       * Un motif qui ne sert jamais est signalé dans le rapport (faute de frappe silencieuse).
+       */
+      expectHttp: (pattern, reason) => {
+        expectedFailures.push({ pattern, reason, phase, hits: 0 });
+      },
       // À appeler AVANT toute soumission du formulaire d'inscription : le quota est
       // partagé avec les comptes créés par le runner, et un 429 fausserait le rapport.
       awaitRegisterSlot,
@@ -424,16 +470,18 @@ export async function runScenario(scenario) {
     }
     rmSync(fixtures.dir, { recursive: true, force: true });
     if (leftovers.length > 0) {
-      console.log(`\n⚠️  compte(s) NON supprimé(s) — à nettoyer à la main : ${leftovers.join(', ')}`);
+      console.log(
+        `\n⚠️  compte(s) NON supprimé(s) — à nettoyer à la main : ${leftovers.join(', ')}`,
+      );
     }
   }
 
-  return { events, steps, crashed, user };
+  return { events, steps, crashed, user, expectedFailures };
 }
 
 // ---------------------------------------------------------------- rapport
 
-export function report(scenario, { events, steps, crashed }) {
+export function report(scenario, { events, steps, crashed, expectedFailures = [] }) {
   const excusable = STRICT ? OUT_OF_SCOPE.filter((k) => k.tooling) : OUT_OF_SCOPE;
   const label = (e) => {
     const known = excusable.find((k) => k.match.test(e.text) || k.match.test(e.url ?? ''));
@@ -442,10 +490,14 @@ export function report(scenario, { events, steps, crashed }) {
   const fmt = (e) => `[${e.level}] ${e.text}${e.url ? ` (${e.url.replace(ORIGIN, '')})` : ''}`;
 
   const scoped = events.filter((e) => !e.phase.startsWith('login'));
-  const blaming = scoped.filter((e) => !label(e));
+  // `e.expected` = échec réseau déclaré par le scénario via expectHttp() : c'est l'état
+  // d'erreur qu'on teste, pas du bruit. Listé plus bas, jamais masqué.
+  const blaming = scoped.filter((e) => !label(e) && !e.expected);
 
   console.log('\n' + '='.repeat(78));
-  console.log(`CONSOLE — ${scenario.name}${STRICT ? '   [MODE STRICT : dette héritée comptée]' : ''}`);
+  console.log(
+    `CONSOLE — ${scenario.name}${STRICT ? '   [MODE STRICT : dette héritée comptée]' : ''}`,
+  );
   console.log('='.repeat(78));
 
   if (blaming.length === 0) {
@@ -458,6 +510,24 @@ export function report(scenario, { events, steps, crashed }) {
       seen.set(key, (seen.get(key) ?? 0) + 1);
     }
     for (const [text, n] of seen) console.log(`   ${n > 1 ? `${n}× ` : ''}${text}`);
+  }
+
+  const provoked = new Map();
+  for (const e of scoped) {
+    if (!e.expected) continue;
+    provoked.set(e.expected, (provoked.get(e.expected) ?? 0) + 1);
+  }
+  if (provoked.size > 0) {
+    console.log('\nErreurs réseau PROVOQUÉES par le scénario (état d’erreur testé) :');
+    for (const [reason, n] of provoked) console.log(`   ${n}× ${reason}`);
+  }
+
+  // Un motif expectHttp() qui n'a jamais matché est presque toujours une faute de frappe ou
+  // une phase qui a bougé. Il échoue du bon côté (rouge), mais en silence : on le dit.
+  const unused = expectedFailures.filter((f) => f.hits === 0);
+  if (unused.length > 0) {
+    console.log('\n⚠️  Motif(s) expectHttp() jamais déclenché(s) — motif ou phase à revoir :');
+    for (const f of unused) console.log(`   ${f.pattern} (phase « ${f.phase} ») : ${f.reason}`);
   }
 
   // La dette connue est AFFICHÉE, jamais masquée : c'est ce qui l'empêche de pourrir.
