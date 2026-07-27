@@ -48,19 +48,19 @@ Reste aussi la **préparation de la soutenance** (chaque module revendiqué doit
 
 ---
 
-## ✅ État d'avancement (résumé — 25 juillet 2026)
+## ✅ État d'avancement (résumé — 27 juillet 2026)
 
 - **Infra** : I2 + I3 + I4 mergés. Origine unique HTTPS, proxy, certs auto, migrations auto, validation d'env Zod. → `docs/infra.md`
-- **Backend** : **terminé et fonctionnel** — auth (JWT typés, OAuth Google, 2FA, profil, avatar), social (amis, blocks, chat WS, DM, conversations), teams (CRUD + membres + édition), matchmaking complet (créer/accepter/annuler/résultat/ELO), **score Bo3 + delta d'Elo persistés par match (B14)**, disputes + arbitrage, notifications (10 types), recherche avancée, jobs 24 h. → `docs/backend.md`
+- **Backend** : **terminé et fonctionnel** — auth (JWT typés, OAuth Google, 2FA, profil, avatar), social (amis, blocks, chat WS, DM, conversations), teams (CRUD + membres + édition), matchmaking complet (créer/accepter/annuler/résultat/ELO), **score Bo3 + delta d'Elo persistés par match (B14)**, **historique de match d'une équipe (B15, `GET /teams/{id}/matches`) + garde de `GET /matches/{id}` relâchée sur un match `completed`**, disputes + arbitrage, notifications (10 types), recherche avancée, jobs 24 h. → `docs/backend.md`
 - **Frontend** : F0, F0-A/B/C/D, FR1 Register, FR2 Login+2FA, F-Nav (teams + ranking), FL landing publique, **FT-1 + FT-1B** (`/teams` : grille d'affiches + formulaire de création, mergés le 26/07 dans `640248b`) — **mergés**. Restent à remplir : `/home`, `/games`, `/profile`, `/privacy`, `/terms`. → `docs/frontend.md`
-- **Tests** : Vitest 27/27 (helpers purs) + **18 suites e2e Python / 594 cas en ~1 min 25** (`cd backend/tests && python3 run_all.py`), sans mocks, sur la vraie base de dev. ⚠️ Les users de test sont **semés en SQL** avec un token forgé (la route `register` reste à 3/min, rien n'est désactivé) : `test_sentinel.py` garde ce couplage, `test_auth_contract.py` couvre la vraie route. → `backend/tests/README.md`
+- **Tests** : Vitest 27/27 (helpers purs) + **19 suites e2e Python / 647 cas** (`cd backend/tests && python3 run_all.py`), sans mocks, sur la vraie base de dev. ⚠️ Les users de test sont **semés en SQL** avec un token forgé (la route `register` reste à 3/min, rien n'est désactivé) : `test_sentinel.py` garde ce couplage, `test_auth_contract.py` couvre la vraie route. → `backend/tests/README.md`
 
 📄 Historique des merges et décisions datées → **`docs/journal.md`**
 
 ### Prochaines actions
 
-- **En cours** : **FT-1C** — logo d'équipe par **upload de fichier** (`POST /teams/{id}/logo`) + `ImagePicker` réutilisable qui porte les puces front du module File upload. A embarqué au passage : rate-limit **indexé sur l'utilisateur** (le NAT du campus partageait 100 req/min), avatar >2 Mo qui répondait **200 avec une image tronquée**, et le nettoyage MinIO sur les 5 chemins qui déréférencent un média. Édition du logo → page détail (FT-2). → `docs/backend.md`
-- **Front** : puces file upload, `/profile`, câbler `SearchBar` sur **`GET /search?q=`** (⚠️ pas `GET /users?search=`, réponse `{ results }` taggée `type`) → débloque « Add member » dans `team-detail.tsx` ; liaison de compte (`LinkAccountBanner`) ; pages match + notifications ; rail social (voir mémoire F-Social).
+- **PROCHAIN TICKET : `[FT-2]` page détail d'équipe** — https://trello.com/c/8EdedO3e (liste Todo, label frontend). Toute la chaîne back est **mergée** (B14 score/Elo → B15 historique), la page est le seul maillon manquant. Maquette de référence : **`vsmode-team-detail-demo.html`** à la racine (direction « Dossier », sélecteur de rôle intégré) — la lire avant de coder. ⚠️ `pages/teams/team-detail.tsx` est un brouillon d'un coéquipier : il est **jeté et réécrit**, pas nettoyé ni audité.
+- **Front (reste)** : puces file upload, `/profile`, câbler `SearchBar` sur **`GET /search?q=`** (⚠️ pas `GET /users?search=`, réponse `{ results }` taggée `type`) ; liaison de compte (`LinkAccountBanner`) ; pages match + notifications ; rail social (voir mémoire F-Social).
 - **Back** : vérification des comptes externes (OAuth Steam/Riot → `verified=true`), présence chat vers Redis (optionnel).
 - **Branche en attente** : `feature/b10-player-count` (`80c675b`) — code **fini et vert**, non mergé. **Ne pas recoder**, rebaser puis merger.
 

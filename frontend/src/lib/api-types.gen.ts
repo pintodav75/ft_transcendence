@@ -1941,12 +1941,16 @@ export interface paths {
                                 competitor: {
                                     /** @enum {string} */
                                     type: "user";
+                                    /** Format: uuid */
+                                    id: string;
                                     pseudo: string;
                                     displayName?: string | null;
                                     avatarUrl?: string | null;
                                 } | {
                                     /** @enum {string} */
                                     type: "team";
+                                    /** Format: uuid */
+                                    id: string;
                                     name: string;
                                     logoUrl?: string | null;
                                 };
@@ -2366,6 +2370,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/teams/{id}/matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Historique de match d'une équipe (B15)
+         * @description Historique des matchs où cette équipe a un side, triés par `scheduledAt` **décroissant** (`NULLS LAST`). 100 % lecture, réponse de forme **différente selon le rôle** — `isMember` est renvoyé à la racine pour que le front n'ait pas à le redéduire :
+         *
+         *     - **Membre** de l'équipe : voit **tous** les matchs, y compris les slots `pending` sans adversaire (`opponent: null`), et reçoit la **composition nominative** (`lineup`) des deux camps.
+         *
+         *     - **Non-membre** (ou anonyme rejeté en 401) : ne voit **que** les matchs où un adversaire a déjà accepté (2 sides) — un slot `pending`, ou périmé puis passé `cancelled` par le job 24 h, reste invisible (même anonymisation que `GET /matches?ladderId=`). `lineup` est **absent** de la réponse.
+         *
+         *     `disputeId`/`disputeStatus` sont exposés **quel que soit le statut du match** — contrairement à `GET /matches/{id}`, qui ne les remonte que pour un match `disputed` : après arbitrage un match repasse `completed`/`cancelled` mais la dispute reste `resolved`, et le badge « litige » de l'historique doit rester visible. `GET /disputes/{id}` garde sa propre garde d'accès.
+         *
+         *     `score` peut être `null` sur un match **`completed`** : un arbitrage admin (`POST /disputes/{id}/resolve`) tranche un vainqueur, pas un score.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Historique de match (peut être vide) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description Le compte appelant est-il membre de cette équipe ? */
+                            isMember: boolean;
+                            matches: {
+                                /** Format: uuid */
+                                id: string;
+                                status: string;
+                                /** Format: date-time */
+                                scheduledAt: string | null;
+                                /** Format: date-time */
+                                completedAt: string | null;
+                                /** @description `null` tant qu'aucun adversaire n'a accepté. N'arrive jamais pour un non-membre : ces matchs sont filtrés de la liste. */
+                                opponent: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    name: string;
+                                    logoUrl: string | null;
+                                } | null;
+                                /** @description Score final Bo3 (manches gagnées) des deux camps. Chaque champ est `null` avant clôture ET après un arbitrage admin. */
+                                score: {
+                                    self: number | null;
+                                    opponent: number | null;
+                                };
+                                /** @description Delta d'Elo de l'équipe consultée UNIQUEMENT sur ce match ; `null` tant que le match n'est pas `completed`. */
+                                eloDelta: number | null;
+                                /**
+                                 * @description Dérivé de `winnerSideId` côté serveur ; `null` sans vainqueur.
+                                 * @enum {string|null}
+                                 */
+                                result: "win" | "loss" | null;
+                                /** Format: uuid */
+                                disputeId: string | null;
+                                /** @enum {string|null} */
+                                disputeStatus: "open" | "resolved" | null;
+                                /** @description **Présent uniquement si `isMember` est `true`.** Absent de la réponse pour un non-membre — aucune composition n'est exposée. */
+                                lineup?: {
+                                    self: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        pseudo: string;
+                                        displayName: string | null;
+                                        avatarUrl: string | null;
+                                    }[];
+                                    opponent: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        pseudo: string;
+                                        displayName: string | null;
+                                        avatarUrl: string | null;
+                                    }[];
+                                };
+                            }[];
+                        };
+                    };
+                };
+                /** @description Param :id non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description Équipe inconnue */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                500: components["responses"]["InternalError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/teams/{id}/members": {
         parameters: {
             query?: never;
@@ -2770,7 +2895,7 @@ export interface paths {
         };
         /**
          * Détail enrichi d'un match (participants only)
-         * @description Détail complet, prêt à afficher : pour chaque side, son **id**, son **état de soumission** (`submittedAt`, `submittedWinnerSideId` — B6), l'**objet team** (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar), plus les maps. Sides **triés** (0 = créateur, 1 = accepteur). Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**) **OU joueur du match** (1v1). 403 sinon — préserve l'anonymat des slots ouverts.
+         * @description Détail complet, prêt à afficher : pour chaque side, son **id**, son **état de soumission** (`submittedAt`, `submittedWinnerSideId` — B6), l'**objet team** (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar), plus les maps. Sides **triés** (0 = créateur, 1 = accepteur). Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**) **OU joueur du match** (1v1) — **SAUF si le match est `completed`** : un match terminé devient lisible par n'importe quel compte authentifié (page match publique, B15). Tout autre statut (`pending`, `in_progress`, `awaiting_confirmation`, `disputed`, `cancelled`) reste 403 pour un tiers — préserve l'anonymat des slots ouverts et des matchs en cours.
          */
         get: {
             parameters: {
@@ -2873,7 +2998,7 @@ export interface paths {
                     };
                 };
                 401: components["responses"]["Unauthorized"];
-                /** @description Non-participant du match */
+                /** @description Non-participant du match, et le match n'est pas (encore) `completed` */
                 403: {
                     headers: {
                         [name: string]: unknown;

@@ -38,6 +38,7 @@ describe('shapeRankings', () => {
     ])
     expect(entry?.competitor).toEqual({
       type: 'user',
+      id: 'u1',
       pseudo: 'alice',
       displayName: 'Alice',
       avatarUrl: 'a.png',
@@ -48,7 +49,7 @@ describe('shapeRankings', () => {
     const [entry] = shapeRankings([
       row({ teamId: 't1', teamName: 'Team Alpha', teamLogoUrl: 'logo.png' }),
     ])
-    expect(entry?.competitor).toEqual({ type: 'team', name: 'Team Alpha', logoUrl: 'logo.png' })
+    expect(entry?.competitor).toEqual({ type: 'team', id: 't1', name: 'Team Alpha', logoUrl: 'logo.png' })
   })
 
   it('reporte elo / wins / losses sur chaque entrée', () => {
