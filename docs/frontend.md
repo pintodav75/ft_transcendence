@@ -107,3 +107,39 @@
 - utiliser `lucide-react` pour les icônes standard
 - lancer `npm run build` et `npm run lint` dans `frontend/` avant review
 
+
+
+---
+
+### FT-2A — page détail d'une équipe, consultation (27/07/2026)
+
+`/teams/$teamId` réécrite **de zéro** (le brouillon d'un coéquipier a été jeté, pas nettoyé). Lecture seule : la gestion capitaine est dans **[FT-2B]** (https://trello.com/c/tmgQGBVz), les actions de match dans **[FT-2C]** (https://trello.com/c/LnSfRghd), la page ladder dans **[FT-3]** (https://trello.com/c/6yZLPjpP).
+
+**Livré** — `lib/team-detail.ts` (3 hooks TanStack Query + dérivations pures + formateurs), `pages/teams/team-detail.tsx` (orchestration, rôle, états d'erreur), 8 composants dans `components/teams/detail/`, 3 pages placeholder (`players/`, `matches/`, `ladders/`) avec leurs routes, et le scénario d'audit console réécrit (13 checks).
+
+**Ce qui est structurant pour la suite :**
+
+- **Contrainte de largeur mesurée** : la colonne centrale du shell ne fait que **616 px** à un viewport de 1280 (les deux rails en prennent ~660). Une table qui réclame plus **fait sortir sa dernière colonne du champ** sans rien signaler — c'est arrivé sur la colonne Status de l'historique (810 px réclamés). Vérifier `scrollWidth` vs `clientWidth` du conteneur, **pas à l'œil**.
+- **Piège CSS** : déclarer un **seul** axe d'`overflow` force l'autre à `auto` (jamais `visible`). La barre d'onglets portait `overflow-x-auto` « au cas où » ; le `-mb-px` volontaire des onglets suffisait à produire 1 px de débordement vertical, donc une barre de défilement parasite. Ne mettre un `overflow-*` qu'après avoir mesuré un débordement réel.
+- **Stratégie d'extraction des composants** (décidée le 27/07) : un composant **sans aucune connaissance du domaine** part tout de suite dans `components/ui/` — c'est le cas de `pill.tsx`, `section-title.tsx`, `tabs.tsx` + `tab-ids.ts`, extraits par ce ticket. Tout le reste suit la **règle de deux** : extraction au **second usage réel**, par le ticket du second consommateur. Restent donc en place, avec leur extraction déléguée : `match-status.ts` / `MatchStatusPill` / `MatchRow` (→ ticket page match, vers `components/matches/`), le `LadderRow` interne à `LadderExcerpt` (→ FT-3, vers `components/ladders/`, et il doit aussi remplacer `components/home/RankingTable.tsx` qui fait la même chose en `useState`/`useEffect`), `RosterChips` (→ FT-2B lui ajoute une prop pour le kick, sans le dupliquer).
+- **Copie d'interface en anglais** comme le reste de l'app connectée ; seules les **dates** sont formatées en `fr-FR`.
+- **Sous-titre de l'en-tête** : ne pas répéter le `ladderName` quand il ne dit rien de plus que le jeu et le format (`Rocket League · 2v2 · Rocket League 2v2`) ; le garder quand il ajoute une information (`Counter-Strike 2 2v2 (Wingman)`). Helper `ladderSubtitle()`.
+
+**Pièges de données traités** (ils reviendront sur la page match) :
+
+- une **équipe neuve est absente du classement** — la ligne de rating naît au **premier résultat de match** (`backend/src/utils/rankings.ts`), pas à la création. D'où l'état « Not ranked yet » (Elo/record/rang à `—`) et l'extrait qui retombe sur le **top du ladder** ;
+- `score.self`/`score.opponent` sont `null` **avant clôture ET après un arbitrage admin** — donc `null` possible sur un match `completed`, avec un `eloDelta` renseigné. Jamais « 0-0 » ;
+- `scheduledAt`/`completedAt` sont des **strings ISO nullables** (`new Date(null)` rend 1970 en silence) ;
+- la clé `lineup` est **absente** (pas `null`) pour un non-membre → dériver l'affichage de sa présence, pas de `isMember` ;
+- un ratio sans match joué s'affiche `—` et non `0%`.
+
+**Harnais d'audit console — `expectHttp(motif, raison)` ajouté à `runner.mjs`.** Chrome logge « Failed to load resource » pour tout fetch non-2xx : tester un écran 404 et sortir 0 étaient contradictoires. Trois garde-fous, vérifiés par une sonde vue **rouge** avant d'être verte : seuls les **flux réseau** sont exemptables (une exception ou un `console.error` de notre code reste imputé, même s'il cite l'URL visée) ; l'exemption est **cloisonnée à la phase** de déclaration ; un motif jamais déclenché est **signalé**. Détail dans `frontend/tests/console-audit/README.md`.
+
+➡️ **Conséquence : `npm run audit` sans filtre sort désormais 0** sur les 6 scénarios (48 checks). Trois scénarios antérieurs (FR1, FR2, FT-1B) provoquaient volontairement un 401/409 qu'ils comptaient contre eux-mêmes — une ligne `expectHttp` chacun. Toute entrée console nouvelle est donc immédiatement visible.
+
+**Dette laissée, assumée et mesurée :**
+
+- ⚠️ **`text-text-muted` (#707b94) sur `surface-card` donne 4,23:1**, sous le 4,5:1 de WCAG AA. Ce n'est pas propre à cette page : **45 usages dans 25 fichiers** (login, register, footer, nav gauche, grille `/teams`, tableau de classement…), et la maquette porte la même valeur. Lever `--color-text-muted` vers ~`#7b86a0` donnerait 4,92:1 mais éclaircit le texte secondaire de **toute** l'app → **ticket design system à ouvrir**.
+- ⚠️ **À 375 px, l'historique laisse 262 px hors champ** (table 605 px dans 343 px) : Score, Elo et Status ne sont visibles qu'en balayant. L'accès **clavier** est réglé (le conteneur prend le focus et porte un `aria-label`, WCAG 2.1.1), il reste l'ergonomie : le vrai correctif est un rendu **en cartes** sous `sm`. Rejoint la dette mobile FL.
+- L'onglet actif vit dans un `useState`, pas dans un search param : on ne peut pas partager un lien vers l'onglet Matches.
+- `components/home/SearchBar.tsx` n'a plus de consommateur (le brouillon était le seul) — FT-2B en aura besoin pour « Add member », via `GET /search?q=&type=user`.

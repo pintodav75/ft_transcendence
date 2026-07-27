@@ -17,7 +17,7 @@ async function createTeam(page, gameIndex, teamName) {
   await page.click('button:has-text("Create team")');
 }
 
-export async function run({ page, setPhase, step, user, ORIGIN }) {
+export async function run({ page, setPhase, step, expectHttp, user, ORIGIN }) {
   setPhase('1. /teams, état vide');
   await page.goto(`${ORIGIN}/teams`, { waitUntil: 'networkidle' });
   const empty = await page.locator("text=You're not part of any team.").count();
@@ -32,6 +32,15 @@ export async function run({ page, setPhase, step, user, ORIGIN }) {
   setPhase('3. même nom, même ladder -> 409 (chemin nominal)');
   // Conflit `teams_ladder_name_unique` : le front lit le `code` du 409 pour viser le bon
   // champ, donc c'est un chemin métier assumé — et une ligne rouge de plus.
+  // Déclaré comme provoqué : `/teams` sert aussi à la création qui réussit, donc c'est le
+  // cloisonnement PAR PHASE d'expectHttp qui limite l'exemption à ce conflit-ci.
+  expectHttp(
+    // Lookahead plutôt qu'un ancrage : selon le flux, l'URL est suivie d'un espace
+    // (« …/api/teams HTTP 409 ») ou du numéro de ligne (« …/api/teams:0 »). Refuser
+    // `[\w/-]` garde hors du motif les sous-routes comme /api/teams/<uuid>/matches.
+    /\/api\/teams(?![\w/-])/,
+    'nom déjà pris soumis volontairement -> 409 attendu',
+  );
   await createTeam(page, 0, nameA);
   await page.waitForTimeout(2500);
   const stillForm = await page.locator('form').count();
@@ -69,5 +78,9 @@ export async function run({ page, setPhase, step, user, ORIGIN }) {
   await page.waitForTimeout(400);
   await page.locator('ul li a').first().click();
   await page.waitForURL(/\/teams\/[0-9a-f-]{36}/, { timeout: 10000 });
-  step('T6', /\/teams\/[0-9a-f-]{36}/.test(page.url()), `détail atteint : ${page.url().split('/').pop()}`);
+  step(
+    'T6',
+    /\/teams\/[0-9a-f-]{36}/.test(page.url()),
+    `détail atteint : ${page.url().split('/').pop()}`,
+  );
 }

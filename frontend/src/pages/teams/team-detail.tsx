@@ -1,244 +1,192 @@
-// this is the page to view a single team
-// the Search to add user to the team feature is not yet installed
-// same for the upload avatar for the team
+import { useId, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
+import { Link, useParams } from '@tanstack/react-router';
 
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Crown } from 'lucide-react';
-import type { components } from '@/lib/api-types.gen';
-import { apiFetch, ApiError } from '@/lib/api';
-type TeamDetail = components['schemas']['TeamDetail'];
-type TeamMember = components['schemas']['TeamMember'];
-import { useAuthStore } from '@/stores/auth-store';
+import { TeamHero } from '@/components/teams/detail/TeamHero';
+import { TeamMatches } from '@/components/teams/detail/TeamMatches';
+import { TeamOverview } from '@/components/teams/detail/TeamOverview';
+import { Tabs } from '@/components/ui/tabs';
+import { panelId, tabId } from '@/components/ui/tab-ids';
+import { buttonClasses } from '@/components/ui/button-variants';
+import { ApiError } from '@/lib/api';
+import { useSortedGames } from '@/lib/games';
+import {
+  findTeamStanding,
+  isValidTeamId,
+  useLadderRankings,
+  useTeam,
+  useTeamMatches,
+} from '@/lib/team-detail';
 
-import { Avatar } from '@/components/ui/avatar';
-import SearchBar from '@/components/home/SearchBar';
-import { Button } from '@/components/ui/button';
+import type { TabItem } from '@/components/ui/tabs';
 
-const ViewerRole = {
-  Guest: 0,
-  Stranger: 1,
-  Member: 2,
-  Captain: 3,
-} as const;
+const TABS: TabItem[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'matches', label: 'Matches' },
+  // Seam for FT-2B: it appends { id: 'manage', label: 'Manage' } here, shown only when
+  // team.captainId === the current user. Nothing is added before its actions exist — an
+  // empty tab or a dead button is exactly the debt this page replaces.
+];
 
-type ViewerRole = (typeof ViewerRole)[keyof typeof ViewerRole];
-
-function getViewerRole(team: TeamDetail, members: TeamMember[], userId: string): ViewerRole {
-  if (!userId) return ViewerRole.Guest;
-  if (team.captainId === userId) return ViewerRole.Captain;
-  if (members.some((m) => m.id === userId)) return ViewerRole.Member;
-  return ViewerRole.Stranger;
+function BackToTeams() {
+  return (
+    <Link
+      to="/teams"
+      className="focus-ring inline-flex items-center gap-2 self-start text-xs label-caps text-text-secondary transition hover:text-text-primary"
+    >
+      <ArrowLeft className="size-4" />
+      My teams
+    </Link>
+  );
 }
 
-export function TeamDetail() {
-  const { teamId } = useParams({ from: '/_authenticated/teams/$teamId' });
-  const navigate = useNavigate();
-
-  const [team, setTeam] = useState<TeamDetail>();
-  const [members, setMembers] = useState<TeamMember[]>();
-  const [error, setError] = useState<string>();
-
-  // logged out / not part of the team / part of the team / captain
-
-  useEffect(() => {
-    apiFetch<{ team: TeamDetail; members: TeamMember[] }>('/teams/' + teamId)
-      .then((res) => {
-        setTeam(res.team);
-        setMembers(res.members);
-      })
-      .catch((err) => {
-        console.log(err instanceof Error ? err.message : 'Could not load team');
-        navigate({ to: '/teams' }); // load failed → bounce back to the teams list
-      })
-      .finally();
-  }, [teamId, navigate]);
-
-  const userId = useAuthStore((state) => state.user?.id);
-  const priviledges =
-    team && members && userId ? getViewerRole(team, members, userId) : ViewerRole.Guest;
-
-  async function leaveTeam(user: string | undefined) {
-    if (!team || !members || !user) return;
-    if (members.every((m) => m.id !== user)) return; // not a member
-
-    const isCaptain = user === team.captainId;
-    if (
-      isCaptain &&
-      !window.confirm(`Delete "${team.name}"? This dissolves the team for everyone.`)
-    ) {
-      return;
-    }
-    setError(undefined);
-    try {
-      if (isCaptain) {
-        await apiFetch<{ ok: true }>(`/teams/${team.id}`, { method: 'DELETE' });
-        navigate({ to: '/teams' });
-      } else {
-        await apiFetch<{ ok: true }>(`/teams/${team.id}/members/${user}`, {
-          method: 'DELETE',
-        });
-        if (user === userId) {
-          navigate({ to: '/teams' }); // I left → back to my teams
-        } else {
-          setMembers((prev) => prev?.filter((m) => m.id !== user)); // I kicked someone → keep the page, drop them
-        }
-      }
-    } catch {
-      setError('Could not leave the team.');
-    }
-  }
-
-  async function addMember(newUserId: string) {
-    if (!team) return;
-    setError(undefined);
-    try {
-      await apiFetch<{ ok: true }>(`/teams/${team.id}/members`, {
-        method: 'POST',
-        body: { userId: newUserId },
-      });
-      // Refresh the roster so the new member shows up and drops out of the search.
-      const res = await apiFetch<{ team: TeamDetail; members: TeamMember[] }>('/teams/' + teamId);
-      setTeam(res.team);
-      setMembers(res.members);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not add member.');
-    }
-  }
-
-  if (!team || !members) {
-    return <p>Loading…</p>;
-  }
-
+function ErrorPanel({ title, message }: { title: string; message: string }) {
   return (
-    <div className="panel">
-      <div className="max-w-300 mx-auto p-10">
-        {error && <p className="text-arena-red">{error}</p>}
-        {priviledges >= ViewerRole.Member && (
-          <Button
-            variant="secondary"
-            className="mb-10 flex gap-2 p-3"
-            onClick={() => {
-              navigate({ to: '/teams' });
-            }}
-          >
-            <ArrowLeft /> Your teams
-          </Button>
-        )}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <Avatar
-              className="size-26 ring-2 mr-5"
-              fallback="team"
-              src={team?.logoUrl ?? undefined}
-            ></Avatar>
-            <div className="m-2 ">
-              <div className="flex gap-2">
-                <h2 className="text-2xl label-caps-black">{team.name}</h2>
-                {userId === team.captainId && (
-                  <Crown
-                    className="size-5.5 shrink-0 text-rank-gold"
-                    aria-label="You are the captain"
-                  />
-                )}
-              </div>
-              <p>
-                {team.gameId.toUpperCase()} {team.format}
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {priviledges >= ViewerRole.Member && (
-              <Button
-                variant="secondary"
-                className="h-8 px-3 text-xs"
-                onClick={() => {
-                  alert('backrend route not yet setup');
-                }}
-              >
-                Upload Avatar
-              </Button>
-            )}
-            {priviledges >= ViewerRole.Captain && (
-              <Button
-                variant="danger"
-                className="h-8 px-3 text-xs"
-                onClick={() => {
-                  leaveTeam(userId);
-                }}
-              >
-                Delete team
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="m-5">
-          <hr className="text-action-primary" />
-          <h2 className="text-2xl label-caps m-5">Team members</h2>
-
-          <div className="flex">
-            {members.map((member) => (
-              <div key={member.id} className="panel flex flex-col items-center w-50 h-50 m-2 p-2">
-                <Avatar src={member.avatarUrl} className="m-2 size-18" />
-                <div className="flex label-caps">
-                  <p>{member.displayName ?? member.pseudo}</p>
-                  {member.id === team.captainId && (
-                    <Crown
-                      className="size-4 shrink-0 text-rank-gold"
-                      aria-label="You are the captain"
-                    />
-                  )}
-                </div>
-                <p className="text-text-muted">@{member.pseudo}</p>
-
-                {priviledges >= ViewerRole.Captain && member.id !== userId && (
-                  <Button
-                    variant="secondary"
-                    className="h-8 px-3 text-xs text-arena-red mt-2"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Kick "${member.displayName ?? member.pseudo}" out of "${team.name}"?`,
-                        )
-                      )
-                        leaveTeam(member.id);
-                    }}
-                  >
-                    Kick
-                  </Button>
-                )}
-                {member.id === userId && priviledges !== ViewerRole.Captain && (
-                  <Button
-                    variant="secondary"
-                    className="h-8 px-3 text-xs text-arena-red mt-2"
-                    onClick={() => {
-                      if (window.confirm(`Are you sure to leave "${team.name}"?`))
-                        leaveTeam(member.id);
-                    }}
-                  >
-                    Leave team
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {priviledges >= ViewerRole.Captain && (
-            <>
-              <hr className="text-action-primary m-5" />
-              <h2 className="text-2xl label-caps m-5">Add member</h2>
-              <SearchBar
-                onSelect={(user) => addMember(user.id)}
-                excludeIds={members.map((m) => m.id)} // remove players already in our team
-                placeholder="Enter a player's pseudo"
-              />
-            </>
-          )}
-        </div>
-      </div>
+    <div className="panel flex flex-col items-start gap-4 p-6">
+      <h1 className="text-2xl label-caps-black">{title}</h1>
+      <p className="max-w-prose text-sm text-text-secondary">{message}</p>
+      <Link to="/teams" className={buttonClasses('secondary')}>
+        <ArrowLeft className="mr-2 size-4" />
+        Back to my teams
+      </Link>
     </div>
   );
 }
 
-export default TeamDetail;
+export function TeamDetail() {
+  const { teamId } = useParams({ from: '/_authenticated/teams/$teamId' });
+  const uid = useId();
+  const [activeTab, setActiveTab] = useState('overview');
+
+  // Mirrors the backend param schema: a malformed id can only ever come back as a 400,
+  // so the error state is rendered without spending a request — and without the red
+  // "Failed to load resource" line a 400 would leave in the console.
+  const validId = isValidTeamId(teamId);
+
+  const teamQuery = useTeam(teamId, validId);
+  const matchesQuery = useTeamMatches(teamId, validId);
+  // ladderId only exists once the team is loaded; the hook stays disabled until then.
+  const rankingsQuery = useLadderRankings(teamQuery.data?.team.ladderId);
+  const { games } = useSortedGames();
+
+  const rankings = rankingsQuery.data?.rankings;
+  // `isMember` is returned at the ROOT of GET /teams/{id}/matches on purpose: it is the
+  // server's answer, not something to re-derive from the roster. Unknown (loading or
+  // failed) is treated as "visitor", the least-disclosing option.
+  const isMember = matchesQuery.data?.isMember === true;
+
+  if (!validId) {
+    return (
+      <div className="flex flex-col gap-6 py-6">
+        <ErrorPanel
+          title="Invalid team link"
+          message="This team identifier is not a valid id. Check the link you followed, or pick the team from your list."
+        />
+      </div>
+    );
+  }
+
+  if (teamQuery.isError) {
+    const status = teamQuery.error instanceof ApiError ? teamQuery.error.status : undefined;
+
+    return (
+      <div className="flex flex-col gap-6 py-6">
+        {status === 404 ? (
+          <ErrorPanel
+            title="Team not found"
+            message="This team does not exist any more — it may have been dissolved by its captain."
+          />
+        ) : (
+          <ErrorPanel
+            title="Team unavailable"
+            message="This team could not be loaded. Check your connection and reload the page."
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (!teamQuery.data) {
+    return (
+      <div className="flex flex-col gap-6 py-6">
+        <BackToTeams />
+        {/* Same footprint as the loaded header so the layout does not jump. */}
+        <div
+          aria-hidden="true"
+          className="h-64 animate-pulse rounded-card border border-border-subtle bg-surface-card"
+        />
+        <p role="status" className="text-sm text-text-muted">
+          Loading the team…
+        </p>
+      </div>
+    );
+  }
+
+  const { team, members } = teamQuery.data;
+  const standing = rankings ? findTeamStanding(rankings, team.id) : undefined;
+  const gameName = games.find((game) => game.id === team.gameId)?.name ?? team.gameId.toUpperCase();
+
+  return (
+    <div className="flex min-w-0 flex-col gap-6 py-6">
+      <BackToTeams />
+
+      <TeamHero
+        team={team}
+        gameName={gameName}
+        memberCount={members.length}
+        standing={standing}
+        ladderSize={rankings?.length ?? 0}
+        rankingsPending={rankingsQuery.isPending}
+        rankingsError={rankingsQuery.isError}
+      />
+
+      <Tabs
+        tabs={TABS}
+        active={activeTab}
+        onSelect={setActiveTab}
+        idPrefix={uid}
+        label="Team sections"
+      />
+
+      {/* Both panels stay in the DOM, the inactive one `hidden`: every tab's
+          aria-controls then points at an element that really exists. */}
+      <div
+        id={panelId(uid, 'overview')}
+        role="tabpanel"
+        aria-labelledby={tabId(uid, 'overview')}
+        hidden={activeTab !== 'overview'}
+        // WAI-ARIA: a panel whose content holds no focusable element (an empty history)
+        // would be unreachable right after the tab strip without this.
+        tabIndex={0}
+        className="focus-ring min-w-0"
+      >
+        <TeamOverview
+          team={team}
+          members={members}
+          isMember={isMember}
+          matches={matchesQuery.data?.matches}
+          rankings={rankings}
+          standing={standing}
+          rankingsPending={rankingsQuery.isPending}
+          rankingsError={rankingsQuery.isError}
+        />
+      </div>
+
+      <div
+        id={panelId(uid, 'matches')}
+        role="tabpanel"
+        aria-labelledby={tabId(uid, 'matches')}
+        hidden={activeTab !== 'matches'}
+        tabIndex={0}
+        className="focus-ring min-w-0"
+      >
+        <TeamMatches
+          matches={matchesQuery.data?.matches}
+          isPending={matchesQuery.isPending}
+          isError={matchesQuery.isError}
+          isMember={isMember}
+        />
+      </div>
+    </div>
+  );
+}

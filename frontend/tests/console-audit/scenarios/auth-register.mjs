@@ -8,7 +8,16 @@ export const name = 'auth-register';
 export const surface = '/register — validation client, règle de mot de passe, 409';
 export const auth = false;
 
-export async function run({ page, setPhase, step, countRequests, awaitRegisterSlot, user, ORIGIN }) {
+export async function run({
+  page,
+  setPhase,
+  step,
+  countRequests,
+  awaitRegisterSlot,
+  expectHttp,
+  user,
+  ORIGIN,
+}) {
   setPhase('1. /register, chargement anonyme');
   await page.goto(`${ORIGIN}/register`, { waitUntil: 'networkidle' });
   step('R1', (await page.locator('#pseudo').count()) === 1, "formulaire d'inscription rendu");
@@ -19,7 +28,11 @@ export async function run({ page, setPhase, step, countRequests, awaitRegisterSl
     await page.waitForTimeout(600);
   });
   const emptyMsgs = await page.locator('p[role="alert"]').count();
-  step('R2', emptyReqs === 0 && emptyMsgs > 0, `${emptyMsgs} message(s), ${emptyReqs} requête(s) (0 attendu)`);
+  step(
+    'R2',
+    emptyReqs === 0 && emptyMsgs > 0,
+    `${emptyMsgs} message(s), ${emptyReqs} requête(s) (0 attendu)`,
+  );
 
   setPhase('3. mot de passe trop faible (aucune requête attendue)');
   // La règle Zod du front doit être le miroir exact de celle du back (≥8, maj, min,
@@ -34,6 +47,10 @@ export async function run({ page, setPhase, step, countRequests, awaitRegisterSl
   step('R3', weakReqs === 0, `${weakReqs} requête(s) sur mot de passe faible (0 attendu)`);
 
   setPhase('4. pseudo/email déjà pris -> 409 (chemin nominal)');
+  // Le 409 est L'OBJET de cette phase : déclaré pour être listé à part plutôt qu'imputé au
+  // ticket. `/auth/register` sert aussi aux inscriptions qui réussissent — c'est le
+  // cloisonnement PAR PHASE d'expectHttp qui restreint l'exemption à ce conflit-ci.
+  expectHttp(/\/auth\/register/, 'pseudo déjà pris soumis volontairement -> 409 attendu');
   // Réserve un créneau du quota 3/min : sans ça on récolterait un 429 fabriqué par
   // l'audit lui-même, qui se lirait dans le rapport comme une erreur de l'application.
   await awaitRegisterSlot();

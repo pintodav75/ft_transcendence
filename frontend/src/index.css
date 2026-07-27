@@ -23,6 +23,13 @@
   --color-arena-blue: #3f7dff;
   --color-arena-red-soft: #35131f;
   --color-arena-blue-soft: #10203b;
+  /* Bleu LISIBLE sur --color-arena-blue-soft. `--color-arena-blue` y tombe à 4,32:1,
+     sous le 4,5:1 exigé par WCAG AA pour du texte de 12px : mesuré sur la pastille
+     « Open slot », la seule du repo à poser de l'arena-blue en TEXTE sur le fond soft
+     (ailleurs c'est un fond, une bordure, un dégradé ou une lueur, non concernés).
+     Cette nuance donne 4,96:1 et reste le même bleu à l'œil. Le rouge, lui, passe déjà
+     à 4,88:1 : on ne touche pas ce qui est conforme. */
+  --color-arena-blue-soft-foreground: #4f8aff;
   --color-action-primary: #343579;
   --color-action-primary-border: #5053a4;
   --color-action-primary-hover: #424596;
