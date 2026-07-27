@@ -1,5 +1,12 @@
 export const K_FACTOR = 32;
 
+// Décision produit : TOUS les matchs, tous jeux et tous ladders confondus, sont en
+// best-of-3 — la manche gagnante est celle qui atteint ce nombre de victoires (2, donc
+// un score de 2 ou 1 côté perdant). Constante nommée plutôt que dispersée en dur dans les
+// gardes : un futur Bo5 par ladder devient un simple ajout de colonne, pas une chasse aux
+// magic numbers.
+export const WINS_REQUIRED = 2;
+
 export function updateElo(
   eloA: number,
   eloB: number,

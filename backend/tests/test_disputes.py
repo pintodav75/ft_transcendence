@@ -124,8 +124,9 @@ def disputed_1v1(tok_creator, tok_acceptor, ladder):
     sql(f"update matches set scheduled_at = now() - interval '1 hour' where id='{m}';")
     s0 = sql(f"select id from match_sides where match_id='{m}' and side_index=0;")
     s1 = sql(f"select id from match_sides where match_id='{m}' and side_index=1;")
-    req("POST", f"/matches/{m}/result", tok_creator, {"winnerSideId": s0})
-    req("POST", f"/matches/{m}/result", tok_acceptor, {"winnerSideId": s1})
+    # Chacun se déclare vainqueur de SON propre côté, 2-0 — vainqueurs différents -> disputed.
+    req("POST", f"/matches/{m}/result", tok_creator, {"winnerSideId": s0, "scoreSelf": 2, "scoreOpponent": 0})
+    req("POST", f"/matches/{m}/result", tok_acceptor, {"winnerSideId": s1, "scoreSelf": 2, "scoreOpponent": 0})
     disp = sql(f"select id from disputes where match_id='{m}';")
     return m, disp, s0, s1
 
@@ -159,8 +160,8 @@ def disputed_2v2(tok_cap_a, id_cap_a, id_mem_a, tok_cap_b, id_cap_b, id_mem_b, l
     sql(f"update matches set scheduled_at = now() - interval '1 hour' where id='{m}';")
     s0 = sql(f"select id from match_sides where match_id='{m}' and side_index=0;")
     s1 = sql(f"select id from match_sides where match_id='{m}' and side_index=1;")
-    req("POST", f"/matches/{m}/result", tok_cap_a, {"winnerSideId": s0})
-    req("POST", f"/matches/{m}/result", tok_cap_b, {"winnerSideId": s1})
+    req("POST", f"/matches/{m}/result", tok_cap_a, {"winnerSideId": s0, "scoreSelf": 2, "scoreOpponent": 0})
+    req("POST", f"/matches/{m}/result", tok_cap_b, {"winnerSideId": s1, "scoreSelf": 2, "scoreOpponent": 0})
     disp = sql(f"select id from disputes where match_id='{m}';")
     return m, disp, s0, s1, ta
 
@@ -303,6 +304,15 @@ def run():
     s.check("winner_side_id = side 0", sql(f"select winner_side_id from matches where id='{M1}';"), s0)
     s.check("ELO gagnant alice = 1016", sql(f"select elo from rankings where user_id='{idA}' and ladder_id='{CHESS}';"), "1016")
     s.check("ELO perdant bob = 984", sql(f"select elo from rankings where user_id='{idB}' and ladder_id='{CHESS}';"), "984")
+    # B14 — arbitrage admin : l'admin tranche un VAINQUEUR, pas un score -> `score` reste
+    # NULL sur les deux sides, mais l'ELO (delta + après-match) est bien écrit, comme pour
+    # un accord classique.
+    s.check("B14 — score reste NULL côté vainqueur (arbitrage, pas de score soumis)", sql(f"select coalesce(score::text,'NULL') from match_sides where id='{s0}';"), "NULL")
+    s.check("B14 — score reste NULL côté perdant", sql(f"select coalesce(score::text,'NULL') from match_sides where id='{s1}';"), "NULL")
+    s.check("B14 — eloDelta gagnant = +16", sql(f"select elo_delta from match_sides where id='{s0}';"), "16")
+    s.check("B14 — eloAfter gagnant = 1016", sql(f"select elo_after from match_sides where id='{s0}';"), "1016")
+    s.check("B14 — eloDelta perdant = -16", sql(f"select elo_delta from match_sides where id='{s1}';"), "-16")
+    s.check("B14 — eloAfter perdant = 984", sql(f"select elo_after from match_sides where id='{s1}';"), "984")
     s.check(
         "dispute resolved + resolution",
         sql(f"select status||'/'||resolution from disputes where id='{D1}';"),

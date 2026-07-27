@@ -51,9 +51,9 @@ Reste aussi la **préparation de la soutenance** (chaque module revendiqué doit
 ## ✅ État d'avancement (résumé — 25 juillet 2026)
 
 - **Infra** : I2 + I3 + I4 mergés. Origine unique HTTPS, proxy, certs auto, migrations auto, validation d'env Zod. → `docs/infra.md`
-- **Backend** : **terminé et fonctionnel** — auth (JWT typés, OAuth Google, 2FA, profil, avatar), social (amis, blocks, chat WS, DM, conversations), teams (CRUD + membres + édition), matchmaking complet (créer/accepter/annuler/résultat/ELO), disputes + arbitrage, notifications (10 types), recherche avancée, jobs 24 h. → `docs/backend.md`
+- **Backend** : **terminé et fonctionnel** — auth (JWT typés, OAuth Google, 2FA, profil, avatar), social (amis, blocks, chat WS, DM, conversations), teams (CRUD + membres + édition), matchmaking complet (créer/accepter/annuler/résultat/ELO), **score Bo3 + delta d'Elo persistés par match (B14)**, disputes + arbitrage, notifications (10 types), recherche avancée, jobs 24 h. → `docs/backend.md`
 - **Frontend** : F0, F0-A/B/C/D, FR1 Register, FR2 Login+2FA, F-Nav (teams + ranking), FL landing publique, **FT-1 + FT-1B** (`/teams` : grille d'affiches + formulaire de création, mergés le 26/07 dans `640248b`) — **mergés**. Restent à remplir : `/home`, `/games`, `/profile`, `/privacy`, `/terms`. → `docs/frontend.md`
-- **Tests** : Vitest 27/27 (helpers purs) + **18 suites e2e Python / 569 cas en ~1 min 25** (`cd backend/tests && python3 run_all.py`), sans mocks, sur la vraie base de dev. ⚠️ Les users de test sont **semés en SQL** avec un token forgé (la route `register` reste à 3/min, rien n'est désactivé) : `test_sentinel.py` garde ce couplage, `test_auth_contract.py` couvre la vraie route. → `backend/tests/README.md`
+- **Tests** : Vitest 27/27 (helpers purs) + **18 suites e2e Python / 594 cas en ~1 min 25** (`cd backend/tests && python3 run_all.py`), sans mocks, sur la vraie base de dev. ⚠️ Les users de test sont **semés en SQL** avec un token forgé (la route `register` reste à 3/min, rien n'est désactivé) : `test_sentinel.py` garde ce couplage, `test_auth_contract.py` couvre la vraie route. → `backend/tests/README.md`
 
 📄 Historique des merges et décisions datées → **`docs/journal.md`**
 
@@ -77,7 +77,7 @@ Reste aussi la **préparation de la soutenance** (chaque module revendiqué doit
 7. **`IMAGE_MIME` et `EVIDENCE_MIME` restent séparés** : un avatar est une image, une preuve de dispute peut être un PDF.
 8. **Contrat API** : `openapi.yaml` est la source de vérité ; **régénérer `frontend/src/lib/api-types.gen.ts`** après toute modif. Ne **jamais** importer les types du backend côté front (ils décrivent la DB). ⚠️ `scheduledAt` arrive en **string ISO**, pas en `Date`.
 9. **Type-check front** : `npx tsc --noEmit` est un **faux vert** (fichier solution + `references`). Utiliser **`npx tsc -b --noEmit`** ou `npm run build`.
-10. **`routeTree.gen.ts` et `api-types.gen.ts` sont générés** — gitignorés, jamais édités à la main.
+10. **`routeTree.gen.ts` et `api-types.gen.ts` sont générés, jamais édités à la main** — mais leur statut git diffère : `routeTree.gen.ts` est **gitignoré** (régénéré au build) ; `api-types.gen.ts` est **tracké** et doit être **committé à chaque régénération** (invariant #8). ⚠️ Erreur vécue : cette ligne affirmait à tort les deux gitignorés, ce qui a fait sauter la régénération sur B14 — vérifier avec `git ls-files`/`git check-ignore` avant de faire confiance à un souvenir sur le statut d'un fichier généré.
 
 📄 Les 20 pièges rencontrés, version longue et expliquée → **`docs/pieges.md`** (TOCTOU/verrous, ordre des verrous, tests de course sans barrière, slots périmés, `.env`, WSL2, Drizzle…)
 
