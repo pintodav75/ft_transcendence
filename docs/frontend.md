@@ -142,4 +142,29 @@
 - ⚠️ **`text-text-muted` (#707b94) sur `surface-card` donne 4,23:1**, sous le 4,5:1 de WCAG AA. Ce n'est pas propre à cette page : **45 usages dans 25 fichiers** (login, register, footer, nav gauche, grille `/teams`, tableau de classement…), et la maquette porte la même valeur. Lever `--color-text-muted` vers ~`#7b86a0` donnerait 4,92:1 mais éclaircit le texte secondaire de **toute** l'app → **ticket design system à ouvrir**.
 - ⚠️ **À 375 px, l'historique laisse 262 px hors champ** (table 605 px dans 343 px) : Score, Elo et Status ne sont visibles qu'en balayant. L'accès **clavier** est réglé (le conteneur prend le focus et porte un `aria-label`, WCAG 2.1.1), il reste l'ergonomie : le vrai correctif est un rendu **en cartes** sous `sm`. Rejoint la dette mobile FL.
 - L'onglet actif vit dans un `useState`, pas dans un search param : on ne peut pas partager un lien vers l'onglet Matches.
-- `components/home/SearchBar.tsx` n'a plus de consommateur (le brouillon était le seul) — FT-2B en aura besoin pour « Add member », via `GET /search?q=&type=user`.
+- ~~`components/home/SearchBar.tsx` n'a plus de consommateur~~ → **traité par FT-2B** : déplacé en `components/search/UserSearch.tsx` et recâblé sur `GET /search?q=&type=user`.
+
+---
+
+### FT-2B — page détail d'une équipe, gestion capitaine (27/07/2026)
+
+Onglet **Manage** réservé au capitaine (renommer, envoyer et retirer le logo, ajouter un joueur, exclure un membre, dissoudre), **Leave team** en en-tête pour un membre non-capitaine, **aucune action** pour un visiteur. Livré en deux passes (socle, puis UI), review agent passée sans bloquant.
+
+**Livré** — `components/ui/confirm-dialog.tsx`, `lib/team-mutations.ts` (5 `useMutation` + le mapping d'erreurs par statut), `components/search/UserSearch.tsx` (ex-`components/home/SearchBar.tsx`), `components/teams/detail/` : `TeamManage` + `TeamIdentity` / `TeamAddMember` / `TeamDangerZone`, prop `actions` sur `TeamHero`, prop `onKick` sur `RosterChips`, et le scénario d'audit `teams-manage.mjs` (23 checks). **C'est ce ticket qui rend le module File upload démontrable** (voir `docs/modules.md`).
+
+**Ce qui est structurant pour la suite :**
+
+- **`ConfirmDialog` est bâti sur le `<dialog>` natif + `showModal()`**, et c'est un choix à reproduire : la plateforme fournit gratuitement et correctement le piège à focus, `Escape`, l'inertie de la page derrière et **la restauration du focus sur le déclencheur**. Le top-layer échappe en prime à la contrainte des 616 px, donc aucun portal n'est nécessaire. ⚠️ Le preflight Tailwind v4 écrase le `margin: auto` de l'UA sur `::backdrop` et sur tout élément — sans `m-auto` explicite, la modale se colle en haut à gauche.
+- **`invalidateQueries` matche les clés PAR PRÉFIXE.** `['team', id]` balaie donc déjà `['team', id, 'matches']` : sans `exact: true`, toute distinction entre « rafraîchir le détail » et « rafraîchir l'historique » est un commentaire mensonger.
+- **Après une dissolution, l'ordre est `navigate` PUIS `removeQueries`**, et la navigation doit porter **`replace: true`**. Trois pièges empilés, tous vérifiés : `invalidateQueries` sur l'équipe morte refetche → 404 → console rouge ; `removeQueries` seul ne suffit pas non plus, car un observateur encore monté reconstruit et refetche la requête ; et sans `replace: true`, le bouton **Précédent** du navigateur ramène sur l'URL détruite et produit le même 404 à un clic du parcours nominal.
+- **Un `<button>` ne peut pas vivre dans un `<a>`.** Le bouton Kick de `RosterChips` est donc **frère** du `<Link>` dans le `<li>`, la surface de la puce ayant migré sur le `<li>` avec `focus-within`.
+- **Ne pas se fier à `excludeIds` seul pour empêcher un doublon** : il ne se met à jour qu'après le refetch, donc une ligne de résultat reste cliquable pendant la mutation. Il faut une garde sur `isPending` **et** un `disabled` visible, sinon deux clics rapides envoient deux `POST` dont le second revient en 409.
+- **`buttonClasses` porte `uppercase`** : toute donnée sensible à la casse rendue dans un `Button` (un pseudo, par exemple) doit annuler avec `normal-case`.
+- **Écarts assumés vs la carte** : recherche **par préfixe** et non « pseudo exact » ; bouton **`Edit team` retiré** de l'en-tête.
+
+**Dette laissée, assumée :**
+
+- Après un kick, le focus retombe sur `<body>` : la puce qui portait le bouton disparaît avec le membre, le `<dialog>` n'a plus d'élément à qui rendre le focus.
+- `<Label>Team logo</Label>` est un `<label>` sans cible (l'`<input type="file">` d'`ImagePicker` garde son `id` en interne). Le corriger demande soit de recopier les classes de `Label` (interdit), soit d'ajouter une prop `as` à un composant partagé.
+- Deux trous de recette signalés par la review : la puce de roster **avec** son bouton Kick n'a jamais été mesurée à 375 px, et la bande **640-1023 px** (où la grille `sm:grid-cols-2` de `TeamIdentity` est la plus serrée) n'est couverte par aucun check.
+- Le 409 « déjà membre » est **inatteignable par l'UI** (`excludeIds` retire le joueur des résultats) : le scénario le provoque par l'autre cause du même statut, « déjà dans une équipe de ce ladder ».

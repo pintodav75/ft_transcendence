@@ -14,12 +14,18 @@
 | ORM (Drizzle)                                  | Minor | 1      | ✅                                     |
 | OAuth 2.0                                      | Minor | 1      | ✅                                     |
 | 2FA TOTP                                       | Minor | 1      | ✅                                     |
-| File upload                                    | Minor | 1      | ✅ **back complet (T1, 24/07)** — reste les puces front, voir sous le tableau |
+| File upload                                    | Minor | 1      | ✅ **complet** — back (T1, 24/07) + puces front (FT-2B, 27/07) |
 | Notification system                            | Minor | 1      | ✅ **B9 + #53 + B11** (match, dispute, amis, équipe) |
 | **Advanced search**                            | Minor | **1**  | ✅ **vérifié PDF 22/07** — `GET /search` (filtres + tri + pagination) |
 | **TOTAL**                                      |       | **16** |                                        |
 
-### ⚠️ Le minor le plus fragile — File upload (back complété le 24/07, front à faire)
+### File upload — COMPLET (back 24/07, front 27/07)
+
+✅ **Les puces FRONT sont livrées par FT-2B** (27/07) et le module est **démontrable en soutenance**. Elles vivent toutes dans **`frontend/src/components/ui/image-picker.tsx`**, composant contrôlé et réutilisable : *validation client* (allowlist `image/jpeg|png|webp` et plafond de 2 Mo, en écho de la garde serveur — un mauvais fichier est refusé **sans aucun aller-retour réseau**, ce que le scénario d'audit prouve avec `countRequests` à 0), *aperçu local* via `URL.createObjectURL` (révoqué au démontage), et *barre de progression* réelle alimentée par `XMLHttpRequest.upload.onprogress` — c'est la raison d'être de `frontend/src/lib/upload.ts` : `fetch` n'a **aucun** événement de progression d'envoi.
+
+Il est câblé à deux endroits : la création d'équipe (FT-1C) et le logo d'équipe de l'onglet Manage (FT-2B, avec le retrait du logo via `PATCH { logoUrl: null }`).
+
+**Ce qu'il reste de fragile** (rappel du sujet, à re-vérifier avant la soutenance) :
 
 Le sujet est explicite : *« You will be asked to demonstrate each claimed module. Only fully functional and properly implemented modules will be counted. **Non-functional or incomplete modules = 0 points.** »*
 
