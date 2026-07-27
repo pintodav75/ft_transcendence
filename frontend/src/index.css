@@ -37,6 +37,11 @@
   --color-focus-ring: #777ae0;
   --color-success: #25d49a;
 
+  /* Voile posé DERRIÈRE une surface du top-layer (`::backdrop` d'un <dialog> modal).
+     Plus sombre que le voile par défaut du navigateur (rgba(0,0,0,.1)), qui laisse
+     l'arrière-plan lisible et fait douter de ce qui est cliquable. */
+  --color-scrim: rgb(4 6 12 / 0.72);
+
   --color-google-button: #0a0a0a;
   --color-google-text: #ffffff;
 

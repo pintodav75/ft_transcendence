@@ -100,7 +100,12 @@ export async function run({
   const teamUrl = page.url();
   // La page enchaîne GET /teams/{id} PUIS GET /ladders/{ladderId}/rankings : compter avant
   // que la puce de roster existe mesurerait le squelette de chargement.
-  const rosterChip = page.locator(`a[href$="/players/${user.pseudo}"]`);
+  // ⚠️ Scopé au panneau VISIBLE depuis FT-2B : le capitaine voit le roster DEUX fois (onglet
+  // Overview et onglet Manage), les deux panneaux restant montés. Un locator nu résout donc
+  // 2 éléments et Playwright refuse d'agir (strict mode).
+  const rosterChip = page.locator(
+    `[role="tabpanel"]:not([hidden]) a[href$="/players/${user.pseudo}"]`,
+  );
   await rosterChip.waitFor({ timeout: 15000 });
   await page.locator('dl').waitFor({ timeout: 10000 });
   await page.waitForTimeout(600);

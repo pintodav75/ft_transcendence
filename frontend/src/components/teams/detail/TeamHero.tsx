@@ -4,6 +4,7 @@ import { GameImage } from '@/components/games/GameImage';
 import { Avatar } from '@/components/ui/avatar';
 import { EM_DASH, ROSTER_LIMIT, formatRecord, ladderSubtitle } from '@/lib/team-detail';
 
+import type { ReactNode } from 'react';
 import type { RankingEntry, TeamDetail } from '@/lib/team-detail';
 
 type TeamHeroProps = {
@@ -19,6 +20,12 @@ type TeamHeroProps = {
   ladderSize: number;
   rankingsPending: boolean;
   rankingsError: boolean;
+  /**
+   * Role-dependent buttons rendered in the identity row ("Edit team" for the captain,
+   * "Leave team" for a plain member, nothing for a visitor). The header stays ignorant
+   * of who is looking: the PAGE knows the role, this component only reserves the slot.
+   */
+  actions?: ReactNode;
 };
 
 type StatProps = {
@@ -49,6 +56,7 @@ export function TeamHero({
   ladderSize,
   rankingsPending,
   rankingsError,
+  actions,
 }: TeamHeroProps) {
   const headingId = useId();
 
@@ -80,6 +88,10 @@ export function TeamHero({
               .join(' · ')}
           </p>
         </div>
+        {/* `ml-auto` pushes the actions to the trailing edge on a wide viewport; the
+            wrapping row drops them onto their own line below ~500 px instead of
+            squeezing the team name. */}
+        {actions ? <div className="ml-auto flex flex-wrap gap-2">{actions}</div> : null}
       </div>
 
       <div className="flex flex-wrap items-center border-t border-border-subtle bg-surface-card">
