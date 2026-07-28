@@ -256,8 +256,34 @@ async function purgeUserTeams(user) {
   }
 }
 
+/**
+ * Annule les créneaux que le scénario a laissés ouverts.
+ *
+ * ⚠️ Obligatoire depuis [BX-DEL], et l'ORDRE l'est aussi : une équipe engagée dans un match
+ * non terminé ne se dissout pas (409 `team_engaged_in_match`), et un compte aligné dans un
+ * tel match ne se supprime pas (409 `engaged_in_match`). Le nettoyage suit donc exactement
+ * le parcours de sortie imposé aux vrais utilisateurs — matchs, puis équipes, puis compte.
+ * Sans ça, `teams-matchmaking` (qui ouvre 5 slots) laissait ses comptes en base à chaque run.
+ */
+async function purgeUserMatches(user) {
+  const auth = { authorization: `Bearer ${user.accessToken}` };
+  try {
+    const res = await fetch(`${ORIGIN}/api/matches/me`, { headers: auth });
+    if (!res.ok) return;
+    const { matches = [] } = await res.json();
+    for (const match of matches) {
+      // `DELETE /matches/:id` n'annule qu'un slot encore annulable ; sur les autres il
+      // répond 4xx, ce qui est sans conséquence ici (on nettoie au mieux).
+      await fetch(`${ORIGIN}/api/matches/${match.id}`, { method: 'DELETE', headers: auth });
+    }
+  } catch {
+    /* même philosophie que purgeUserTeams : on tente, on ne bloque pas le nettoyage */
+  }
+}
+
 /** Sans ça la base de dev accumule un compte + ses équipes à chaque exécution. */
 async function deleteAuditUser(user) {
+  await purgeUserMatches(user);
   await purgeUserTeams(user);
   try {
     const res = await fetch(`${ORIGIN}/api/users/me`, {
