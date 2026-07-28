@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from helpers import Suite, ladder_id, register, req, req_multipart
+from helpers import Suite, join_team, ladder_id, register, req, req_multipart
 
 # PNG 1×1 valide (bytes en dur : aucun binaire ajouté au dépôt).
 PNG = base64.b64decode(
@@ -105,8 +105,7 @@ def run():
     VAL2 = ladder_id(tokA, "val", "2v2")
     _, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "Logo" + uuid.uuid4().hex[:5]})
     TEAM = b["team"]["id"]
-    st, _ = req("POST", f"/teams/{TEAM}/members", tokA, {"userId": idB})
-    s.check("bob rejoint l'équipe (préparation)", st, 201)
+    join_team(TEAM, idB)  # bob membre simple (préparation)
 
     png = [("logo", "logo.png", PNG, "image/png")]
 

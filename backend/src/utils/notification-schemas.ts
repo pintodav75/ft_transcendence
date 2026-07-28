@@ -96,6 +96,34 @@ export const notificationPayloadSchemas = {
     byUserId: uuidField,
     byPseudo: z.string(),
   }),
+  // Invitations (B-INV) — même forme que les notifs d'équipe, + `invitationId` : le front
+  // peut accepter/refuser DEPUIS la notification, sans relister les invitations (exactement
+  // le rôle de `friendshipId` sur `friend_request_received`). `by*` = l'AUTRE partie :
+  // le capitaine qui invite pour `received`, le joueur qui répond pour les deux réponses.
+  team_invitation_received: z.strictObject({
+    invitationId: uuidField,
+    teamId: uuidField,
+    teamName: z.string(),
+    ladderId: uuidField,
+    byUserId: uuidField,
+    byPseudo: z.string(),
+  }),
+  team_invitation_accepted: z.strictObject({
+    invitationId: uuidField,
+    teamId: uuidField,
+    teamName: z.string(),
+    ladderId: uuidField,
+    byUserId: uuidField,
+    byPseudo: z.string(),
+  }),
+  team_invitation_declined: z.strictObject({
+    invitationId: uuidField,
+    teamId: uuidField,
+    teamName: z.string(),
+    ladderId: uuidField,
+    byUserId: uuidField,
+    byPseudo: z.string(),
+  }),
 } as const satisfies Record<NotificationType, z.ZodType>;
 
 export type NotificationPayload<T extends NotificationType> = z.infer<

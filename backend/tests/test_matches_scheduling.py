@@ -35,7 +35,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from helpers import Suite, ladder_id, link, register, req, sql
+from helpers import Suite, join_team, ladder_id, link, register, req, sql
 
 MIN_LEAD_MINUTES = 15
 MAX_OPEN_SLOTS = 5
@@ -304,8 +304,7 @@ def run():
     TEAM = b.get("team", {}).get("id") or b.get("id")
     s.check("alice crée une team sur val 5v5 → 201", st, 201, b.get("error", ""))
     for uid in (idB, idC, idD, idE):
-        st, b = req("POST", f"/teams/{TEAM}/members", tokA, {"userId": uid})
-        s.check(f"ajout de {uid[:8]} à la team 5v5 → 201", st, 201, b.get("error", ""))
+        join_team(TEAM, uid)
 
     LINEUP = [idA, idB, idC, idD, idE]
     U = slot(500)  # loin de tout, aligné quart

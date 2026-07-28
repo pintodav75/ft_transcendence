@@ -14,7 +14,7 @@ Ce qui doit rester vrai :
 
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req
+from helpers import Suite, future, join_team, ladder_id, link, register, req
 
 PRIVATE_FIELDS = ("email", "passwordHash", "password_hash", "totpSecret", "totp_secret", "bio")
 
@@ -40,13 +40,13 @@ def run():
     st, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "Ratones" + uuid.uuid4().hex[:4]})
     TEAM_A = (b.get("team") or b).get("id")
     NAME_A = (b.get("team") or b).get("name")
-    req("POST", f"/teams/{TEAM_A}/members", tokA, {"userId": idB})
-    req("POST", f"/teams/{TEAM_A}/members", tokA, {"userId": idC})  # carol → banc
+    join_team(TEAM_A, idB)
+    join_team(TEAM_A, idC)  # carol → banc
 
     st, b = req("POST", "/teams", tokD, {"ladderId": VAL2, "name": "Karmine" + uuid.uuid4().hex[:4]})
     TEAM_B = (b.get("team") or b).get("id")
     NAME_B = (b.get("team") or b).get("name")
-    req("POST", f"/teams/{TEAM_B}/members", tokD, {"userId": idE})
+    join_team(TEAM_B, idE)
 
     st, b = req("POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future(), "lineup": [idA, idB]})
     M = b["match"]["id"]

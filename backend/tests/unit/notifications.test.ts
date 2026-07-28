@@ -79,7 +79,7 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
     expect(typeof parsed.scheduledAt).toBe('string')
   })
 
-  it('les 13 types de notification ont bien un schéma', () => {
+  it('les 16 types de notification ont bien un schéma', () => {
     const expectedTypes = [
       'match_accepted',
       'result_submitted',
@@ -94,9 +94,16 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
       'friend_request_accepted',
       // équipe (B11) — pas de type pour la création ni l'édition : personne d'autre
       // que l'acteur n'est concerné (règle B9 « jamais l'acteur »).
+      // ⚠️ `team_member_added` n'est plus ÉMIS depuis B-INV (l'ajout forcé a disparu), mais
+      // il garde son schéma : la valeur reste dans l'enum Postgres et des notifications
+      // historiques la portent encore — les relire ne doit pas casser.
       'team_member_added',
       'team_member_removed',
       'team_disbanded',
+      // invitations (B-INV)
+      'team_invitation_received',
+      'team_invitation_accepted',
+      'team_invitation_declined',
     ]
     expect(Object.keys(notificationPayloadSchemas).sort()).toEqual(expectedTypes.sort())
   })

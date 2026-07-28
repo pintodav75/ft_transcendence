@@ -12,7 +12,7 @@ AVANT que le capitaine ne compose sa lineup (prévenir plutôt que refuser).
 
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req
+from helpers import Suite, future, join_team, ladder_id, link, register, req
 
 
 def run():
@@ -29,8 +29,8 @@ def run():
 
     _, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "Sniper" + uuid.uuid4().hex[:5]})
     TEAM = (b.get("team") or b).get("id")
-    req("POST", f"/teams/{TEAM}/members", tokA, {"userId": idB})
-    req("POST", f"/teams/{TEAM}/members", tokA, {"userId": idC})
+    join_team(TEAM, idB)
+    join_team(TEAM, idC)
 
     s.section("GET /teams/:id — ce que le front doit afficher")
     st, b = req("GET", f"/teams/{TEAM}", tokA)

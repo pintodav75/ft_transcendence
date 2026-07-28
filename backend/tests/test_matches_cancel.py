@@ -6,7 +6,7 @@ Le créateur, c'est le side_index 0 — capitaine de sa team (2v2+) ou participa
 
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req, sql
+from helpers import Suite, future, join_team, ladder_id, link, register, req, sql
 
 
 def run():
@@ -50,8 +50,7 @@ def run():
     st, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "Del" + uuid.uuid4().hex[:5]})
     TEAM = (b.get("team") or b).get("id")
     s.check("team créée → 201", st, 201)
-    st, _ = req("POST", f"/teams/{TEAM}/members", tokA, {"userId": idB})
-    s.check("bob ajouté au roster → 201", st, 201)
+    join_team(TEAM, idB)  # roster semé en SQL (B-INV : plus d'ajout direct par l'API)
     st, b = req("POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future(), "lineup": [idA, idB]})
     M2 = b["match"]["id"]
     s.check("slot team créé par le capitaine → 201", st, 201)

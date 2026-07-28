@@ -3,7 +3,7 @@ l'anonymat de la liste, et le détail réservé aux participants."""
 
 import uuid
 
-from helpers import Suite, future, ladder_id, link, past, register, req, sql
+from helpers import Suite, future, join_team, ladder_id, link, past, register, req, sql
 
 
 def run():
@@ -67,8 +67,7 @@ def run():
     st, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "B5b" + uuid.uuid4().hex[:5]})
     TEAM = (b.get("team") or b).get("id")
     s.check("création de la team → 201", st, 201)
-    st, _ = req("POST", f"/teams/{TEAM}/members", tokA, {"userId": idB})
-    s.check("bob ajouté au roster → 201", st, 201)
+    join_team(TEAM, idB)  # roster semé en SQL (B-INV : plus d'ajout direct par l'API)
 
     st, b = req("POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future()})
     s.check("lineup absente sur un ladder team → 400", st, 400, b.get("error", ""))
@@ -101,8 +100,7 @@ def run():
     s.check("un joueur sans team voit le slot", M2 in [x["id"] for x in b.get("slots", [])], True)
 
     # §5.1 côté team : carol est dans le roster mais n'a pas lié riot
-    st, _ = req("POST", f"/teams/{TEAM}/members", tokA, {"userId": idC})
-    s.check("carol ajoutée au roster (sans compte riot) → 201", st, 201)
+    join_team(TEAM, idC)  # carol dans le roster, mais sans compte riot lié
     st, b = req("POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future(), "lineup": [idA, idC]})
     s.check("§5.1 joueur de la lineup sans compte lié → 400", st, 400, b.get("error", ""))
     s.check("le 400 nomme les fautifs (unlinkedPlayers)", b.get("unlinkedPlayers"), [idC])

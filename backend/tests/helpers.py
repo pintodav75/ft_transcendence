@@ -165,6 +165,37 @@ def register(tag):
     return forge_token(uid), uid, pseudo
 
 
+def join_team(team_id, user_id):
+    """Fait entrer un user dans une équipe **directement en base** — comme `register()`
+    sème ses users.
+
+    Pourquoi pas par l'API ? Depuis **B-INV il n'existe plus d'ajout direct** :
+    `POST /teams/{id}/members` a été supprimée (elle permettait au capitaine de verrouiller
+    un joueur sur tout un ladder sans son accord). Peupler un roster demanderait désormais
+    `POST /teams/{id}/invitations` **puis** `POST /teams/invitations/{id}/accept` avec le
+    token du joueur : deux appels au lieu d'un, et surtout **deux notifications parasites
+    par membre**, qui fausseraient les comptages de `test_notifications.py`. Les suites
+    matchmaking ne testent pas le recrutement — elles ont juste besoin d'un roster.
+
+    Le cycle d'invitation, lui, est couvert **pour de vrai** par `test_teams_invitations.py`,
+    qui vérifie en plus que la ligne `team_members` née d'une acceptation est **identique**
+    à celle semée ici (même garde-fou que `test_auth_contract.py` pour `register()` : si le
+    back se met à écrire autre chose, c'est un vrai positif, pas une exclusion à ajouter).
+
+    `ladder_id` est LU sur la team (sous-requête) : la colonne est dénormalisée en base, la
+    dupliquer à la main dans chaque suite finirait par diverger.
+
+    Rend l'id de la ligne `team_members` créée ; s'arrête net si l'insert est refusé.
+    """
+    row = sql(
+        "insert into team_members (team_id, user_id, ladder_id) "
+        f"select id, '{user_id}', ladder_id from teams where id = '{team_id}' returning id;"
+    )
+    if not _UUID_RE.match(row):
+        raise SystemExit(f"join_team({team_id}, {user_id}) : insert inattendu → {row!r}")
+    return row
+
+
 def link(token, provider):
     return req("POST", "/users/me/external-accounts", token, {"provider": provider, "externalId": uuid.uuid4().hex[:8]})
 

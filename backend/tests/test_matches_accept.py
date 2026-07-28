@@ -13,7 +13,7 @@ mais par JOUEUR en 1v1 — les deux sides y ont `team_id = NULL`.
 
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req, sql
+from helpers import Suite, future, join_team, ladder_id, link, register, req, sql
 
 
 def side1_team(match):
@@ -111,12 +111,12 @@ def run():
     st, b = req("POST", "/teams", tokA, {"ladderId": VAL2, "name": "Acc" + uuid.uuid4().hex[:5]})
     TEAM_A = (b.get("team") or b).get("id")
     s.check("team A créée (capitaine alice) → 201", st, 201)
-    req("POST", f"/teams/{TEAM_A}/members", tokA, {"userId": idB})
+    join_team(TEAM_A, idB)
 
     st, b = req("POST", "/teams", tokC, {"ladderId": VAL2, "name": "Acc" + uuid.uuid4().hex[:5]})
     TEAM_B = (b.get("team") or b).get("id")
     s.check("team B créée (capitaine carol) → 201", st, 201)
-    req("POST", f"/teams/{TEAM_B}/members", tokC, {"userId": idD})
+    join_team(TEAM_B, idD)
 
     st, b = req("POST", "/matches", tokA, {"ladderId": VAL2, "scheduledAt": future(), "lineup": [idA, idB]})
     M3 = b["match"]["id"]

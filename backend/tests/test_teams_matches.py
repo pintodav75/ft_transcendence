@@ -25,7 +25,7 @@ Couvre aussi :
 
 import uuid
 
-from helpers import Suite, future, ladder_id, link, register, req, sql
+from helpers import Suite, future, join_team, ladder_id, link, register, req, sql
 
 
 def create_team(tok_cap, ladder, tag):
@@ -78,10 +78,10 @@ def run():
 
     st, TEAM_A, NAME_A = create_team(tokA, VAL2, "TA")
     s.check("team A créée -> 201", st, 201)
-    req("POST", f"/teams/{TEAM_A}/members", tokA, {"userId": idB})
-    req("POST", f"/teams/{TEAM_A}/members", tokA, {"userId": idC})
+    join_team(TEAM_A, idB)
+    join_team(TEAM_A, idC)
     _, TEAM_B, NAME_B = create_team(tokD, VAL2, "TB")
-    req("POST", f"/teams/{TEAM_B}/members", tokD, {"userId": idD2})
+    join_team(TEAM_B, idD2)
 
     # ⚠️ Fenêtres espacées de 2h (>> lockoutMinutes=30 des deux côtés) : sans ça, deux
     # `future()` consécutifs retombent sur le même quart et la 2e création se prend un
