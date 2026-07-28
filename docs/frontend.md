@@ -168,3 +168,32 @@ Onglet **Manage** réservé au capitaine (renommer, envoyer et retirer le logo, 
 - `<Label>Team logo</Label>` est un `<label>` sans cible (l'`<input type="file">` d'`ImagePicker` garde son `id` en interne). Le corriger demande soit de recopier les classes de `Label` (interdit), soit d'ajouter une prop `as` à un composant partagé.
 - Deux trous de recette signalés par la review : la puce de roster **avec** son bouton Kick n'a jamais été mesurée à 375 px, et la bande **640-1023 px** (où la grille `sm:grid-cols-2` de `TeamIdentity` est la plus serrée) n'est couverte par aucun check.
 - Le 409 « déjà membre » est **inatteignable par l'UI** (`excludeIds` retire le joueur des résultats) : le scénario le provoque par l'autre cause du même statut, « déjà dans une équipe de ce ladder ».
+
+---
+
+### FT-2C — ouvrir et annuler un créneau de match (28/07/2026)
+
+Commit `1d74b90`, merge `f0e2369`. Le capitaine ouvre un créneau depuis un **panneau déroulé sous l'en-tête** de `/teams/$teamId` (deux menus : jour puis quart d'heure ; composition à cocher) et annule son slot ouvert depuis « Next match » ou depuis la ligne du tableau, derrière `ConfirmDialog`. C'est le dernier maillon qui rend le cycle challenge/accept atteignable à la souris.
+
+**Livré** — `components/teams/detail/CreateMatchPanel.tsx`, `components/ui/select.tsx`, `components/ui/inline-button.tsx` (extrait au 4ᵉ usage de l'idiome, `RosterChips` refactoré pour le consommer), `components/ui/label-variants.ts`, `lib/create-match-schema.ts`, 5 dérivations pures dans `lib/team-detail.ts`, 2 hooks + 2 mappings d'erreurs dans `lib/team-mutations.ts`, scénario `teams-matchmaking.mjs` (15 checks). **`npm run audit` : 9 scénarios, 107 checks, exit 0.**
+
+**Ce qui est structurant pour la suite :**
+
+- **La règle du lockout est reproduite côté client, à l'identique.** Le back refuse un créneau `t` quand un match engageant `s` vérifie `|t − s| < lockoutMinutes` — **inégalité STRICTE** (`backend/src/routes/matches.ts:107-121`). Donc en 5v5 (lockout 60) : 21h grise 21h30, mais **20h et 22h restent sélectionnables**, deux fenêtres qui se touchent ne se chevauchent pas. Statuts engageants : `pending`, `in_progress`, `awaiting_confirmation`, `disputed`. Et un slot `pending` **périmé** (à moins de 15 min de son heure) **ne bloque plus** son créateur : le filtre client l'exclut aussi, sinon on grise des créneaux que le serveur accepterait.
+- **`lockoutMinutes` est exposé par `GET /ladders`** (schéma `Ladder` d'`openapi.yaml`) — c'était le type **écrit à la main** de `lib/games.ts` qui l'omettait. Règle générale : avant de conclure qu'une donnée manque au front, vérifier si c'est la **route** qui ne la renvoie pas ou seulement notre type local qui l'ignore.
+- **Deux 409 sans `code` stable.** `POST /matches` renvoie de la prose pour « chevauchement » comme pour « plafond de 5 slots », sans code — contrairement aux invitations de B-INV. L'invariant #8 interdisant de router un message sur la prose, ils sont départagés par un **compteur local** de slots ouverts (miroir de `countOpenSlots`). Les deux cas sont **pré-emptés** par l'UI (créneaux grisés, formulaire démonté à 5 slots), le 409 n'est plus que le filet d'une page périmée.
+- **« Pas chargé » n'est pas « vide ».** `matches ?? []` éteignait les deux pré-emptions **en silence** et faisait affirmer la mauvaise cause au message d'erreur. L'inconnu reste `undefined`, se dit à l'écran, et la branche 409 nomme alors les deux causes possibles au lieu d'en choisir une.
+- **Une région live doit exister AVANT son texte.** Un `role="status"` inséré dans le DOM avec son contenu n'est pas annoncé de façon fiable : la zone est montée en permanence en `sr-only`, seul son texte change, et le bandeau visible est un élément séparé.
+- **`labelClasses()` existe maintenant** (`components/ui/label-variants.ts`, calqué sur `button-variants.ts` pour la même raison Fast Refresh). ⚠️ **Ça débloque la dette de FT-2B** sur `<Label>Team logo</Label>` : le troisième choix qui manquait — ni recopier les classes, ni ajouter une prop `as` — est disponible.
+
+**Deux règles CSS globales, assumées** (`index.css`) :
+
+- **`color-scheme: dark` sur `html`** — sans elle la liste déroulante native d'un `<select>` sort blanc sur blanc, donc illisible. Bénéfice collatéral : barres de défilement et autofill suivent enfin le thème.
+- **`scrollbar-gutter: stable` sur `html`** — la colonne centrale est en `flex-1`, donc **fluide** : la barre de défilement apparaissait et disparaissait selon la hauteur de l'onglet affiché, et le rail se resserrait puis réélargissait à chaque changement d'onglet. ⚠️ **Conséquence chiffrée : la colonne centrale mesure désormais 601 px à 1280, plus 616** (check `B2` de `teams-manage`). À budgéter pour toute table large — **[FT-3]** en premier. Bénéfice collatéral : `showModal()` posait `overflow:hidden` sur le document et faisait sauter la page à chaque ouverture de modale, la gouttière réservée supprime aussi ce saut.
+
+**Dette laissée, assumée :**
+
+- Le focus retombe sur `<body>` après une annulation depuis le tableau — **même cause que le kick de FT-2B** : l'élément qui portait le bouton disparaît avec l'action, le `<dialog>` n'a plus à qui rendre le focus. Une carte pour les trois occurrences (kick, annulation d'invitation, annulation de slot).
+- Panneau laissé ouvert **au passage de minuit** puis erreur « créneau passé » : le menu jour affiche une valeur absente de la liste régénérée, les heures sortent vides. Se règle en resélectionnant un jour.
+- Le **409 « plafond »** est inatteignable par l'UI (à 5 slots le formulaire n'est plus monté) : le scénario teste l'état pré-empté, pas la branche de message. Idem pour 403, 429 et le 400 `unlinkedPlayers`, mappés mais jamais déclenchés.
+- ⚠️ **Le scénario laisse 2 comptes en base à chaque run** (`audit…@example.com`) : `DELETE /users/me` répond **500** dès qu'un joueur a été aligné dans un match, `match_participants.user_id` étant en `onDelete: 'restrict'` **sans condition de statut**. Bug back à part entière — un joueur ayant joué une fois ne peut plus jamais supprimer son compte.
