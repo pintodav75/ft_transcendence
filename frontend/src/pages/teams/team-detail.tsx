@@ -394,8 +394,8 @@ export function TeamDetail() {
         title="Leave this team?"
         description={
           <>
-            You will be removed from <strong className="text-text-primary">{team.name}</strong>
-            . Only its captain can add you back.
+            You will be removed from <strong className="text-text-primary">{team.name}</strong>.
+            Only its captain can add you back.
           </>
         }
         confirmLabel="Leave team"
@@ -420,8 +420,8 @@ export function TeamDetail() {
             <strong className="text-text-primary">
               {formatMatchDate(slotToCancel?.scheduledAt ?? null, 'long')}
             </strong>{' '}
-            will no longer be acceptable by any team. It stays in the history, marked
-            cancelled — you can open another one right away.
+            will no longer be acceptable by any team. It stays in the history, marked cancelled —
+            you can open another one right away.
           </>
         }
         confirmLabel="Cancel the slot"

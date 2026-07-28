@@ -160,10 +160,19 @@ export async function run({ page, awaitAnnouncement, setPhase, step, countReques
 
   // 🚨 Décision produit verrouillée : challenge/accept, PAS de file d'attente ni
   // d'appariement automatique. Une régression de copie doit se voir ici.
-  const queueWording = await page
+  //
+  // ⚠️ Scopé à <main> depuis [F-Nav]. Ce check surveille la PROSE DE CETTE PAGE ; quand il a
+  // été écrit, le rail n'existait pas et le document entier ÉTAIT la page. Depuis, la nav
+  // persistante porte un item « Matchmaking » — le nom interne du cycle challenge/accept,
+  // celui dont `openapi.yaml` tague déjà `POST /matches` — sur TOUTES les pages
+  // authentifiées. Non scopé, le check comptait le mobilier de l'app et rendait rouge une
+  // page dont la copie est irréprochable. Restreindre la portée préserve son intention ;
+  // l'élargir au rail en ferait un contrôle de vocabulaire de navigation, ce qu'il n'est pas.
+  const content = page.locator('main');
+  const queueWording = await content
     .locator('text=/\\b(queue|queueing|matchmaking|auto-?match)\\b/i')
     .count();
-  const challengeWording = await page.locator('text=A side opens a slot').count();
+  const challengeWording = await content.locator('text=A side opens a slot').count();
   step(
     'L7',
     queueWording === 0 && challengeWording === 1,

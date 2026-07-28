@@ -49,7 +49,10 @@ export async function run({ page, awaitAnnouncement, setPhase, step, expectHttp,
   await page.waitForTimeout(2500);
   const stillForm = await page.locator('form').count();
   step('T3', stillForm === 1, `formulaire toujours ouvert après le conflit = ${stillForm === 1}`);
-  await page.click('button:has-text("Cancel")');
+  // Scopé au FORMULAIRE : depuis [F-Nav] le rail monte en permanence le <dialog> de
+  // confirmation de déconnexion, qui a lui aussi un bouton d'abandon. Non scopé, le clic
+  // prenait le premier bouton du DOM — celui d'un dialogue fermé (`display:none`).
+  await page.locator('form button:has-text("Cancel")').click();
 
   setPhase('4. création équipe B sur un autre jeu');
   const nameB = `Audit B ${user.stamp}`;

@@ -23,13 +23,18 @@ export async function run({ page, awaitAnnouncement, setPhase, step, countReques
   setPhase('1.3 montage/démontage répété');
   // PAS de page.goto pour ce check : un goto recharge toute la SPA et recompterait le
   // bandeau du serveur de dev à chaque tour — on mesurerait Vite, pas l'application.
-  // Et il n'existe aujourd'hui aucun rail de navigation monté (LeftNav.tsx n'est rendu
-  // nulle part), donc le seul vrai cycle client de cette page est l'ouverture/fermeture
-  // du formulaire, qui monte et démonte ImagePicker et la grille.
+  // Le rail de navigation existe depuis [F-Nav], mais ses liens QUITTENT /teams : ils ne
+  // remontent donc pas la grille ni ImagePicker, qui sont l'objet de ce check. Le seul vrai
+  // cycle client de cette page reste l'ouverture/fermeture du formulaire, qui monte et
+  // démonte les deux. (Le rail, lui, a son propre scénario : `f-nav`.)
   for (let i = 0; i < 5; i++) {
     await page.click('button:has-text("Create new team")');
     await page.locator('form').waitFor();
-    await page.click('button:has-text("Cancel")');
+    // Scopé au FORMULAIRE : depuis [F-Nav] le rail monte en permanence le <dialog> de
+    // confirmation de déconnexion, qui contient lui aussi un bouton d'abandon. Un
+    // `page.click('button:has-text("Cancel")')` non scopé prenait le premier du DOM —
+    // celui du dialogue fermé, donc `display:none`, donc 30 s d'attente puis un exit 2.
+    await page.locator('form button:has-text("Cancel")').click();
     await page.locator('button:has-text("Create new team")').waitFor();
   }
   step('1.3', true, '5 cycles monter/démonter effectués');
