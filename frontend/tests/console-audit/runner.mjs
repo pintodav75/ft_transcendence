@@ -46,11 +46,6 @@ const OUT_OF_SCOPE = [
     owner: 'aucun (outillage)',
     tooling: true,
   },
-  {
-    match: /auth\/refresh/,
-    reason: "restoreSession() tente le refresh sans savoir s'il y a un cookie -> 401 anonyme",
-    owner: 'F0 / FR2',
-  },
 ];
 
 /**

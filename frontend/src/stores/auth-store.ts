@@ -86,10 +86,22 @@ export const useAuthStore = create<AuthStore>((set) => ({
       set({ ready: false })
 
       try {
-        const { accessToken } =
-          await requestAuthJson<RefreshSessionResponse>('/auth/refresh', {
-            method: 'POST',
-          })
+        const session = await requestAuthJson<RefreshSessionResponse | undefined>(
+          '/auth/refresh',
+          { method: 'POST' },
+        )
+
+        // 204 = pas de cookie, donc pas de session (B13) : on sort READY et déconnecté.
+        // ⚠️ Garde ÉCRITE, pas subie : `requestAuthJson` rend `undefined` sur un corps vide,
+        // donc sans elle le destructuring jetterait un TypeError que le `catch` ci-dessous
+        // avalerait — on obtiendrait le bon état par accident, en passant par un chemin
+        // d'erreur. C'est exactement ce que B13 veut éviter.
+        if (!session) {
+          set({ accessToken: null, user: null, ready: true })
+          return
+        }
+
+        const { accessToken } = session
         const { user } = await requestAuthJson<MeResponse>(
           '/users/me',
           { method: 'GET' },

@@ -133,8 +133,11 @@ au ticket en cours. Chaque entrée porte sa raison et son ticket d'origine, et r
 **affichée** dans le rapport — c'est ce qui l'empêche de pourrir en silence. Quand la
 dette est payée, on retire la ligne.
 
-Au 27/07/2026 : le bandeau React DevTools + le serveur de dev (absents du build de
-prod), et le **401 sur `POST /auth/refresh`** à chaque chargement anonyme (F0 / FR2).
+Au 28/07/2026 il ne reste **qu'une** entrée : le bandeau React DevTools + le serveur de dev
+(absents du build de prod). Le **401 sur `POST /auth/refresh`** à chaque chargement anonyme
+a été **payé par [B13]** — la route rend désormais 204 quand il n'y a pas de cookie, et
+l'exemption a été retirée. Ne pas la remettre : c'est le retrait de cette ligne qui fait
+tomber les trois scénarios anonymes si quelqu'un ramène le 401.
 
 ## Un scénario qui laisse des comptes derrière lui
 

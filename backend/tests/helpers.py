@@ -37,15 +37,22 @@ TEST_USER_RE = r"^(alice|bob|carol|dave|erin)[0-9a-f]{8}$"
 
 
 # ---------------------------------------------------------------- HTTP
-def req(method, path, token=None, body=None):
+def req(method, path, token=None, body=None, cookies=None):
     """Renvoie (status, json). Pas de Content-Type sans body : Fastify renverrait
-    400 FST_ERR_CTP_EMPTY_JSON_BODY (piège classique sur les DELETE)."""
+    400 FST_ERR_CTP_EMPTY_JSON_BODY (piège classique sur les DELETE).
+
+    `cookies` : dict optionnel. Utile pour les rares routes qui lisent un cookie plutôt qu'un
+    Bearer — aujourd'hui `POST /auth/refresh` seule. Sans lui, aucune requête n'envoie de
+    cookie, ce qui est le cas « pas de session » par défaut.
+    """
     data = json.dumps(body).encode() if body is not None else None
     r = urllib.request.Request(BASE + path, data=data, method=method)
     if data is not None:
         r.add_header("Content-Type", "application/json")
     if token:
         r.add_header("Authorization", "Bearer " + token)
+    if cookies:
+        r.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in cookies.items()))
     try:
         with urllib.request.urlopen(r, context=CTX) as resp:
             return resp.status, _parse(resp.read().decode())
