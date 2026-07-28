@@ -17,7 +17,7 @@ async function createTeam(page, gameIndex, teamName) {
   await page.click('button:has-text("Create team")');
 }
 
-export async function run({ page, setPhase, step, expectHttp, user, ORIGIN }) {
+export async function run({ page, awaitAnnouncement, setPhase, step, expectHttp, user, ORIGIN }) {
   setPhase('1. /teams, état vide');
   await page.goto(`${ORIGIN}/teams`, { waitUntil: 'networkidle' });
   const empty = await page.locator("text=You're not part of any team.").count();
@@ -30,7 +30,7 @@ export async function run({ page, setPhase, step, expectHttp, user, ORIGIN }) {
   // elle est montée pour toute la vie de la page (une région insérée en même temps que son
   // texte n'est pas annoncée de façon fiable), donc `waitFor()` sur sa seule présence
   // rendait la main immédiatement et n'attendait plus rien.
-  await page.locator('[role="status"]', { hasText: nameA }).first().waitFor({ timeout: 15000 });
+  await awaitAnnouncement(nameA);
   step('T2', (await page.locator(`text=${nameA}`).count()) > 0, `« ${nameA} » créée`);
 
   setPhase('3. même nom, même ladder -> 409 (chemin nominal)');
@@ -54,7 +54,7 @@ export async function run({ page, setPhase, step, expectHttp, user, ORIGIN }) {
   setPhase('4. création équipe B sur un autre jeu');
   const nameB = `Audit B ${user.stamp}`;
   await createTeam(page, 1, nameB);
-  await page.locator('[role="status"]', { hasText: nameB }).first().waitFor({ timeout: 15000 });
+  await awaitAnnouncement(nameB);
   step('T4', (await page.locator(`text=${nameB}`).count()) > 0, `« ${nameB} » créée sur un 2e jeu`);
 
   setPhase('5. filtre par jeu');

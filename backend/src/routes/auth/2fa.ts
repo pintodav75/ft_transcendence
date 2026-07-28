@@ -7,7 +7,11 @@ import { setRefreshCookie } from '../../auth/cookies.js';
 import { eq } from 'drizzle-orm';
 import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
-import { twoFactorVerifyAccountKey, twoFactorVerifyRateLimitKey } from '../../utils/rate-limit.js';
+import {
+  twoFactorVerifyAccountKey,
+  twoFactorVerifyRateLimitKey,
+  rlMax,
+} from '../../utils/rate-limit.js';
 
 const codeSchema = z.object({
   code: z.string().regex(/^\d{6}$/),
@@ -110,13 +114,13 @@ export const twoFactorRoutes: FastifyPluginAsync = async (server) => {
   // tous les suivants — on croirait compter par compte sans jamais le faire. Seul
   // `server.createRateLimit()` renvoie l'application directe, sans cette garde.
   const verifyAccountLimit = server.createRateLimit({
-    max: 5,
+    max: rlMax(5),
     timeWindow: '1 minute',
     keyGenerator: twoFactorVerifyRateLimitKey,
   });
   server.post(
     '/verify',
-    { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    { config: { rateLimit: { max: rlMax(30), timeWindow: '1 minute' } } },
     async (request, reply) => {
     // Hors du `try` : son `catch` transforme tout en 401, il avalerait le 429.
     //

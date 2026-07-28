@@ -8,7 +8,7 @@
 export const name = 'ft1c-team-logo';
 export const surface = 'ImagePicker + /teams + POST /teams/:id/logo';
 
-export async function run({ page, setPhase, step, countRequests, fixtures, user, ORIGIN }) {
+export async function run({ page, awaitAnnouncement, setPhase, step, countRequests, fixtures, user, ORIGIN }) {
   // ---------------------------------------------------------------- §1 affichage
   setPhase('1. /teams affichage');
   await page.goto(`${ORIGIN}/teams`, { waitUntil: 'networkidle' });
@@ -104,7 +104,9 @@ export async function run({ page, setPhase, step, countRequests, fixtures, user,
   const res = await uploadRes;
   step('4.1', res.status() === 200, `POST .../logo -> HTTP ${res.status()}`);
 
-  await page.locator('[role=status]').first().waitFor({ timeout: 15000 });
+  // ⚠️ Le TEXTE, pas l'élément : la région live est montée en permanence (une seule par écran
+  // depuis FX-FOCUS), un waitFor sur sa présence rendait la main sur une bannière vide.
+  await awaitAnnouncement(teamName);
   const banner = await page.locator('[role=status]').first().innerText();
   step('4.1b', banner.includes(teamName), `bannière : « ${banner.trim()} »`);
 
@@ -132,6 +134,8 @@ export async function run({ page, setPhase, step, countRequests, fixtures, user,
     },
     (url) => url.includes('/logo'),
   );
+  // Même règle : l'annonce de la 2ᵉ équipe doit être ARRIVÉE avant d'être lue.
+  await awaitAnnouncement(' bis');
   const bis = await page.locator('[role=status]').first().innerText();
   step(
     '4.4',

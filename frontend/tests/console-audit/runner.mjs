@@ -171,17 +171,80 @@ function makeFixtures() {
  */
 const registerHits = [];
 
+/**
+ * ⚠️ 75 s, pas 61 : notre modèle est une fenêtre GLISSANTE, celle du serveur est FIXE (elle
+ * démarre à la première requête de la clé et se réinitialise d'un bloc). Les deux se
+ * décalent, et un décalage de quelques secondes suffit à faire partir une inscription qui,
+ * côté serveur, est la 4ᵉ de sa fenêtre — le 429 tombe alors sur le formulaire d'un
+ * scénario, où il se lit comme un défaut de l'application. La marge coûte une attente de
+ * plus par campagne et supprime la classe de faux rouge.
+ */
+const REGISTER_WINDOW_MS = 75_000;
+
+/**
+ * Plafond de `/auth/register` tel que le SERVEUR l'applique. 3 par défaut, mais le backend
+ * multiplie tous ses quotas par `RATE_LIMIT_FACTOR` (voir `backend/src/utils/rate-limit.ts`) :
+ * à 1000, ces attentes disparaissent et une campagne cesse d'être dominée par du sommeil.
+ *
+ * ⚠️ On le LIT sur l'en-tête `x-ratelimit-limit` de la réponse plutôt que de configurer le
+ * harnais en parallèle du backend : deux réglages à tenir synchronisés divergent, et la panne
+ * est silencieuse (soit on attend pour rien, soit on prend un vrai 429 dans le rapport).
+ * Ici, le serveur est la seule source de vérité et le harnais s'aligne tout seul.
+ */
+let registerMax = 3;
+
 export async function awaitRegisterSlot() {
   for (;;) {
     const now = Date.now();
-    while (registerHits.length > 0 && now - registerHits[0] > 61_000) registerHits.shift();
-    if (registerHits.length < 3) {
+    while (registerHits.length > 0 && now - registerHits[0] > REGISTER_WINDOW_MS)
+      registerHits.shift();
+    if (registerHits.length < registerMax) {
       registerHits.push(now);
       return;
     }
-    const wait = 61_000 - (now - registerHits[0]);
-    console.log(`   ⏳ quota register (3/min) atteint — attente de ${Math.ceil(wait / 1000)} s`);
+    const wait = REGISTER_WINDOW_MS - (now - registerHits[0]);
+    console.log(
+      `   ⏳ quota register (${registerMax}/min) atteint — attente de ${Math.ceil(wait / 1000)} s`,
+    );
     await new Promise((r) => setTimeout(r, wait + 250));
+  }
+}
+
+/**
+ * Attend que le quota GLOBAL (100/min) soit reconstitué avant de lancer un scénario.
+ *
+ * ⚠️ Ce quota est compté PAR IP pour tout ce qui n'authentifie pas la requête, et les routes
+ * de référence (`/games`, `/ladders`, `/ladders/{id}`, `/ladders/{id}/rankings`,
+ * `/auth/refresh`) sont PUBLIQUES : `request.user` y est vide, donc `rateLimitKey` retombe
+ * sur l'IP **même quand un Bearer est envoyé**. Toute la campagne — chaque scénario, chaque
+ * `page.goto` qui rejoue `restoreSession()` — partage donc UN SEUL compteur.
+ *
+ * Mesuré : à partir du 4ᵉ scénario, la campagne dépassait les 100 req/min et le 429 qui suit
+ * est INDISCERNABLE d'un vrai défaut dans le rapport (session non restaurée -> redirection
+ * vers la landing -> `/games` 429 -> 3 réessais de TanStack Query). Le harnais fabriquait le
+ * rouge qu'il prétend mesurer, et l'ordre alphabétique des fichiers décidait qui le prenait.
+ *
+ * Même philosophie qu'`awaitRegisterSlot` : on attend le créneau, on ne l'encaisse pas.
+ * `/api/ping` porte les en-têtes `x-ratelimit-*` du même compteur (vérifié : 99 puis 98).
+ */
+export async function awaitGlobalQuota(minRemaining = 60) {
+  for (;;) {
+    let res;
+    try {
+      res = await fetch(`${ORIGIN}/api/ping`, { signal: AbortSignal.timeout(5000) });
+    } catch {
+      return; // stack injoignable : run.mjs le dira mieux que nous
+    }
+
+    const remaining = Number(res.headers.get('x-ratelimit-remaining') ?? '0');
+    if (res.ok && remaining >= minRemaining) return;
+
+    const reset = Number(res.headers.get('x-ratelimit-reset') ?? '60');
+    const limit = res.headers.get('x-ratelimit-limit') ?? '100';
+    console.log(
+      `   ⏳ quota global (${limit}/min par IP) : ${remaining} restante(s) — attente de ${reset + 1} s`,
+    );
+    await new Promise((r) => setTimeout(r, (reset + 1) * 1000));
   }
 }
 
@@ -204,6 +267,9 @@ async function createAuditUser(suffix = '') {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(user),
     });
+    // Le serveur annonce son propre plafond : on s'y aligne pour les créneaux suivants.
+    const announced = Number(res.headers.get('x-ratelimit-limit'));
+    if (Number.isInteger(announced) && announced >= 1) registerMax = announced;
     if (res.status !== 429 || attempt >= 3) break;
     console.log('   ⏳ register rate-limité, attente de la fenêtre (21 s)…');
     await new Promise((r) => setTimeout(r, 21_000));
@@ -313,6 +379,65 @@ async function deleteAuditUser(user) {
  * ⚠️ `role` et `name` sont rendus EN PLUS de `tag` : une assertion sur le seul `tag`
  * (« c'est un DIV ») est satisfaite par n'importe quel conteneur de la page et ne prouve
  * donc rien d'autre que « pas BODY ».
+ */
+/**
+ * Attend qu'une annonce PRÉCISE soit écrite dans la région live, puis rend la main.
+ *
+ * ⚠️ POURQUOI CE HELPER EXISTE — c'est le piège le plus coûteux du harnais, rencontré DEUX
+ * fois (`ft1c` 4.1b, `teams-manage` B13c-bis) : depuis FX-FOCUS il y a UNE région live
+ * `role="status"` par écran, et elle est **montée en permanence**. Donc :
+ *   - `locator('[role=status]').waitFor()` rend la main IMMÉDIATEMENT — on lit une région
+ *     encore vide, ou pire, l'annonce PRÉCÉDENTE, et le check est un faux rouge (ou un faux
+ *     vert) selon le sens du test ;
+ *   - `focusLanding()` est un INSTANTANÉ synchrone : il ne contient aucune attente, ni pour
+ *     le focus ni pour l'annonce. Il faut donc appeler CE helper AVANT lui.
+ * Les deux bugs ont survécu longtemps parce que la course se gagnait tant que la campagne
+ * dormait entre scénarios (quotas de rate-limit). RATE_LIMIT_FACTOR a supprimé ce sommeil et
+ * les a fait tomber d'un coup : ce n'était pas une régression, c'était une course latente.
+ *
+ * `.catch()` volontaire : un timeout doit produire le ROUGE DU CHECK avec le texte réellement
+ * lu — jamais une exception qui avorte la phase et masque tout ce qui suit.
+ *
+ * @param {string} text fragment attendu (sous-chaîne, pas une regex)
+ * @returns {Promise<boolean>} true si l'annonce est arrivée dans le délai
+ */
+async function awaitAnnouncement(page, text, timeout = 15000) {
+  return page
+    .locator('[role="status"]', { hasText: text })
+    .first()
+    .waitFor({ timeout })
+    .then(() => true)
+    .catch(() => false);
+}
+
+/**
+ * Attend que le focus ait QUITTÉ `<body>`, puis rend la main. Compagnon obligatoire de
+ * `focusLanding()` après une action qui déplace le focus.
+ *
+ * ⚠️ MÊME PIÈGE QUE `awaitAnnouncement`, et il a mordu une troisième fois : la restauration
+ * du focus (FX-FOCUS) se fait APRÈS le rendu qui suit la mutation. Entre l'annonce — déjà
+ * écrite — et le focus posé, il y a une fenêtre où `document.activeElement` vaut encore
+ * `<body>`. `focusLanding()` étant un instantané, il lit ce `<body>` et le check rougit
+ * alors que l'application est correcte. Vécu sur `teams-invitations` I6-bis, apparu le jour
+ * où la base de dev a été peuplée : plus de données -> rendu plus lent -> fenêtre plus large.
+ *
+ * ⚠️ Attendre ici ne masque PAS un vrai défaut : si l'app ne restaure jamais le focus, on
+ * atteint le timeout, `focusLanding()` lit `<body>` et le check rougit — comme il le doit.
+ */
+async function awaitFocusRestored(page, timeout = 5000) {
+  return page
+    .waitForFunction(() => document.activeElement && document.activeElement.tagName !== 'BODY', null, {
+      timeout,
+    })
+    .then(() => true)
+    .catch(() => false);
+}
+
+/**
+ * ⚠️ INSTANTANÉ, sans aucune attente : `activeElement` et le texte des régions live sont lus
+ * À CET INSTANT. Si l'annonce attendue est produite par l'action qu'on vient de déclencher,
+ * appeler `awaitAnnouncement()` AVANT (elle ne déplace pas le focus, elle ne fausse donc pas
+ * la mesure).
  */
 async function focusLanding(page) {
   return page.evaluate(() => {
@@ -504,7 +629,13 @@ export async function runScenario(scenario) {
       user,
       ORIGIN,
       login,
+      // ⚠️ `focusLanding` est un INSTANTANÉ : après une action qui déplace le focus,
+      // appeler `awaitFocusRestored()` avant lui (voir son docblock).
       focusLanding: () => focusLanding(page),
+      awaitFocusRestored: (timeout) => awaitFocusRestored(page, timeout),
+      // ⚠️ À appeler avant TOUTE lecture d'une région live (dont `focusLanding`). Voir son
+      // docblock : la région est montée en permanence, attendre sa présence n'attend rien.
+      awaitAnnouncement: (text, timeout) => awaitAnnouncement(page, text, timeout),
       pressEnterOn,
       // Compte supplémentaire (ajout de membre, conflit de pseudo) — supprimé lui aussi.
       createUser: async () => {

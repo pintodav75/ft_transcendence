@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router';
 
 import { Button } from '@/components/ui/button';
 import { Callout } from '@/components/ui/callout';
+import { ErrorPanel } from '@/components/ui/error-panel';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { CreateMatchPanel } from '@/components/teams/detail/CreateMatchPanel';
 import { TeamHero } from '@/components/teams/detail/TeamHero';
@@ -23,14 +24,8 @@ import {
   useCancelMatch,
   useRemoveTeamMember,
 } from '@/lib/team-mutations';
-import {
-  findTeamStanding,
-  formatMatchDate,
-  isValidTeamId,
-  useLadderRankings,
-  useTeam,
-  useTeamMatches,
-} from '@/lib/team-detail';
+import { findTeamStanding, useLadderRankings } from '@/lib/ladders';
+import { formatMatchDate, isValidTeamId, useTeam, useTeamMatches } from '@/lib/team-detail';
 
 import type { TabItem } from '@/components/ui/tabs';
 import type { TeamMatch } from '@/lib/team-detail';
@@ -56,16 +51,16 @@ function BackToTeams() {
   );
 }
 
-function ErrorPanel({ title, message }: { title: string; message: string }) {
+// Same panel on both dead ends of this page — the shared component lives in
+// `components/ui/error-panel.tsx` since the ladder page needed the very same screen.
+function TeamErrorPanel({ title, message }: { title: string; message: string }) {
   return (
-    <div className="panel flex flex-col items-start gap-4 p-6">
-      <h1 className="text-2xl label-caps-black">{title}</h1>
-      <p className="max-w-prose text-sm text-text-secondary">{message}</p>
+    <ErrorPanel title={title} message={message}>
       <Link to="/teams" className={buttonClasses('secondary')}>
-        <ArrowLeft className="mr-2 size-4" />
+        <ArrowLeft aria-hidden="true" className="mr-2 size-4" />
         Back to my teams
       </Link>
-    </div>
+    </ErrorPanel>
   );
 }
 
@@ -126,7 +121,7 @@ export function TeamDetail() {
   if (!validId) {
     return (
       <div className="flex flex-col gap-6 py-6">
-        <ErrorPanel
+        <TeamErrorPanel
           title="Invalid team link"
           message="This team identifier is not a valid id. Check the link you followed, or pick the team from your list."
         />
@@ -140,12 +135,12 @@ export function TeamDetail() {
     return (
       <div className="flex flex-col gap-6 py-6">
         {status === 404 ? (
-          <ErrorPanel
+          <TeamErrorPanel
             title="Team not found"
             message="This team does not exist any more — it may have been dissolved by its captain."
           />
         ) : (
-          <ErrorPanel
+          <TeamErrorPanel
             title="Team unavailable"
             message="This team could not be loaded. Check your connection and reload the page."
           />

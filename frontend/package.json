@@ -12,6 +12,7 @@
     "prebuild": "node scripts/generate-routes.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "audit": "node tests/console-audit/run.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

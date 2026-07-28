@@ -11,18 +11,16 @@ import { Select } from '@/components/ui/select';
 import { labelClasses } from '@/components/ui/label-variants';
 import { createMatchErrorMessage, isExpiredSlotError, useCreateMatch } from '@/lib/team-mutations';
 import { createMatchSchema } from '@/lib/create-match-schema';
-import { useLadders } from '@/lib/games';
+import { providerLabel, useLadders } from '@/lib/games';
 import {
-  EM_DASH,
   MAX_OPEN_SLOTS,
   conflictsWithEngagement,
   engagementTimes,
   openSlotCount,
-  providerLabel,
   slotDays,
   slotTimes,
 } from '@/lib/team-detail';
-import { cn } from '@/lib/utils';
+import { EM_DASH, cn } from '@/lib/utils';
 
 import type { CreateMatchFormValues } from '@/lib/create-match-schema';
 import type { TeamDetail, TeamMatch, TeamMember } from '@/lib/team-detail';

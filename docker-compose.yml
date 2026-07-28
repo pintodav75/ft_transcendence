@@ -64,6 +64,10 @@ services:
       - REDIS_HOSTNAME=${REDIS_HOSTNAME:?REDIS_HOSTNAME manquant}
       - REDIS_PORT=${REDIS_PORT:?REDIS_PORT manquant}
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD manquant}
+      # Multiplicateur des quotas de rate-limit. Volontairement OPTIONNEL avec un repli sur 1 :
+      # un `.env` qui ne la mentionne pas (celui d'un coéquipier, celui de la correction) tourne
+      # avec les quotas de production. Voir backend/src/utils/rate-limit.ts.
+      - RATE_LIMIT_FACTOR=${RATE_LIMIT_FACTOR:-1}
     healthcheck:
       test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1:3000/ping"]
       interval: 5s

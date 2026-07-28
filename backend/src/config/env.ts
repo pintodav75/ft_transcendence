@@ -47,6 +47,19 @@ const envSchema = z.object({
   REDIS_HOSTNAME: z.string().min(1),
   REDIS_PORT: port,
   REDIS_PASSWORD: z.string().min(1),
+
+  // Multiplicateur de TOUS les quotas de rate-limit (voir `utils/rate-limit.ts`). Optionnel :
+  // absent = 1 = quotas de production. Bornes volontaires : entier ≥ 1 (0 ou une fraction
+  // fermerait l'API au lieu de l'ouvrir, ce que personne n'attend d'une variable de confort)
+  // et ≤ 10000 (au-delà, autant dire que le plugin est débranché — ce n'est pas le but).
+  RATE_LIMIT_FACTOR: z
+    .string()
+    .regex(/^\d+$/, 'must be a positive integer')
+    .refine((value) => {
+      const n = Number(value);
+      return n >= 1 && n <= 10_000;
+    }, 'must be between 1 and 10000')
+    .optional(),
 });
 
 export function validateEnv(): void {

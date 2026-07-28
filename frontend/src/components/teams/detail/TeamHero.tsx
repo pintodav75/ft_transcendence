@@ -2,10 +2,13 @@ import { useId } from 'react';
 
 import { GameImage } from '@/components/games/GameImage';
 import { Avatar } from '@/components/ui/avatar';
-import { EM_DASH, ROSTER_LIMIT, formatRecord, ladderSubtitle } from '@/lib/team-detail';
+import { formatRecord } from '@/lib/ladders';
+import { ROSTER_LIMIT, ladderSubtitle } from '@/lib/team-detail';
+import { EM_DASH } from '@/lib/utils';
 
 import type { ReactNode } from 'react';
-import type { RankingEntry, TeamDetail } from '@/lib/team-detail';
+import type { RankingEntry } from '@/lib/ladders';
+import type { TeamDetail } from '@/lib/team-detail';
 
 type TeamHeroProps = {
   team: TeamDetail;

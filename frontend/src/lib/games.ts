@@ -2,6 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { gameOrder } from '@/data/games';
 
+import type { components } from '@/lib/api-types.gen';
+
 // Games and ladders are seeded reference data that doesn't change during a
 // session, so we cache them for an hour: no refetch on remount or window focus.
 const REFERENCE_STALE_TIME = 1000 * 60 * 60;
@@ -63,6 +65,30 @@ export function useLadders() {
     queryFn: () => apiFetch<{ ladders: Ladder[] }>('/ladders'),
     staleTime: REFERENCE_STALE_TIME,
   });
+}
+
+/**
+ * The external account a game requires before a player can be fielded.
+ *
+ * ⚠️ Typed from the CODEGEN, not from the hand-written `Game` above: the union
+ * (`riot | steam | epic | chess_com`) is a contract, and a page that renders a label per
+ * member must break at compile time the day a provider is added.
+ *
+ * The labels moved out of `lib/team-detail.ts` when the ladder page became their second
+ * reader — a ladder is a game × format, so "which account does this game require" belongs
+ * with the games module, not with a team.
+ */
+export type RequiredProvider = components['schemas']['Game']['requiredProvider'];
+
+const providerLabels: Record<RequiredProvider, string> = {
+  riot: 'Riot',
+  steam: 'Steam',
+  epic: 'Epic',
+  chess_com: 'chess.com',
+};
+
+export function providerLabel(provider: RequiredProvider) {
+  return providerLabels[provider];
 }
 
 // Distinct ranking formats a game supports, derived from its ladders.

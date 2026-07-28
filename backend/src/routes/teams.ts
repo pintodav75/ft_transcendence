@@ -20,6 +20,7 @@ import { isBlocked } from '../utils/blocks.js';
 import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { IMAGE_MIME } from './users.js';
 import { randomUUID } from 'node:crypto';
+import { rlMax } from '../utils/rate-limit.js';
 import z from 'zod';
 
 // `logoUrl` est optionnel à la création : même règle HTTPS qu'à l'édition (voir le
@@ -704,7 +705,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       // Même quota que l'avatar : 20 uploads/min PAR COMPTE (le `keyGenerator` global est
       // hérité, et la route est authentifiée → la clé est le `sub` du JWT, pas l'IP). Borne
       // le trafic MinIO sans jamais gêner un capitaine qui hésite entre trois logos.
-      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+      config: { rateLimit: { max: rlMax(20), timeWindow: '1 minute' } },
     },
     async (request, reply) => {
       // Hissée hors du try (comme `key` dans POST /disputes/:id/evidence) : si l'objet est

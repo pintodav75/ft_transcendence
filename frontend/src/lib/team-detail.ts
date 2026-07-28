@@ -1,37 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 
-import { ApiError, apiFetch } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
+import { retryServerErrorsOnly } from '@/lib/ladders';
+import { EM_DASH } from '@/lib/utils';
 
 import type { components, paths } from '@/lib/api-types.gen';
 
 export type TeamDetail = components['schemas']['TeamDetail'];
 export type TeamMember = components['schemas']['TeamMember'];
 export type TeamInvitation = components['schemas']['TeamInvitation'];
-export type RequiredProvider = TeamDetail['requiredProvider'];
 
 type TeamDetailResponse =
   paths['/teams/{id}']['get']['responses'][200]['content']['application/json'];
 type TeamMatchesResponse =
   paths['/teams/{id}/matches']['get']['responses'][200]['content']['application/json'];
-type LadderRankingsResponse =
-  paths['/ladders/{id}/rankings']['get']['responses'][200]['content']['application/json'];
 
 export type TeamMatch = TeamMatchesResponse['matches'][number];
 export type MatchLineup = NonNullable<TeamMatch['lineup']>;
 export type LineupPlayer = MatchLineup['self'][number];
-export type RankingEntry = LadderRankingsResponse['rankings'][number];
-export type Competitor = RankingEntry['competitor'];
-export type TeamCompetitor = Extract<Competitor, { type: 'team' }>;
 
 // The backend refuses an eleventh slot (`used >= 10` -> 409 `roster_full`). It is a
 // flat cap, NOT derived from the format: a 2v2 team may bench extra players, so the
 // format only sizes a lineup. Since B-INV a PENDING INVITATION holds a slot too — see
 // `rosterUsage` below.
 export const ROSTER_LIMIT = 10;
-
-/** Used where a value is legitimately unknown (no score, no Elo delta, no date). */
-export const EM_DASH = '—';
 
 // Mirrors the backend param schema (`z.uuid()` in routes/teams.ts): an id that cannot
 // be a uuid can only ever come back as a 400, so the page renders its error state
@@ -40,15 +33,6 @@ const teamIdSchema = z.uuid();
 
 export function isValidTeamId(teamId: string) {
   return teamIdSchema.safeParse(teamId).success;
-}
-
-/**
- * A 4xx is a verdict, not a hiccup: retrying an unknown team three times (the TanStack
- * default) only delays the error screen and multiplies the browser's red lines.
- */
-function retryServerErrorsOnly(failureCount: number, error: Error) {
-  if (error instanceof ApiError && error.status < 500) return false;
-  return failureCount < 2;
 }
 
 export function useTeam(teamId: string, enabled: boolean) {
@@ -65,20 +49,6 @@ export function useTeamMatches(teamId: string, enabled: boolean) {
     queryKey: ['team', teamId, 'matches'],
     queryFn: () => apiFetch<TeamMatchesResponse>(`/teams/${teamId}/matches`),
     enabled,
-    retry: retryServerErrorsOnly,
-  });
-}
-
-// One rankings request feeds BOTH the header stats (Elo, record, rank) and the
-// ladder excerpt of the Overview tab — same query key, so the second reader hits
-// the cache.
-export function useLadderRankings(ladderId: string | undefined) {
-  return useQuery({
-    queryKey: ['ladder', ladderId, 'rankings'],
-    queryFn: () => apiFetch<LadderRankingsResponse>(`/ladders/${ladderId}/rankings`),
-    // ladderId comes from GET /teams/{id}, so it is undefined on the first render:
-    // firing early would request /ladders/undefined/rankings and get a 500.
-    enabled: Boolean(ladderId),
     retry: retryServerErrorsOnly,
   });
 }
@@ -104,46 +74,6 @@ export function rosterUsage(members: TeamMember[], invitations: TeamInvitation[]
   const used = members.length + pending;
 
   return { used, pending, full: used >= ROSTER_LIMIT };
-}
-
-export function isTeamCompetitor(competitor: Competitor): competitor is TeamCompetitor {
-  return competitor.type === 'team';
-}
-
-export function competitorName(competitor: Competitor) {
-  return competitor.type === 'user'
-    ? (competitor.displayName ?? competitor.pseudo)
-    : competitor.name;
-}
-
-export function competitorAvatarUrl(competitor: Competitor) {
-  return (competitor.type === 'user' ? competitor.avatarUrl : competitor.logoUrl) ?? undefined;
-}
-
-/**
- * The consulted team's ladder line — `undefined` when the team is not ranked yet: a
- * line is created by the FIRST match result, not by team creation. Callers must show
- * an explicit "not ranked" state rather than a fabricated Elo.
- */
-export function findTeamStanding(rankings: RankingEntry[], teamId: string) {
-  return rankings.find(
-    (entry) => isTeamCompetitor(entry.competitor) && entry.competitor.id === teamId,
-  );
-}
-
-/**
- * A `size`-row slice of the ladder centred on the team. The window is clamped at both
- * ends so rank 1 still shows rows 1-5 instead of three rows and two holes. Falls back
- * to the top of the ladder when the team has no line yet.
- */
-export function rankingWindow(rankings: RankingEntry[], standing: RankingEntry | undefined, size = 5) {
-  if (rankings.length <= size) return rankings;
-
-  const index = standing ? rankings.indexOf(standing) : -1;
-  if (index === -1) return rankings.slice(0, size);
-
-  const start = Math.min(Math.max(index - Math.floor(size / 2), 0), rankings.length - size);
-  return rankings.slice(start, start + size);
 }
 
 export type FormResult = 'win' | 'loss' | 'dispute';
@@ -375,17 +305,6 @@ export function ladderSubtitle(ladderName: string, gameName: string, format: str
   return squash(ladderName) === squash(`${gameName}${format}`) ? undefined : ladderName;
 }
 
-const providerLabels: Record<RequiredProvider, string> = {
-  riot: 'Riot',
-  steam: 'Steam',
-  epic: 'Epic',
-  chess_com: 'chess.com',
-};
-
-export function providerLabel(provider: RequiredProvider) {
-  return providerLabels[provider];
-}
-
 // ---------------------------------------------------------------- formatting
 
 // Built once at module scope: an Intl formatter is expensive to create and these
@@ -430,19 +349,4 @@ export function formatEloDelta(eloDelta: number | null) {
   if (eloDelta === null) return EM_DASH;
   if (eloDelta < 0) return `−${Math.abs(eloDelta)}`;
   return `+${eloDelta}`;
-}
-
-export function formatRecord(wins: number, losses: number) {
-  return `${wins}–${losses}`;
-}
-
-/**
- * Win rate, rounded. A competitor with no game played has no rate — `0%` would read as
- * "always loses" instead of "never played", so it stays an em dash.
- */
-export function formatWinRate(wins: number, losses: number) {
-  const played = wins + losses;
-  if (played === 0) return EM_DASH;
-
-  return `${Math.round((wins / played) * 100)}%`;
 }

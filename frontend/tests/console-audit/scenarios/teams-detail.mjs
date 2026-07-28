@@ -48,6 +48,7 @@ const appears = (locator, timeout = 10000) =>
 
 export async function run({
   page,
+  awaitAnnouncement,
   setPhase,
   step,
   countRequests,
@@ -94,7 +95,7 @@ export async function run({
   await form.locator('div.flex-wrap').first().locator('button').first().click();
   await page.fill('#team-name', `Audit FT2A ${user.stamp}`);
   await page.click('button:has-text("Create team")');
-  await page.locator('[role="status"]').first().waitFor({ timeout: 15000 });
+  await awaitAnnouncement('was created');
   await page.locator('ul li a').first().click();
   await page.waitForURL(/\/teams\/[0-9a-f-]{36}/, { timeout: 10000 });
   const teamUrl = page.url();
@@ -183,11 +184,15 @@ export async function run({
   await page.locator('a', { hasText: 'See the full ladder' }).click();
   await page.waitForURL(/\/ladders\/[0-9a-f-]{36}/, { timeout: 10000 });
   // Attendre le rendu avant de compter : l'URL change avant que le composant soit monté.
-  const ladderRendered = await appears(page.locator('text=map pool'));
+  // ⚠️ On vise « Standings », pas « map pool » : depuis FT-3 la section des maps est MASQUÉE
+  // pour un jeu sans pool (chess, lol, rl), donc le check dépendrait du jeu tiré par la
+  // création d'équipe. Le classement, lui, est rendu sur tout ladder. Le contenu de la page
+  // est audité par son propre scénario (`ladder-detail`), celui-ci ne teste que le LIEN.
+  const ladderRendered = await appears(page.locator('text=Standings'));
   step(
     'A11',
     ladderRendered,
-    `lien du ladder -> placeholder /ladders/$ladderId = ${ladderRendered}`,
+    `lien du ladder -> page /ladders/$ladderId rendue = ${ladderRendered}`,
   );
 
   // La divulgation progressive est le cœur du ticket : on la vérifie avec un VRAI second

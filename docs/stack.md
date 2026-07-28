@@ -9,10 +9,10 @@
 - ✅ **Fondation visuelle F0 mergée** : tokens Tailwind v4 dans `src/index.css`, composants UI de base (`Button`, `Input`, `Label`, `Card`), config shadcn-like `components.json`, alias `@/*`, helper `cn()`
 - ✅ **F0-A implémenté et testé** : client API `fetch` + store auth Zustand (`user`, `accessToken`, `ready`, restauration `refresh → me`, retry unique sur 401)
 - ✅ **F0-B routing + home mergé / Trello Done** : TanStack Router **file-based** branché (plugin Vite génère `routeTree.gen.ts`), pattern route/page, page home/landing arène complète + base visuelle de Login
-- ✅ **F0-C implémenté** : route layout pathless `_authenticated` avec garde unique (`restoreSession` si nécessaire puis redirection des visiteurs vers `/`), shell trois colonnes partagé par `/home`, `/games`, `/profile`, `/ranking` et `/teams`; ancien `/dashboard` et layouts dupliqués supprimés
+- ✅ **F0-C implémenté** : route layout pathless `_authenticated` avec garde unique (`restoreSession` si nécessaire puis redirection des visiteurs vers `/`), shell trois colonnes partagé par `/home`, `/games`, `/profile` et `/teams` (`/ranking` supprimée par FT-3); ancien `/dashboard` et layouts dupliqués supprimés
 - ✅ **FR1 Register implémenté et testé** : formulaire RHF + Zod, inscription classique, session Zustand, erreurs API, Google OAuth complet et redirection `/home`
 - Libs front : **TanStack Router branché** + TanStack Query (installé), Zustand, React Hook Form, Zod + `@hookform/resolvers`, `@fontsource/geist`, `lucide-react`, `clsx`, `tailwind-merge`
-- ⚠️ **Pages restantes** : `/`, `/register`, `/login`, `/ranking` et `/teams` ont une vraie UI ; **FR2 Login + 2FA est mergé**. `/home`, `/games`, `/profile`, `/privacy` et `/terms` restent à compléter. `App.tsx` supprimé (renommé `pages/login.tsx`)
+- ⚠️ **Pages restantes** : `/`, `/register`, `/login`, `/teams`, `/teams/$teamId` et `/ladders/$ladderId` ont une vraie UI (`/ranking` supprimée par FT-3) ; **FR2 Login + 2FA est mergé**. `/home`, `/games`, `/profile`, `/privacy` et `/terms` restent à compléter. `App.tsx` supprimé (renommé `pages/login.tsx`)
 - ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
 
 **Backend** : Fastify v5 sur Node 24 LTS (TypeScript strict, ESM) — _en place et bien avancé_
@@ -93,7 +93,7 @@
 │       ├── routeTree.gen.ts  # généré par le plugin TanStack — PLUS VERSIONNÉ (gitignoré depuis `0df06ef`), régénéré au démarrage de Vite
 │       ├── index.css         # source de vérité visuelle : tokens Tailwind + @utility (panel/label-caps/focus-ring) + utilitaires arène
 │       ├── routes/           # wrappers file-based : routes publiques + layout pathless `_authenticated` et ses enfants protégés
-│       ├── pages/            # index/login/register, home/games/profile/ranking, privacy/terms et pages teams
+│       ├── pages/            # index/login/register, home/games/profile, privacy/terms, pages teams et ladders
 │       ├── stores/           # auth-store.ts (Zustand session — F0-A)
 │       ├── lib/              # api.ts, api-config.ts, schémas Zod register/login, utils.ts (cn())
 │       ├── types/            # auth.ts
@@ -105,7 +105,7 @@
 │           ├── layout/       # RootLayout, AuthenticatedLayout, rails F0-C, navs F-Nav, SiteFooter, Logo/SiteLogo
 │           ├── landing/      # vitrine publique : HeroBanner, LandingNav
 │           ├── games/        # GameAsset + coquilles GameLogo/GameIcon/GameImage, GamesCards, GameInfo, GamesFallback (+ previews non montées)
-│           └── home/         # ⚠️ MAL NOMMÉ : contient du teams/ranking (LadderSelect, RankingTable, TeamCreation, SearchBar, LinkAccountBanner)
+│           └── home/         # ⚠️ MAL NOMMÉ : contient du teams (LadderSelect, TeamCreation, SearchBar, LinkAccountBanner ; RankingTable supprimé par FT-3)
 │
 └── data/                    # volumes bind-mount Postgres/MinIO (NON versionné)
 ```

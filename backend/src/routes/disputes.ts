@@ -22,6 +22,7 @@ import {
   type CreatedNotification,
 } from '../utils/notifications.js';
 import { randomUUID } from 'node:crypto';
+import { rlMax } from '../utils/rate-limit.js';
 
 const idParamSchema = z.object({ id: z.uuid() });
 const resolveBodySchema = z.object({
@@ -85,7 +86,7 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
       onRequest: [server.authenticate],
       // 30/min : un camp peut légitimement déposer plusieurs captures + messages dans un fil ;
       // 10/min était trop serré. Reste un garde-fou anti-spam.
-      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+      config: { rateLimit: { max: rlMax(30), timeWindow: '1 minute' } },
     },
     async (request, reply) => {
       // `key` est hissé hors du try : si l'objet MinIO a été uploadé mais qu'un échec survient

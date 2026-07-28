@@ -1,6 +1,42 @@
 import type { FastifyRequest } from 'fastify';
 
 /**
+ * Multiplicateur appliqué à TOUS les quotas de l'API (`rlMax`). Vaut 1 en marche normale.
+ *
+ * POURQUOI : nos quotas sont calibrés pour un humain (register 3/min, global 100/min), pas
+ * pour un harnais. L'audit console rejoue 9 parcours en rafale et les tests e2e Python
+ * tapent des centaines de requêtes en quelques secondes : les deux passent l'essentiel de
+ * leur temps à ATTENDRE la reconstitution d'une fenêtre, pas à tester. Mesuré : une campagne
+ * d'audit complète est dominée par ces attentes, ce qui rend le cycle d'un ticket front
+ * inutilisable. Un facteur global déplace le plafond sans toucher UNE SEULE règle métier :
+ * le code des routes, l'ordre des hooks, les clés de comptage et le montage à deux étages de
+ * `/2fa/verify` sont rigoureusement identiques — seul le nombre change.
+ *
+ * ⚠️ CE N'EST PAS UN INTERRUPTEUR « OFF ». On ne désactive pas le plugin, on ne saute pas le
+ * hook : à facteur 1000, `/auth/register` répond toujours 429 au 3001ᵉ appel de la minute, et
+ * la mécanique reste donc DÉMONTRABLE en soutenance (baisser la variable à 1 et rejouer).
+ * Désactiver le plugin, à l'inverse, aurait fait diverger le code testé du code livré.
+ *
+ * ⚠️ DOIT VALOIR 1 À LA LIVRAISON. `.env.example` est à 1, docker-compose retombe sur 1 si la
+ * variable est absente, et le backend écrit une bannière d'avertissement à CHAQUE démarrage
+ * tant qu'elle ne vaut pas 1 (voir `server.ts`) — c'est le rappel qui empêche d'oublier.
+ */
+export const RATE_LIMIT_FACTOR = (() => {
+  const raw = Number(process.env.RATE_LIMIT_FACTOR ?? '1');
+  // Repli défensif sur 1 : une valeur absurde doit DURCIR, jamais relâcher silencieusement.
+  // (Le cas ne se produit pas en pratique — `config/env.ts` refuse le démarrage avant.)
+  return Number.isInteger(raw) && raw >= 1 && raw <= 10_000 ? raw : 1;
+})();
+
+/**
+ * Le plafond réellement passé à `@fastify/rate-limit`. Toute route qui déclare un quota DOIT
+ * passer par ici : un `max:` littéral oublié quelque part rend le harnais bloquant sur cette
+ * seule route, et le symptôme (une attente de 60 s au milieu d'un scénario) est pénible à
+ * relier à sa cause.
+ */
+export const rlMax = (base: number): number => base * RATE_LIMIT_FACTOR;
+
+/**
  * Clé du compteur de rate-limit : l'UTILISATEUR quand la requête est authentifiée, l'IP sinon.
  *
  * Sûr parce que `@fastify/rate-limit` AJOUTE son hook à la FIN du tableau `onRequest` de la

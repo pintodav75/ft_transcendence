@@ -5,18 +5,13 @@ import { LadderExcerpt } from '@/components/teams/detail/LadderExcerpt';
 import { Pill } from '@/components/ui/pill';
 import { RosterChips } from '@/components/teams/detail/RosterChips';
 import { SectionTitle } from '@/components/ui/section-title';
-import {
-  formatLineup,
-  formatMatchDate,
-  nextOpenSlot,
-  providerLabel,
-  recentForm,
-} from '@/lib/team-detail';
+import { providerLabel } from '@/lib/games';
+import { formatLineup, formatMatchDate, nextOpenSlot, recentForm } from '@/lib/team-detail';
 
 import type { PillTone } from '@/components/ui/pill';
+import type { RankingEntry } from '@/lib/ladders';
 import type {
   FormResult,
-  RankingEntry,
   TeamDetail,
   TeamInvitation,
   TeamMatch,

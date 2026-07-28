@@ -11,7 +11,7 @@ import { readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runScenario, report, ORIGIN } from './runner.mjs';
+import { awaitGlobalQuota, runScenario, report, ORIGIN } from './runner.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const wanted = process.argv.slice(2);
@@ -41,6 +41,10 @@ try {
 let worst = 0;
 for (const file of files) {
   const scenario = await import(join(here, 'scenarios', file));
+  // Le quota global (100/min PAR IP) est partagé par toute la campagne : sans cette attente,
+  // les scénarios de fin de liste héritent du 429 provoqué par ceux du début. Ne coûte rien
+  // quand il reste du quota (un GET /api/ping).
+  await awaitGlobalQuota();
   console.log(`\n${'━'.repeat(78)}\n▶ ${scenario.name} — ${scenario.surface}\n${'━'.repeat(78)}`);
   const result = await runScenario(scenario);
   worst = Math.max(worst, report(scenario, result));
