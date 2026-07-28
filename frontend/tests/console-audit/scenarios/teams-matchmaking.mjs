@@ -50,16 +50,13 @@
  *     alignement de la colonne d'actions) et la **restauration du focus** après annulation :
  *     la ligne qui portait le bouton perd son bouton, le focus retombe sur `<body>`.
  *
- * ⚠️ CE SCÉNARIO LAISSE DES COMPTES DERRIÈRE LUI, et c'est une TROUVAILLE, pas un défaut du
- * scénario. Le motif a CHANGÉ le 28/07 avec [BX-DEL] : ce n'était plus un 500 (`onDelete:
- * 'restrict'` sans condition de statut, corrigé en `cascade`), c'est maintenant un **409
- * assumé**. `DELETE /users/me` refuse tant que le compte est aligné dans un match non terminé
- * (`engaged_in_match`) ou capitaine d'une équipe (`captain_of_team`). Or le scénario ouvre des
- * slots sans tous les refermer et crée une équipe. Pour être auto-nettoyant il devrait, en
- * fin de parcours, annuler ses slots PUIS dissoudre l'équipe — c'est le parcours de sortie
- * imposé aux vrais utilisateurs, donc ce serait aussi une couverture utile. Nettoyage manuel
- * en attendant :
- *   delete from users where email like 'audit%@example.com';   -- après avoir purgé les matchs
+ * ⚠️ CE SCÉNARIO LAISSAIT DEUX COMPTES DERRIÈRE LUI — la TROUVAILLE qui a donné [BX-DEL].
+ * `match_participants.user_id` était en `onDelete: 'restrict'` sans condition de statut, donc
+ * `DELETE /users/me` rendait un 500 pour tout compte ayant été aligné une fois. Réglé le
+ * 28/07 (FK en `cascade`). Le scénario ouvre 5 slots et crée une équipe, et la nouvelle garde
+ * impose un ORDRE de sortie : annuler les matchs, dissoudre l'équipe, puis supprimer le
+ * compte — sinon 409 `engaged_in_match` / `team_engaged_in_match`. `deleteAuditUser()` du
+ * runner le fait maintenant, et ce scénario ne laisse plus rien en base.
  */
 export const name = 'teams-matchmaking';
 export const surface = '/teams/$teamId — ouvrir un créneau (POST /matches) et l’annuler (DELETE)';

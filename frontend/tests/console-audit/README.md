@@ -147,12 +147,11 @@ parvenait pas à supprimer ses deux comptes alignés : `match_participants.user_
 aligné une fois. **Corrigé le 28/07 par [BX-DEL]** (migration `0023`, la FK passe en
 `cascade`) : le nettoyage repasse par la route.
 
-⚠️ **Mais le symptôme n'a pas disparu : il a changé de code.** Le 500 est devenu un **409
-assumé** — la route refuse tant que le compte est aligné dans un match non terminé
-(`engaged_in_match`) ou **capitaine d'une équipe** (`captain_of_team`). Or `teams-matchmaking`
-ouvre 5 slots sans les refermer et crée une équipe : ses comptes survivent toujours, et le
-rapport les nomme. Pour redevenir auto-nettoyant, le scénario doit **annuler ses slots puis
-dissoudre l'équipe** — c'est exactement le parcours de sortie imposé aux vrais utilisateurs,
-donc une couverture utile plutôt qu'une corvée. En attendant, nettoyage manuel :
-`delete from users where email like 'audit%'` une fois les matchs purgés — jamais un
-contournement de la garde.
+⚠️ **L'ORDRE du nettoyage est devenu contraignant**, et `deleteAuditUser()` le suit
+désormais : une équipe engagée dans un match non terminé ne se dissout pas
+(409 `team_engaged_in_match`), et un compte aligné dans un tel match ne se supprime pas
+(409 `engaged_in_match`). Le runner annule donc **les matchs, puis les équipes, puis le
+compte** — exactement le parcours de sortie imposé aux vrais utilisateurs. Vérifié : un run
+de `teams-matchmaking`, qui ouvre 5 slots et crée une équipe, ne laisse plus **aucun** compte.
+Si un jour le rapport en nomme à nouveau, c'est que le parcours de sortie s'est cassé quelque
+part — le message est un signal, pas une corvée.
