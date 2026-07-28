@@ -28,7 +28,7 @@ resterait juste. Ne pas le déplacer après le login pour « regrouper le SQL »
 import time
 import uuid
 
-from helpers import FIXTURE_PASSWORD, Suite, register, req, sql
+from helpers import FIXTURE_PASSWORD, Suite, forge_temp_token, register, req, sql
 
 WINDOW = 61  # 60 s + marge : la fenêtre du limiteur est fixe (continueExceeding = false)
 
@@ -204,6 +204,49 @@ def run():
     st, b = req("POST", "/auth/login", body={"email": email, "password": FIXTURE_PASSWORD})
     s.check("6e tentative dans la minute → 429", st, 429)
     s.check("… avec le corps standard du limiteur", b.get("error"), "Too Many Requests")
+
+    # ── B12 — le compteur de /auth/2fa/verify est-il indexé sur le COMPTE ? ─────────────
+    # Ce que ce bloc prouve et que l'unitaire ne PEUT pas prouver : que le générateur de clé
+    # est réellement APPELÉ, sur le bon compteur, à un moment du cycle de vie où le tempToken
+    # est lisible (il ne l'est pas en `onRequest`, le corps n'y est pas encore décodé). Un
+    # `keyGenerator` parfait mais jamais branché passe tous les cas unitaires.
+    #
+    # Aucun user créé : un tempToken forgé sur un uuid inexistant rend 401 (user introuvable)
+    # tout en étant COMPTÉ — c'est exactement la mesure qu'on veut.
+    #
+    # ⚠️ ARITHMÉTIQUE — la route a DEUX compteurs (cf. `routes/auth/2fa.ts`) : un plancher
+    # par IP à 30/min et le compteur par compte à 5/min. Ce bloc dépense 7 requêtes, donc
+    # reste très en dessous du plancher : tout 429 observé ici vient forcément du compteur
+    # par compte. Ajouter des appels ici change ce raisonnement — refaire le compte d'abord.
+    s.section("POST /auth/2fa/verify — le compteur est-il par COMPTE (B12) ?")
+    victim, other = str(uuid.uuid4()), str(uuid.uuid4())
+    for _ in range(6):
+        st, _ = req(
+            "POST",
+            "/auth/2fa/verify",
+            body={"tempToken": forge_temp_token(victim), "code": "000000"},
+        )
+    s.check(
+        "6e essai sur le même compte → 429",
+        st,
+        429,
+        "⚠️ si 401 : le compteur par compte n'est pas branché (5/min attendu).",
+    )
+    # ⚠️ NE PAS SUPPRIMER l'assertion qui suit en croyant faire du ménage : c'est ELLE qui
+    # discrimine. Le 429 ci-dessus serait vert sur master aussi (master bornait à 5/min par
+    # IP, donc la 6e requête d'une même machine y donnait déjà 429) — c'est « un autre compte
+    # depuis la même IP » qui est ROUGE sur master et vert ici.
+    # Chaque essai ci-dessus utilisait un tempToken DIFFÉRENT (forgé à chaque tour) : le 429
+    # prouve donc aussi que le compteur suit le COMPTE, et pas un token particulier.
+    st, _ = req(
+        "POST", "/auth/2fa/verify", body={"tempToken": forge_temp_token(other), "code": "000000"}
+    )
+    s.check(
+        "un AUTRE compte, MÊME IP, garde son quota → 401",
+        st,
+        401,
+        "⚠️ si 429 : la clé est retombée sur l'IP — c'est exactement le bug que B12 corrige.",
+    )
 
     # ── La clé du compteur GLOBAL est-elle vraiment l'utilisateur ? ─────────────────────
     # Ces deux cas ne sont pas décoratifs. `rateLimitKey` ne peut lire `request.user` que si

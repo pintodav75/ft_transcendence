@@ -124,15 +124,32 @@ def forge_token(sub, kind="access", ttl=900, secret=None):
     doivent être REFUSÉS (mauvais type, expiré, mauvaise signature).
     """
 
+    now = int(time.time())
+    return _sign({"sub": sub, "type": kind, "iat": now, "exp": now + ttl}, secret)
+
+
+def forge_temp_token(sub, ttl=300):
+    """Forge un **tempToken 2FA** — celui de `signTempToken` (backend/src/auth/tokens.ts) :
+    mêmes algo et secret que `forge_token`, mais les claims sont `{sub, pending: 'totp'}`,
+    et surtout PAS de claim `type` (un tempToken n'est pas une session).
+
+    Sert à `test_auth_contract.py` pour prouver que le compteur de `/auth/2fa/verify` est
+    indexé sur le compte (B12) **sans créer un seul user** : un sub inexistant rend 401 tout
+    en étant compté. Même couplage assumé que `forge_token`, même sentinelle.
+    """
+    now = int(time.time())
+    return _sign({"sub": sub, "pending": "totp", "iat": now, "exp": now + ttl})
+
+
+def _sign(payload, secret=None):
+    """Encode et signe un JWT HS256 avec `JWT_SECRET`. Détail partagé par les deux forgeurs."""
+
     def seg(obj):
         raw = json.dumps(obj, separators=(",", ":")).encode()
         return base64.urlsafe_b64encode(raw).rstrip(b"=")
 
-    now = int(time.time())
     key = (secret if secret is not None else _env("JWT_SECRET")).encode()
-    msg = seg({"alg": "HS256", "typ": "JWT"}) + b"." + seg(
-        {"sub": sub, "type": kind, "iat": now, "exp": now + ttl}
-    )
+    msg = seg({"alg": "HS256", "typ": "JWT"}) + b"." + seg(payload)
     sig = base64.urlsafe_b64encode(hmac.new(key, msg, hashlib.sha256).digest()).rstrip(b"=")
     return (msg + b"." + sig).decode()
 

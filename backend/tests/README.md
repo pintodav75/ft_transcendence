@@ -55,6 +55,17 @@ Il existe aussi des **tests unitaires Vitest** pour les helpers purs (sans DB ni
 **réellement branchée** sur le chemin global. Les deux sont nécessaires : l'un sans l'autre
 laisse passer un `keyGenerator` correct mais jamais appelé.
 
+⚠️ Même partage des rôles pour `twoFactorVerifyRateLimitKey` (B12) : l'unitaire verrouille la
+**forme** de la clé (`u:<sub>` si le tempToken est valide et `pending: 'totp'`, `ip:<ip>` en
+repli), et il ne peut rien dire de plus — un `keyGenerator` correct mais jamais branché passe
+tous ses cas. Le **câblage** est prouvé e2e dans `test_auth_contract.py`, section « le compteur
+est-il par COMPTE (B12) ? » : 6 essais sur un même compte → 429, puis un autre compte depuis la
+**même IP** qui garde son quota. Elle ne crée aucun user (tempToken forgé par
+`helpers.forge_temp_token()` sur un uuid inexistant : 401 côté handler, mais compté).
+⚠️ `POST /auth/2fa/verify` a **deux compteurs** : 5/min **par compte**, appelé dans le handler et
+**uniquement** quand la requête porte un tempToken exploitable, et un plancher de 30/min par IP
+(hook `onRequest`) qui borne tout le reste. En tenir compte avant d'ajouter des appels ici.
+
 ## Détails utiles
 
 - **`helpers.py`** contient le client HTTP, `register()`, `join_team()`, l'accès SQL et le

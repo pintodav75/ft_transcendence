@@ -545,6 +545,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Rate limit dépassé. Deux compteurs distincts peuvent le produire (B12) : **5 essais/min par COMPTE** visé par le tempToken — le budget d'essais de code, identique quel que soit le nombre d'adresses employées — et un plancher de **30 req/min par IP** qui borne tout le reste, c'est-à-dire les requêtes ne portant pas de tempToken exploitable (corps illisible, token absent, expiré ou de mauvais type). En-têtes `x-ratelimit-*` et `retry-after` dans les deux cas ; seul le libellé de `message` diffère selon le compteur qui a coupé. */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RateLimitError"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -4319,6 +4328,15 @@ export interface components {
         Error: {
             /** @example Unauthorized */
             error: string;
+        };
+        /** @description Corps d'un 429. ⚠️ Ce N'EST PAS le schéma `Error` : il est produit par @fastify/rate-limit, pas par nos handlers, et porte trois champs. */
+        RateLimitError: {
+            /** @example 429 */
+            statusCode: number;
+            /** @example Too Many Requests */
+            error: string;
+            /** @example Rate limit exceeded, retry in 1 minute */
+            message: string;
         };
         /** @description Erreur de validation Zod (issues brutes). */
         ValidationError: {
