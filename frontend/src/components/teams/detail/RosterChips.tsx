@@ -2,6 +2,7 @@ import { Crown, UserMinus, X } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 
 import { Avatar } from '@/components/ui/avatar';
+import { InlineButton } from '@/components/ui/inline-button';
 import { Pill } from '@/components/ui/pill';
 import { providerLabel } from '@/lib/team-detail';
 import { cn } from '@/lib/utils';
@@ -104,19 +105,17 @@ export function RosterChips({
             </Link>
 
             {kickable && (
-              // Always visible, never revealed by hover only: on a touch screen a
-              // `group-hover` action is simply unreachable.
-              <button
-                type="button"
+              <InlineButton
+                tone="danger"
                 onClick={() => onKick?.(member)}
                 // The visible text ("Kick") is the start of the accessible name, so
                 // voice control still works while a screen reader hears WHICH player.
                 aria-label={`Kick ${member.pseudo}`}
-                className="focus-ring mr-1.5 inline-flex shrink-0 items-center gap-1 rounded-full border border-arena-red/45 px-2.5 py-1 text-xs label-caps text-arena-red transition hover:bg-arena-red/10"
+                className="mr-1.5"
               >
                 <UserMinus aria-hidden="true" className="size-3" />
                 Kick
-              </button>
+              </InlineButton>
             )}
           </li>
         );
@@ -170,15 +169,14 @@ export function RosterChips({
               // Deliberately NOT styled like Kick: cancelling an invitation destroys
               // nothing (the player never joined), so it stays neutral. Same reason the
               // icon is an X and not `UserMinus`.
-              <button
-                type="button"
+              <InlineButton
                 onClick={() => onCancelInvitation?.(invitation)}
                 aria-label={`Cancel invitation to ${user.pseudo}`}
-                className="focus-ring mr-1.5 inline-flex shrink-0 items-center gap-1 rounded-full border border-border-subtle px-2.5 py-1 text-xs label-caps text-text-secondary transition hover:border-border-strong hover:text-text-primary"
+                className="mr-1.5"
               >
                 <X aria-hidden="true" className="size-3" />
                 Cancel
-              </button>
+              </InlineButton>
             )}
           </li>
         );

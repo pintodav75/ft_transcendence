@@ -1,5 +1,7 @@
 import { Link } from '@tanstack/react-router';
+import { X } from 'lucide-react';
 
+import { InlineButton } from '@/components/ui/inline-button';
 import { MatchStatusPill } from '@/components/teams/detail/MatchStatusPill';
 import { matchAccentClass, matchStatusView } from '@/components/teams/detail/match-status';
 import {
@@ -8,6 +10,7 @@ import {
   formatLineup,
   formatMatchDate,
   formatScore,
+  isCancellableSlot,
 } from '@/lib/team-detail';
 import { cn } from '@/lib/utils';
 
@@ -17,9 +20,16 @@ type MatchRowProps = {
   match: TeamMatch;
   /** The whole column is dropped when no match carries a line-up (visitor response). */
   showLineup: boolean;
+  /**
+   * Whether the table has an actions column at all. Decided ONCE by the table (so every
+   * `<td>` count matches its `<th>` count), not row by row.
+   */
+  showActions?: boolean;
+  /** Captain only. A row that is not an open slot renders an empty cell, never a button. */
+  onCancelSlot?: (match: TeamMatch) => void;
 };
 
-export function MatchRow({ match, showLineup }: MatchRowProps) {
+export function MatchRow({ match, showLineup, showActions = false, onCancelSlot }: MatchRowProps) {
   const { tone } = matchStatusView(match);
   // Only a finished match has a sheet to open; the others stay dimmed and inert.
   const isOpenable = match.status === 'completed';
@@ -104,6 +114,25 @@ export function MatchRow({ match, showLineup }: MatchRowProps) {
       <td className="px-3 py-3 text-right whitespace-nowrap">
         <MatchStatusPill match={match} />
       </td>
+
+      {showActions && (
+        // Last column, no visible header (the buttons name themselves). `w-px` makes the
+        // column collapse to its content so it never steals width from Opponent.
+        <td className="w-px px-3 py-3 text-right whitespace-nowrap">
+          {/* An accepted match cannot be cancelled: offering the button would guarantee a
+              409 and a red line in the console. */}
+          {onCancelSlot && isCancellableSlot(match) ? (
+            <InlineButton
+              tone="danger"
+              onClick={() => onCancelSlot(match)}
+              aria-label={`Cancel the slot of ${formatMatchDate(match.scheduledAt, 'long')}`}
+            >
+              <X aria-hidden="true" className="size-3" />
+              Cancel
+            </InlineButton>
+          ) : null}
+        </td>
+      )}
     </tr>
   );
 }

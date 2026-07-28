@@ -135,3 +135,12 @@ dette est payée, on retire la ligne.
 
 Au 27/07/2026 : le bandeau React DevTools + le serveur de dev (absents du build de
 prod), et le **401 sur `POST /auth/refresh`** à chaque chargement anonyme (F0 / FR2).
+
+## Un scénario qui laisse des comptes derrière lui
+
+`teams-matchmaking` (FT-2C) est le seul scénario qui **crée de vrais matchs**. Le runner ne
+parvient donc pas à supprimer ses deux comptes alignés : `match_participants.user_id` est en
+`onDelete: 'restrict'` (`backend/src/db/schema.ts`), et `DELETE /users/me` échoue pour tout
+compte ayant été aligné une fois. Ce n'est **pas** un défaut du scénario, c'est une
+limitation back à ticketer (en l'état, un joueur ne peut plus jamais supprimer son compte).
+En attendant, le rapport nomme les comptes restants et le nettoyage se fait à la main en SQL.

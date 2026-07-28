@@ -1,9 +1,11 @@
-import { useId, useState } from 'react';
-import { ArrowLeft, LogOut } from 'lucide-react';
+import { useId, useRef, useState } from 'react';
+import { ArrowLeft, CalendarPlus, LogOut } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 
 import { Button } from '@/components/ui/button';
+import { Callout } from '@/components/ui/callout';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { CreateMatchPanel } from '@/components/teams/detail/CreateMatchPanel';
 import { TeamHero } from '@/components/teams/detail/TeamHero';
 import { TeamManage } from '@/components/teams/detail/TeamManage';
 import { TeamMatches } from '@/components/teams/detail/TeamMatches';
@@ -14,9 +16,15 @@ import { buttonClasses } from '@/components/ui/button-variants';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useSortedGames } from '@/lib/games';
-import { removeTeamMemberErrorMessage, useRemoveTeamMember } from '@/lib/team-mutations';
+import {
+  cancelMatchErrorMessage,
+  removeTeamMemberErrorMessage,
+  useCancelMatch,
+  useRemoveTeamMember,
+} from '@/lib/team-mutations';
 import {
   findTeamStanding,
+  formatMatchDate,
   isValidTeamId,
   useLadderRankings,
   useTeam,
@@ -24,6 +32,7 @@ import {
 } from '@/lib/team-detail';
 
 import type { TabItem } from '@/components/ui/tabs';
+import type { TeamMatch } from '@/lib/team-detail';
 
 const BASE_TABS: TabItem[] = [
   { id: 'overview', label: 'Overview' },
@@ -62,14 +71,27 @@ function ErrorPanel({ title, message }: { title: string; message: string }) {
 export function TeamDetail() {
   const { teamId } = useParams({ from: '/_authenticated/teams/$teamId' });
   const uid = useId();
+  const createPanelId = useId();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
   const [leaveConfirming, setLeaveConfirming] = useState(false);
+  // FT-2C — the slot opener is a DISCLOSURE, not a modal: this flag drives both the inline
+  // panel and the `aria-expanded` of the button that toggles it.
+  const [creatingMatch, setCreatingMatch] = useState(false);
+  // ISO instant of the slot just opened, so the confirmation can name it. Null = nothing to
+  // announce.
+  const [openedSlotAt, setOpenedSlotAt] = useState<string | null>(null);
+  // Holding the whole match (not just an id) is what lets the confirmation state its date.
+  const [slotToCancel, setSlotToCancel] = useState<TeamMatch | null>(null);
+  // Focus has to come BACK to the opener when the panel closes; the browser only does that
+  // for itself with a native <dialog>.
+  const createButtonRef = useRef<HTMLButtonElement>(null);
   // The signed-in user's id: the ONLY thing the role is derived from, compared against
   // `team.captainId`. Selector form so the page re-renders on the user, not on the token.
   const currentUserId = useAuthStore((state) => state.user?.id);
   // Same route as the captain's kick — a voluntary departure is just removing yourself.
   const leaveTeam = useRemoveTeamMember(teamId);
+  const cancelSlot = useCancelMatch(teamId);
 
   // Mirrors the backend param schema: a malformed id can only ever come back as a 400,
   // so the error state is rendered without spending a request — and without the red
@@ -166,14 +188,67 @@ export function TeamDetail() {
     });
   }
 
+  function toggleCreateMatch() {
+    // A new attempt supersedes the previous confirmation: leaving "Slot opened for…" on
+    // screen next to an open form would leave the captain unsure which one it describes.
+    setOpenedSlotAt(null);
+    setCreatingMatch((open) => !open);
+  }
+
+  function closeCreateMatch() {
+    setCreatingMatch(false);
+    createButtonRef.current?.focus();
+  }
+
+  function handleSlotCreated(scheduledAt: string) {
+    setOpenedSlotAt(scheduledAt);
+    setCreatingMatch(false);
+    createButtonRef.current?.focus();
+  }
+
+  function confirmCancelSlot() {
+    if (!slotToCancel) return;
+
+    // `mutate`, not `mutateAsync`: a rejection lands in `cancelSlot.error` and is rendered
+    // inside the dialog, so no promise is left dangling in the handler.
+    cancelSlot.mutate(slotToCancel.id, {
+      onSuccess: () => {
+        setSlotToCancel(null);
+        // The confirmation may well have been describing the slot just withdrawn.
+        setOpenedSlotAt(null);
+      },
+    });
+  }
+
+  function dismissCancelSlot() {
+    cancelSlot.reset();
+    setSlotToCancel(null);
+  }
+
   function headerActions() {
-    // Le capitaine n'a AUCUNE action d'en-tête. Pas de « Leave team » : le back répond 400
-    // (« dissolve the team instead »), sa sortie est la zone dangereuse de l'onglet Manage.
-    // Pas de « Edit team » non plus, que la carte demandait : l'onglet Manage n'est visible
-    // que par lui, donc le bouton n'était qu'une seconde porte vers la même pièce et
-    // mangeait la largeur de l'en-tête à 375 px (décision David, 27/07).
-    // Un capitaine est aussi membre, d'où le `!isCaptain`.
-    if (isMember && !isCaptain) {
+    // FT-2C — the captain's ONLY header action is opening a slot. Still no « Leave team »
+    // (the backend answers 400, « dissolve the team instead »: his exit is the Manage tab's
+    // danger zone) and still no « Edit team », which the card asked for: the Manage tab is
+    // visible to him alone, so the button was a second door into the same room and ate the
+    // header's width at 375 px (David's call, 27/07).
+    if (isCaptain) {
+      return (
+        <Button
+          ref={createButtonRef}
+          aria-expanded={creatingMatch}
+          // Only while the panel exists: pointing at a missing id is invalid ARIA.
+          aria-controls={creatingMatch ? createPanelId : undefined}
+          onClick={toggleCreateMatch}
+        >
+          <CalendarPlus aria-hidden="true" className="mr-2 size-4" />
+          Create match
+        </Button>
+      );
+    }
+
+    // Reached only for a NON-captain, so `isMember` alone is the plain member: a captain is
+    // a member too, and the branch above has already returned for him.
+    if (isMember) {
       return (
         <Button variant="danger" onClick={() => setLeaveConfirming(true)}>
           <LogOut aria-hidden="true" className="mr-2 size-4" />
@@ -200,6 +275,38 @@ export function TeamDetail() {
         rankingsError={rankingsQuery.isError}
         actions={headerActions()}
       />
+
+      {isCaptain && creatingMatch && (
+        <CreateMatchPanel
+          id={createPanelId}
+          team={team}
+          members={members}
+          matches={matchesQuery.data?.matches}
+          onCreated={handleSlotCreated}
+          onClose={closeCreateMatch}
+        />
+      )}
+
+      {/* The live region is MOUNTED FOR THE WHOLE LIFE OF THE PAGE and only its text
+          changes: a region inserted into the DOM together with its content is not reliably
+          announced (the screen reader has to be watching the element before it fills).
+          `sr-only` is `position: absolute`, so an empty region costs no layout — the visible
+          banner below is a separate, purely visual element. */}
+      <p role="status" className="sr-only">
+        {openedSlotAt && !creatingMatch
+          ? `Slot opened for ${formatMatchDate(openedSlotAt, 'long')}, now waiting for an opponent.`
+          : ''}
+      </p>
+
+      {openedSlotAt && !creatingMatch && (
+        // The "Next match" block only ever shows the EARLIEST open slot, so a slot opened
+        // later than an existing one changes nothing on screen — this banner is what tells
+        // the captain his click landed. The row itself appears in the Matches tab.
+        <Callout tone="success">
+          Slot opened for {formatMatchDate(openedSlotAt, 'long')} — it is now waiting for an
+          opponent.
+        </Callout>
+      )}
 
       <Tabs
         tabs={tabs}
@@ -231,6 +338,7 @@ export function TeamDetail() {
           standing={standing}
           rankingsPending={rankingsQuery.isPending}
           rankingsError={rankingsQuery.isError}
+          onCancelSlot={isCaptain ? setSlotToCancel : undefined}
         />
       </div>
 
@@ -247,6 +355,7 @@ export function TeamDetail() {
           isPending={matchesQuery.isPending}
           isError={matchesQuery.isError}
           isMember={isMember}
+          onCancelSlot={isCaptain ? setSlotToCancel : undefined}
         />
       </div>
 
@@ -282,6 +391,30 @@ export function TeamDetail() {
           leaveTeam.reset();
           setLeaveConfirming(false);
         }}
+      />
+
+      {/* A SECOND instance next to the first, same pattern as the Manage tab: one dialog
+          multiplexing both would have to re-derive which action it is showing on every
+          render, for two texts that share nothing. */}
+      <ConfirmDialog
+        open={slotToCancel !== null}
+        title="Cancel this slot?"
+        description={
+          <>
+            The slot of{' '}
+            <strong className="text-text-primary">
+              {formatMatchDate(slotToCancel?.scheduledAt ?? null, 'long')}
+            </strong>{' '}
+            will no longer be acceptable by any team. It stays in the history, marked
+            cancelled — you can open another one right away.
+          </>
+        }
+        confirmLabel="Cancel the slot"
+        cancelLabel="Keep it"
+        pending={cancelSlot.isPending}
+        error={cancelSlot.isError ? cancelMatchErrorMessage(cancelSlot.error) : null}
+        onConfirm={confirmCancelSlot}
+        onCancel={dismissCancelSlot}
       />
     </div>
   );

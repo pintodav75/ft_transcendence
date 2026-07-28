@@ -1,5 +1,6 @@
-import { TriangleAlert } from 'lucide-react';
+import { TriangleAlert, X } from 'lucide-react';
 
+import { InlineButton } from '@/components/ui/inline-button';
 import { LadderExcerpt } from '@/components/teams/detail/LadderExcerpt';
 import { Pill } from '@/components/ui/pill';
 import { RosterChips } from '@/components/teams/detail/RosterChips';
@@ -46,6 +47,12 @@ type TeamOverviewProps = {
   standing: RankingEntry | undefined;
   rankingsPending: boolean;
   rankingsError: boolean;
+  /**
+   * Captain only: opens the confirmation for withdrawing the open slot. Left out for every
+   * other role, which is what keeps this component role-blind — the PAGE knows who is
+   * looking, this block only renders what it is handed.
+   */
+  onCancelSlot?: (match: TeamMatch) => void;
 };
 
 export function TeamOverview({
@@ -58,6 +65,7 @@ export function TeamOverview({
   standing,
   rankingsPending,
   rankingsError,
+  onCancelSlot,
 }: TeamOverviewProps) {
   const openSlot = isMember && matches ? nextOpenSlot(matches) : undefined;
   const form = matches ? recentForm(matches) : [];
@@ -95,7 +103,6 @@ export function TeamOverview({
       {openSlot && (
         <section className="flex flex-col gap-3.5">
           <SectionTitle>Next match</SectionTitle>
-          {/* Read-only here: cancelling the slot is FT-2C. */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border-y border-r border-l-2 border-border-subtle border-l-arena-blue bg-surface-card px-4 py-3">
             <p className="font-mono text-xs text-text-secondary">
               {formatMatchDate(openSlot.scheduledAt, 'long')}
@@ -106,8 +113,20 @@ export function TeamOverview({
                 {formatLineup(openSlot.lineup.self)}
               </p>
             )}
-            <span className="ml-auto">
+            <span className="ml-auto flex items-center gap-2">
               <Pill tone="open">Open slot</Pill>
+              {/* `nextOpenSlot` only ever returns a `pending` match with no opponent, so
+                  the button offered here is always one the server will accept. */}
+              {onCancelSlot ? (
+                <InlineButton
+                  tone="danger"
+                  onClick={() => onCancelSlot(openSlot)}
+                  aria-label={`Cancel the slot of ${formatMatchDate(openSlot.scheduledAt, 'long')}`}
+                >
+                  <X aria-hidden="true" className="size-3" />
+                  Cancel
+                </InlineButton>
+              ) : null}
             </span>
           </div>
         </section>
