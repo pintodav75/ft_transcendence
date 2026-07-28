@@ -1,5 +1,6 @@
 /**
- * `/teams/$teamId` — FT-2B, onglet Manage (gestion capitaine).
+ * `/teams/$teamId` — onglet Manage (gestion capitaine). FT-2B, mis à jour par FT-INV :
+ * l'ajout direct d'un membre n'existe plus, le capitaine INVITE.
  *
  * Ce que le scénario vérifie :
  *   - l'onglet **Manage** n'existe que pour le capitaine, et la barre à 3 onglets ne lève
@@ -11,34 +12,51 @@
  *   - recherche de joueur : 1 caractère ne déclenche aucune requête, 2 caractères en
  *     déclenchent une seule, et **aucun 404 sur tout le parcours** (c'est la régression que
  *     `GET /users/{pseudo}` produisait à chaque frappe) ;
- *   - ajout refusé (409 déclaré) puis accepté (201), exclusion, et retour du joueur ;
+ *   - **invitation refusée** (409 `already_in_team_on_ladder`, déclaré) : le message affiché
+ *     est celui dérivé du **`code`**, comparé en `exact` pour le distinguer de la prose
+ *     serveur — c'est le check qui garde la migration verbatim → `code` ;
+ *   - **invitation envoyée** (201) : la puce « Pending » apparaît au pseudo du joueur, le
+ *     compteur de plafond passe de `Roster slots 1/10` à `Roster slots 2/10 · 1 pending`, et
+ *     la statistique « Roster » de l'en-tête (les MEMBRES) **ne bouge pas** ;
+ *   - **annulation** (200) : la puce disparaît — puis **ré-invitation du même joueur en
+ *     201**, ce qui prouve que l'index d'unicité est PARTIEL (une invitation annulée ne
+ *     bloque pas la suivante) ;
+ *   - un **non-membre** (en l'occurrence le joueur invité lui-même) ne voit **aucune** puce
+ *     « Pending » — la divulgation progressive vient du contrat, pas d'une garde client — et
+ *     un **membre non-capitaine** les voit, mais **sans** bouton d'annulation ;
+ *   - les deux compteurs de l'écran sont mesurés **séparément** : « Roster slots » (onglet
+ *     Manage, membres + invitations) monte, « Roster » (en-tête, public, MEMBRES) ne bouge
+ *     pas — deux libellés distincts pour deux chiffres légitimement différents ;
  *   - l'onglet Manage **au repos** ne parle pas (mesure de référence : sans elle, une requête
  *     tardive d'une autre origine serait imputée au dialogue) ;
  *   - `ConfirmDialog` : ouvrir/fermer ne coûte aucune requête, Escape ferme sans muter, et
  *     **aucune boîte native** (`window.confirm`) n'est apparue de tout le run ;
- *   - un membre non-capitaine n'a pas l'onglet Manage, peut quitter, et atterrit sur
- *     `/teams` ;
+ *   - kick, départ volontaire d'un membre, atterrissage sur `/teams` ;
  *   - la dissolution atterrit sur `/teams` **sans un seul 404** — c'est ce check qui valide
  *     l'ordre `navigate` → `removeQueries` de `useDissolveTeam`.
  *
  * ⚠️ CE QUE CE SCÉNARIO NE PROUVE PAS.
- *   - **Le roster plein.** L'état « This roster is full » et le 409 « team is full »
+ *   - **Le parcours du joueur invité** (Accept / Decline sur `/teams`) : il a son propre
+ *     scénario, `teams-invitations.mjs`. Ici les deux acceptations passent par un **appel
+ *     API direct**, uniquement pour fabriquer l'état « le joueur est membre » dont les
+ *     phases kick / départ / dissolution ont besoin.
+ *   - **Le roster plein.** L'état « This roster is full » et le 409 `roster_full`
  *     demanderaient 10 comptes : le bloc désactivé n'est jamais rendu ici.
- *   - **Le même joueur ajouté deux fois.** C'est INATTEIGNABLE par l'UI : dès qu'un joueur
- *     est au roster, `excludeIds` le retire des résultats de recherche, il n'y a plus rien à
- *     cliquer. Le 409 est donc provoqué par l'autre cause du même statut — un joueur déjà
- *     engagé dans une équipe de ce ladder — qui emprunte le même chemin de code et le même
- *     rendu de message (verbatim serveur).
- *   - **Le rendu visuel** (contraste, alignements) et la **restauration du focus après un
- *     kick** : la puce qui portait le bouton disparaît avec le membre, le focus retombe donc
- *     sur `<body>`. À constater à l'œil, pas mesurable ici.
+ *   - **`already_invited` et `already_member`.** Tous deux INATTEIGNABLES par l'UI :
+ *     `excludeIds` retire des résultats de recherche les membres ET les joueurs déjà
+ *     invités, il n'y a plus rien à cliquer. Seul `already_in_team_on_ladder` est
+ *     déclenchable, et il emprunte le même chemin de code (mapping par `code`).
+ *   - **Le rendu visuel** (contraste, alignements, distinction Kick / Cancel à l'œil) et la
+ *     **restauration du focus** après un kick OU après l'annulation d'une invitation : la
+ *     puce qui portait le bouton disparaît avec lui, le focus retombe sur `<body>`.
  *   - **403 (capitaine destitué) et 429** : mappés dans `team-mutations.ts`, jamais
  *     déclenchés ici.
  *   - L'équipe créée à la volée **n'a aucun match** : rien ne dit ce que devient un
  *     historique quand un joueur aligné est exclu.
  */
 export const name = 'teams-manage';
-export const surface = '/teams/$teamId — onglet Manage : renommage, logo, roster, dissolution';
+export const surface =
+  '/teams/$teamId — onglet Manage : renommage, logo, invitations, roster, dissolution';
 
 export async function run({
   page,
@@ -372,39 +390,45 @@ export async function run({
     `GET /search -> HTTP ${searchRes.status()}, ${searchCalls} requête(s) pour une saisie (1 attendue)`,
   );
 
-  // ------------------------------------------------------------------ §7 ajout refusé
-  setPhase('10. ajout d’un joueur déjà engagé sur ce ladder -> 409');
+  // ------------------------------------------------------------------ §7 invitation refusée
+  setPhase('10. invitation d’un joueur déjà engagé sur ce ladder -> 409');
   expectHttp(
-    new RegExp(`/teams/${teamId}/members`),
-    'joueur déjà dans une équipe de ce ladder -> 409 attendu',
+    new RegExp(`/teams/${teamId}/invitations`),
+    'joueur déjà dans une équipe de ce ladder -> 409 already_in_team_on_ladder attendu',
   );
   await searchForRival();
-  const addConflictPromise = page.waitForResponse(
-    (r) => r.url().endsWith(`/api/teams/${teamId}/members`) && r.request().method() === 'POST',
+  const inviteConflictPromise = page.waitForResponse(
+    (r) => r.url().endsWith(`/api/teams/${teamId}/invitations`) && r.request().method() === 'POST',
     { timeout: 20000 },
   );
   await rivalRow.click();
-  const addConflictRes = await addConflictPromise;
-  const conflictMessage = await page
-    .locator('text=already in a team on this ladder')
+  const inviteConflictRes = await inviteConflictPromise;
+  // ⚠️ `exact: true` n'est pas cosmétique : c'est LUI qui prouve qu'on affiche le message
+  // dérivé du `code` stable et non la prose du serveur. Le back dit « this player already
+  // has a team on this ladder » (minuscule, sans point final), le front dit « This player
+  // already has a team on this ladder. ». Un match par sous-chaîne confondrait les deux —
+  // et c'est précisément la régression que B-INV rend possible.
+  const conflictByCode = await page
+    .getByText('This player already has a team on this ladder.', { exact: true })
+    .first()
     .waitFor({ timeout: 10000 })
     .then(() => true)
     .catch(() => false);
   step(
     'B12',
-    addConflictRes.status() === 409 && conflictMessage,
-    `POST /members -> HTTP ${addConflictRes.status()}, message serveur affiché verbatim = ${conflictMessage}`,
+    inviteConflictRes.status() === 409 && conflictByCode,
+    `POST /invitations -> HTTP ${inviteConflictRes.status()}, message dérivé du code (et non la prose serveur) affiché = ${conflictByCode}`,
   );
 
-  // ------------------------------------------------------------------ §8 ajout nominal
-  // Libère le joueur : tant que son équipe existe, l'ajout ne peut QUE répondre 409.
+  // ------------------------------------------------------------------ §8 invitation nominale
+  // Libère le joueur : tant que son équipe existe, l'invitation ne peut QUE répondre 409.
   const rivalTeamGone = await api(rival, `/teams/${rivalTeamId}`, { method: 'DELETE' });
 
-  setPhase('11. ajout nominal -> 201');
-  const addMember = async () => {
+  const invitePlayer = async () => {
     await searchForRival();
     const promise = page.waitForResponse(
-      (r) => r.url().endsWith(`/api/teams/${teamId}/members`) && r.request().method() === 'POST',
+      (r) =>
+        r.url().endsWith(`/api/teams/${teamId}/invitations`) && r.request().method() === 'POST',
       { timeout: 20000 },
     );
     await rivalRow.click();
@@ -412,27 +436,142 @@ export async function run({
   };
 
   // ⚠️ Scopé au panneau VISIBLE : le roster est rendu deux fois (Overview et Manage), et
-  // la copie de l'onglet inactif est `hidden` — un `.first()` nu attendrait la mauvaise.
-  const rivalChip = page.locator(
-    `[role="tabpanel"]:not([hidden]) a[href$="/players/${rival.pseudo}"]`,
-  );
-  const addRes = await addMember();
-  const chipAppeared = await rivalChip
+  // la copie de l'onglet inactif est `hidden` — un `.first()` nu viserait la mauvaise.
+  const visiblePanel = page.locator('[role="tabpanel"]:not([hidden])');
+  const rivalChip = visiblePanel.locator(`li:has(a[href$="/players/${rival.pseudo}"])`);
+  const rivalPendingChip = rivalChip.filter({ hasText: 'Pending' });
+  // Compteur de PLAFOND de l'onglet Manage (« Roster slots » = membres + invitations en
+  // attente) — à ne pas confondre avec la statistique « Roster » de l'en-tête, qui compte
+  // les MEMBRES. Les deux libellés diffèrent exprès : ils ne doivent PAS bouger ensemble,
+  // et c'est mesuré ci-dessous.
+  const capCounter = visiblePanel
+    .locator('p')
+    .filter({ hasText: /^Roster slots \d+\/10/ })
+    .first();
+  // 4e statistique de l'en-tête, dans l'ordre fixe Elo / Record / Rank / Roster.
+  const memberStat = page.locator('dl > div').nth(3).locator('dd');
+  const flat = (value) => value.replace(/\s+/g, ' ').trim();
+
+  setPhase('11. invitation nominale -> 201 et puce « Pending »');
+  const capBefore = flat(await capCounter.innerText());
+  const membersBefore = flat(await memberStat.innerText());
+  const inviteRes = await invitePlayer();
+  const pendingAppeared = await rivalPendingChip
     .first()
     .waitFor({ timeout: 15000 })
     .then(() => true)
     .catch(() => false);
+  const capAfter = flat(await capCounter.innerText());
+  const membersAfter = flat(await memberStat.innerText());
   step(
     'B13',
-    addRes.status() === 201 && chipAppeared,
-    `dissolution de l’équipe rivale -> HTTP ${rivalTeamGone.status}, POST /members -> HTTP ${addRes.status()}, puce de roster apparue = ${chipAppeared}`,
+    inviteRes.status() === 201 && pendingAppeared,
+    `dissolution de l’équipe rivale -> HTTP ${rivalTeamGone.status}, POST /invitations -> HTTP ${inviteRes.status()}, puce « Pending » au pseudo du joueur apparue = ${pendingAppeared}`,
+  );
+  step(
+    'B13a',
+    capBefore.startsWith('Roster slots 1/10') &&
+      capAfter.startsWith('Roster slots 2/10') &&
+      capAfter.includes('1 pending'),
+    `compteur de plafond : « ${capBefore.slice(0, 46)} » -> « ${capAfter.slice(0, 46)} » (2/10 · 1 pending attendu)`,
+  );
+  step(
+    'B13b',
+    membersBefore === membersAfter,
+    `statistique « Roster » de l’en-tête (MEMBRES) : « ${membersBefore} » -> « ${membersAfter} » — un invité ne doit pas être compté comme membre`,
+  );
+
+  setPhase('11b. la puce « Pending » + son bouton Cancel à 375 px');
+  // La puce en attente est la plus large du roster (avatar + pseudo + pastille « Pending » +
+  // bouton « Cancel »). FT-2B avait laissé ce trou : la puce AVEC son bouton n'avait jamais
+  // été mesurée à 375 px. On mesure, on ne regarde pas.
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.waitForTimeout(400);
+  const narrowPanel = await visiblePanel.evaluate((el) => ({
+    scroll: el.scrollWidth,
+    client: el.clientWidth,
+  }));
+  const narrowDocOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  step(
+    'B13b2',
+    narrowPanel.scroll <= narrowPanel.client && narrowDocOverflow <= 0,
+    `panneau Manage avec une puce « Pending » à 375 px : scrollWidth=${narrowPanel.scroll} vs clientWidth=${narrowPanel.client}, débordement du document ${narrowDocOverflow}px`,
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForTimeout(300);
+
+  // ------------------------------------------------------------------ §8b annulation
+  const dialog = page.locator('dialog[open]');
+
+  setPhase('12. annulation de l’invitation -> la puce disparaît');
+  await page.getByRole('button', { name: `Cancel invitation to ${rival.pseudo}` }).click();
+  await dialog.waitFor({ timeout: 5000 });
+  const cancelPromise = page.waitForResponse(
+    (r) =>
+      r.url().includes(`/api/teams/${teamId}/invitations/`) && r.request().method() === 'DELETE',
+    { timeout: 20000 },
+  );
+  // Le libellé de confirmation (« Cancel invitation ») est distinct de celui du bouton de
+  // la puce (« Cancel invitation to <pseudo> ») ET du bouton d'abandon (« Keep it »).
+  await dialog.getByRole('button', { name: 'Cancel invitation', exact: true }).click();
+  const cancelRes = await cancelPromise;
+  const pendingGone = await rivalPendingChip
+    .first()
+    .waitFor({ state: 'detached', timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  step(
+    'B13c',
+    cancelRes.status() === 200 && pendingGone,
+    `DELETE /invitations/:id -> HTTP ${cancelRes.status()}, puce « Pending » retirée = ${pendingGone}`,
+  );
+
+  setPhase('13. ré-invitation du même joueur -> 201');
+  const reinviteRes = await invitePlayer();
+  await rivalPendingChip.first().waitFor({ timeout: 15000 });
+  step(
+    'B13d',
+    reinviteRes.status() === 201,
+    `ré-invitation après annulation -> HTTP ${reinviteRes.status()} (201 attendu : l’index d’unicité est PARTIEL, il ne porte que sur les invitations « pending »)`,
+  );
+
+  // ------------------------------------------------------------------ §8c acceptation
+  // Le joueur accepte par APPEL DIRECT : ce parcours-ci appartient au scénario
+  // `teams-invitations`, on ne fabrique ici que l'état « rival = membre » dont les phases
+  // kick / départ / dissolution ci-dessous ont besoin.
+  setPhase('14. le joueur accepte (appel direct) -> il devient membre');
+  const pendingForRival = await api(rival, '/teams/invitations/me').then((r) => r.json());
+  // ⚠️ Garde AVANT de construire l'URL : une liste vide interpolerait `undefined` et
+  // produirait un 404 qui ferait rougir le filet transverse B20 avec un diagnostic
+  // trompeur (« un 404 sur le parcours ») au lieu de la vraie cause.
+  const rivalInviteId = pendingForRival.invitations[0]?.id;
+  step(
+    'B13e0',
+    pendingForRival.invitations.length === 1 && Boolean(rivalInviteId),
+    `invitations en attente du joueur avant acceptation : ${pendingForRival.invitations.length} (1 attendue)`,
+  );
+  const acceptRes = await api(rival, `/teams/invitations/${rivalInviteId}/accept`, {
+    method: 'POST',
+  });
+  await page.goto(teamUrl, { waitUntil: 'networkidle' });
+  await openManage();
+  await rivalChip.first().waitFor({ timeout: 15000 });
+  const chipsForRival = await rivalChip.count();
+  const stillPending = await rivalPendingChip.count();
+  const membersJoined = flat(await memberStat.innerText());
+  step(
+    'B13e',
+    acceptRes.status === 200 && chipsForRival === 1 && stillPending === 0,
+    `POST .../accept -> HTTP ${acceptRes.status}, puces au nom du joueur : ${chipsForRival} (1 attendue), dont « Pending » : ${stillPending} (0 attendu), en-tête « Roster » = « ${membersJoined} »`,
   );
 
   // ------------------------------------------------------------------ §9 ConfirmDialog
-  setPhase('12a. onglet Manage au repos : aucune requête');
-  // L'ajout qui précède invalide trois clés de cache ; leurs refetch partent APRÈS que la
-  // puce soit apparue. Sans cette attente ils tomberaient dans la fenêtre de mesure et on
-  // imputerait au dialogue une requête qui ne lui appartient pas.
+  setPhase('15a. onglet Manage au repos : aucune requête');
+  // Le rechargement qui précède invalide plusieurs clés de cache ; leurs refetch partent
+  // APRÈS que la puce soit apparue. Sans cette attente ils tomberaient dans la fenêtre de
+  // mesure et on imputerait au dialogue une requête qui ne lui appartient pas.
   await page.waitForLoadState('networkidle');
   // Mesure de RÉFÉRENCE, sans aucune interaction : elle sépare « le dialogue coûte une
   // requête » de « quelque chose parle tout seul sur cet onglet ». Sans elle, la seconde
@@ -454,7 +593,7 @@ export async function run({
     `requêtes /api sur l’onglet Manage au repos : ${idleCalls} (0 attendu)${idleUrls.length ? ` -> ${idleUrls.join(', ')}` : ''}`,
   );
 
-  setPhase('12b. ConfirmDialog : ouverture/Escape sans aucune mutation');
+  setPhase('15b. ConfirmDialog : ouverture/Escape sans aucune mutation');
   const kickButton = page.getByRole('button', { name: `Kick ${rival.pseudo}` });
   // Le filtre sert aussi de collecteur : un échec doit DIRE quelle requête est partie,
   // sinon il ne reste qu'un compteur et rien pour le diagnostiquer.
@@ -481,9 +620,8 @@ export async function run({
     `appels /api pendant ouverture+Escape : ${dialogCalls} (0 attendu)${dialogUrls.length ? ` -> ${dialogUrls.join(', ')}` : ''}, dialogue refermé = ${dialogClosed}, joueur toujours au roster = ${chipSurvived}`,
   );
 
-  setPhase('13. kick confirmé -> la puce disparaît');
+  setPhase('16. kick confirmé -> la puce disparaît');
   await kickButton.click();
-  const dialog = page.locator('dialog[open]');
   await dialog.waitFor({ timeout: 5000 });
   const kickPromise = page.waitForResponse(
     (r) =>
@@ -503,30 +641,83 @@ export async function run({
     `DELETE /members/:userId -> HTTP ${kickRes.status()}, puce retirée = ${chipGone}`,
   );
 
-  // ------------------------------------------------------------------ §10 vue non-capitaine
-  setPhase('14. ré-ajout du joueur pour la vue non-capitaine');
-  const readdRes = await addMember();
-  await rivalChip.first().waitFor({ timeout: 15000 });
-  step('B16', readdRes.status() === 201, `ré-ajout -> HTTP ${readdRes.status()}`);
+  // ------------------------------------------------------------------ §10 vue non-membre
+  setPhase('17. ré-invitation du joueur pour la vue non-membre');
+  const readdRes = await invitePlayer();
+  await rivalPendingChip.first().waitFor({ timeout: 15000 });
+  step('B16', readdRes.status() === 201, `ré-invitation -> HTTP ${readdRes.status()}`);
 
   await page.context().clearCookies();
   await login(rival);
   // APRÈS login() : il pose sa propre phase, un setPhase avant lui serait écrasé.
-  setPhase('15. même page vue par un membre non-capitaine');
+  setPhase('18. la même page vue par un NON-MEMBRE (invité, pas encore membre)');
   await page.goto(teamUrl, { waitUntil: 'networkidle' });
   await page.locator('h1').first().waitFor({ timeout: 15000 });
-  const manageTabForMember = await page.getByRole('tab', { name: 'Manage' }).count();
+  const manageTabForGuest = await page.getByRole('tab', { name: 'Manage' }).count();
+  // ⚠️ LE check de divulgation progressive : `invitations` est ABSENT de GET /teams/{id}
+  // pour un non-membre. Le compte utilisé ici est justement CELUI QUI EST INVITÉ — s'il ne
+  // voit aucune puce « Pending », personne hors de l'équipe n'en voit.
+  const pendingForGuest = await visiblePanel.locator('li:has-text("Pending")').count();
+  step(
+    'B17',
+    manageTabForGuest === 0 && pendingForGuest === 0,
+    `onglet Manage pour un non-membre : ${manageTabForGuest} (0 attendu), puces « Pending » visibles par un non-membre : ${pendingForGuest} (0 attendu)`,
+  );
+
+  setPhase('19. le joueur accepte -> il devient membre et peut quitter');
+  const pendingAgain = await api(rival, '/teams/invitations/me').then((r) => r.json());
+  // Même garde qu'en phase 14, même raison.
+  const rivalInviteId2 = pendingAgain.invitations[0]?.id;
+  step(
+    'B17b0',
+    pendingAgain.invitations.length === 1 && Boolean(rivalInviteId2),
+    `invitations en attente du joueur avant la 2e acceptation : ${pendingAgain.invitations.length} (1 attendue)`,
+  );
+  const acceptAgainRes = await api(rival, `/teams/invitations/${rivalInviteId2}/accept`, {
+    method: 'POST',
+  });
+  await page.goto(teamUrl, { waitUntil: 'networkidle' });
   const leaveButton = page.getByRole('button', { name: 'Leave team' });
+  await leaveButton.waitFor({ timeout: 15000 });
   // getByRole ignore ce que l'arbre d'accessibilité ne voit pas : le bouton du dialogue
   // fermé (<dialog> = display:none) n'est donc PAS compté ici.
   const leaveCount = await leaveButton.count();
   step(
-    'B17',
-    manageTabForMember === 0 && leaveCount === 1,
-    `onglet Manage pour un membre : ${manageTabForMember} (0 attendu), bouton « Leave team » : ${leaveCount} (1 attendu)`,
+    'B17b',
+    acceptAgainRes.status === 200 && leaveCount === 1,
+    `POST .../accept -> HTTP ${acceptAgainRes.status}, bouton « Leave team » du nouveau membre : ${leaveCount} (1 attendu)`,
   );
 
-  setPhase('16. départ volontaire -> retour sur /teams');
+  // ----------------------------------------------------- §10b vue d'un MEMBRE non-capitaine
+  // Critère §4.2 : un membre voit les puces en attente (« le capitaine a sollicité untel »)
+  // mais n'a AUCUN bouton d'annulation — retirer une invitation reste la décision du
+  // capitaine. Un 3e compte est nécessaire : le capitaine ne peut pas s'auto-inviter, et le
+  // seul autre compte du run est justement celui qui regarde.
+  setPhase('19b. un membre non-capitaine voit les puces « Pending », sans bouton Cancel');
+  const outsider = await createUser();
+  const outsiderId = await api(outsider, '/users/me')
+    .then((r) => r.json())
+    .then(({ user: me }) => me.id);
+  const inviteOutsider = await api(user, `/teams/${teamId}/invitations`, {
+    method: 'POST',
+    body: JSON.stringify({ userId: outsiderId }),
+  });
+  await page.goto(teamUrl, { waitUntil: 'networkidle' });
+  await visiblePanel.locator('li:has-text("Pending")').first().waitFor({ timeout: 15000 });
+  const pendingForMember = await visiblePanel.locator('li:has-text("Pending")').count();
+  // Motif ancré : n'importe quel bouton « Cancel invitation to <pseudo> », quel que soit le
+  // joueur visé. Le dialogue de confirmation, lui, s'appelle « Cancel invitation » tout
+  // court et est de toute façon fermé (donc hors arbre d'accessibilité).
+  const cancelButtonsForMember = await page
+    .getByRole('button', { name: /^Cancel invitation to / })
+    .count();
+  step(
+    'B17c',
+    inviteOutsider.status === 201 && pendingForMember === 1 && cancelButtonsForMember === 0,
+    `invitation d’un 3e joueur -> HTTP ${inviteOutsider.status}, puces « Pending » vues par un MEMBRE : ${pendingForMember} (1 attendue), boutons d’annulation : ${cancelButtonsForMember} (0 attendu — réservés au capitaine)`,
+  );
+
+  setPhase('20. départ volontaire -> retour sur /teams');
   await leaveButton.click();
   await dialog.waitFor({ timeout: 5000 });
   const leavePromise = page.waitForResponse(
@@ -549,7 +740,7 @@ export async function run({
   // ------------------------------------------------------------------ §11 dissolution
   await page.context().clearCookies();
   await login(user);
-  setPhase('17. dissolution -> /teams, et surtout AUCUN 404');
+  setPhase('21. dissolution -> /teams, et surtout AUCUN 404');
   await page.goto(teamUrl, { waitUntil: 'networkidle' });
   await openManage();
   await page.getByRole('button', { name: 'Dissolve team' }).first().click();

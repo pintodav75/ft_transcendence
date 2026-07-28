@@ -17,6 +17,7 @@ import type {
   FormResult,
   RankingEntry,
   TeamDetail,
+  TeamInvitation,
   TeamMatch,
   TeamMember,
 } from '@/lib/team-detail';
@@ -32,6 +33,12 @@ const formWord: Record<FormResult, string> = {
 type TeamOverviewProps = {
   team: TeamDetail;
   members: TeamMember[];
+  /**
+   * Pending invitations, shown read-only here. Always `[]` for a visitor because the key is
+   * absent from `GET /teams/{id}` for a non-member — so no role check is needed: a member
+   * legitimately sees who the captain has approached, a visitor simply receives nothing.
+   */
+  invitations: TeamInvitation[];
   /** From the ROOT of GET /teams/{id}/matches — never recomputed from the roster. */
   isMember: boolean;
   matches: TeamMatch[] | undefined;
@@ -44,6 +51,7 @@ type TeamOverviewProps = {
 export function TeamOverview({
   team,
   members,
+  invitations,
   isMember,
   matches,
   rankings,
@@ -58,10 +66,13 @@ export function TeamOverview({
     <div className="flex flex-col gap-8">
       <section className="flex flex-col gap-3.5">
         <SectionTitle>Roster</SectionTitle>
+        {/* No `onCancelInvitation`: withdrawing an invitation is the captain's call, and
+            the captain has the Manage tab for it. */}
         <RosterChips
           members={members}
           provider={team.requiredProvider}
           showAccountState={isMember}
+          invitations={invitations}
         />
         {isMember && (
           <p className="text-xs text-text-muted">

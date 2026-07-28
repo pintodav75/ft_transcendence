@@ -136,6 +136,9 @@ export function TeamDetail() {
   }
 
   const { team, members } = teamQuery.data;
+  // ABSENT (not empty) for a non-member — progressive disclosure lives in the contract, so
+  // there is deliberately no role check here: a visitor gets `[]` and renders nothing.
+  const invitations = teamQuery.data.invitations ?? [];
   const standing = rankings ? findTeamStanding(rankings, team.id) : undefined;
   const gameName = games.find((game) => game.id === team.gameId)?.name ?? team.gameId.toUpperCase();
 
@@ -221,6 +224,7 @@ export function TeamDetail() {
         <TeamOverview
           team={team}
           members={members}
+          invitations={invitations}
           isMember={isMember}
           matches={matchesQuery.data?.matches}
           rankings={rankings}
@@ -255,7 +259,7 @@ export function TeamDetail() {
           tabIndex={0}
           className="focus-ring min-w-0"
         >
-          <TeamManage team={team} members={members} />
+          <TeamManage team={team} members={members} invitations={invitations} />
         </div>
       )}
 
