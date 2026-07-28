@@ -46,9 +46,10 @@
  *     `excludeIds` retire des résultats de recherche les membres ET les joueurs déjà
  *     invités, il n'y a plus rien à cliquer. Seul `already_in_team_on_ladder` est
  *     déclenchable, et il emprunte le même chemin de code (mapping par `code`).
- *   - **Le rendu visuel** (contraste, alignements, distinction Kick / Cancel à l'œil) et la
- *     **restauration du focus** après un kick OU après l'annulation d'une invitation : la
- *     puce qui portait le bouton disparaît avec lui, le focus retombe sur `<body>`.
+ *   - **Le rendu visuel** (contraste, alignements, distinction Kick / Cancel à l'œil).
+ *     ⚠️ La **restauration du focus** après un kick ou une annulation d'invitation N'EST
+ *     PLUS un angle mort : [FX-FOCUS] l'a corrigée et les checks B13c-bis / B15-bis la
+ *     mesurent (le focus doit atterrir sur le titre « Roster », jamais sur `<body>`).
  *   - **403 (capitaine destitué) et 429** : mappés dans `team-mutations.ts`, jamais
  *     déclenchés ici.
  *   - L'équipe créée à la volée **n'a aucun match** : rien ne dit ce que devient un
@@ -62,6 +63,8 @@ export async function run({
   page,
   setPhase,
   step,
+  focusLanding,
+  pressEnterOn,
   countRequests,
   expectHttp,
   createUser,
@@ -506,7 +509,8 @@ export async function run({
   const dialog = page.locator('dialog[open]');
 
   setPhase('12. annulation de l’invitation -> la puce disparaît');
-  await page.getByRole('button', { name: `Cancel invitation to ${rival.pseudo}` }).click();
+  // AU CLAVIER, pas au clic : c'est le seul parcours où « où atterrit le focus » a un sens.
+  await pressEnterOn(page.getByRole('button', { name: `Cancel invitation to ${rival.pseudo}` }));
   await dialog.waitFor({ timeout: 5000 });
   const cancelPromise = page.waitForResponse(
     (r) =>
@@ -515,7 +519,7 @@ export async function run({
   );
   // Le libellé de confirmation (« Cancel invitation ») est distinct de celui du bouton de
   // la puce (« Cancel invitation to <pseudo> ») ET du bouton d'abandon (« Keep it »).
-  await dialog.getByRole('button', { name: 'Cancel invitation', exact: true }).click();
+  await pressEnterOn(dialog.getByRole('button', { name: 'Cancel invitation', exact: true }));
   const cancelRes = await cancelPromise;
   const pendingGone = await rivalPendingChip
     .first()
@@ -526,6 +530,18 @@ export async function run({
     'B13c',
     cancelRes.status() === 200 && pendingGone,
     `DELETE /invitations/:id -> HTTP ${cancelRes.status()}, puce « Pending » retirée = ${pendingGone}`,
+  );
+
+  // FX-FOCUS — la puce annulée portait le bouton qui a ouvert la boîte ; sans point de
+  // repli, le <dialog> natif rendrait le focus à <body>.
+  const afterCancel = await focusLanding();
+  const cancelAnnounced = afterCancel.live.some((line) =>
+    line === `The invitation to @${rival.pseudo} was cancelled.`,
+  );
+  step(
+    'B13c-bis',
+    afterCancel.tag === 'H2' && afterCancel.label === 'Roster' && cancelAnnounced,
+    `focus après annulation : <${afterCancel.tag}> « ${afterCancel.label} » (H2 « Roster » attendu, JAMAIS BODY) — annonce exacte trouvée = ${cancelAnnounced} parmi [${afterCancel.live.join(' | ')}]`,
   );
 
   setPhase('13. ré-invitation du même joueur -> 201');
@@ -621,14 +637,14 @@ export async function run({
   );
 
   setPhase('16. kick confirmé -> la puce disparaît');
-  await kickButton.click();
+  await pressEnterOn(kickButton);
   await dialog.waitFor({ timeout: 5000 });
   const kickPromise = page.waitForResponse(
     (r) =>
       r.url().includes(`/api/teams/${teamId}/members/`) && r.request().method() === 'DELETE',
     { timeout: 20000 },
   );
-  await dialog.getByRole('button', { name: 'Remove player' }).click();
+  await pressEnterOn(dialog.getByRole('button', { name: 'Remove player' }));
   const kickRes = await kickPromise;
   const chipGone = await rivalChip
     .first()
@@ -639,6 +655,16 @@ export async function run({
     'B15',
     kickRes.status() === 200 && chipGone,
     `DELETE /members/:userId -> HTTP ${kickRes.status()}, puce retirée = ${chipGone}`,
+  );
+
+  const afterKick = await focusLanding();
+  const kickAnnounced = afterKick.live.some(
+    (line) => line === `@${rival.pseudo} was removed from the roster.`,
+  );
+  step(
+    'B15-bis',
+    afterKick.tag === 'H2' && afterKick.label === 'Roster' && kickAnnounced,
+    `focus après kick : <${afterKick.tag}> « ${afterKick.label} » (H2 « Roster » attendu, JAMAIS BODY) — annonce exacte trouvée = ${kickAnnounced} parmi [${afterKick.live.join(' | ')}]`,
   );
 
   // ------------------------------------------------------------------ §10 vue non-membre

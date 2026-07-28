@@ -47,7 +47,8 @@
  *   - **Un ladder 5v5** (lockout 60) : la règle stricte est vérifiée sur un 2v2 (lockout 30).
  *     C'est la même fonction, paramétrée par le ladder.
  *   - **Le rendu visuel** (contraste, liste déroulante native du `<select>` sur fond sombre,
- *     alignement de la colonne d'actions) et la **restauration du focus** après annulation :
+ *     alignement de la colonne d'actions). ⚠️ La **restauration du focus** après annulation
+ *     est désormais MESURÉE (check M8-bis, [FX-FOCUS]) — l'ancien angle mort était :
  *     la ligne qui portait le bouton perd son bouton, le focus retombe sur `<body>`.
  *
  * ⚠️ CE SCÉNARIO LAISSAIT DEUX COMPTES DERRIÈRE LUI — la TROUVAILLE qui a donné [BX-DEL].
@@ -65,7 +66,7 @@ export const surface = '/teams/$teamId — ouvrir un créneau (POST /matches) et
 const QUARTER_MS = 15 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
-export async function run({ page, setPhase, step, countRequests, expectHttp, createUser, user, ORIGIN }) {
+export async function run({ page, setPhase, step, countRequests, expectHttp, createUser, user, ORIGIN, focusLanding, pressEnterOn }) {
   // Filet transverse : un seul 404 suffit à faire rougir la console d'un correcteur.
   const notFound = [];
   page.on('response', (res) => {
@@ -366,7 +367,8 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
   await page.goto(`${ORIGIN}/teams/${teamId}`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Matches' }).click();
   const slotRow = page.locator('tbody tr', { hasText: 'Open slot' });
-  await slotRow.locator('button[aria-label^="Cancel the slot of"]').click();
+  // AU CLAVIER : voir `pressEnterOn` dans runner.mjs.
+  await pressEnterOn(slotRow.locator('button[aria-label^="Cancel the slot of"]'));
 
   const cancelResponse = page.waitForResponse(
     (res) => /\/api\/matches\/[0-9a-f-]{36}$/.test(res.url()) && res.request().method() === 'DELETE',
@@ -374,7 +376,7 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
   );
   // `exact` : le bouton de la LIGNE s'appelle « Cancel the slot of … » et il est toujours
   // dans le DOM derrière la boîte — sans ça le sélecteur en trouverait deux.
-  await page.getByRole('button', { name: 'Cancel the slot', exact: true }).click();
+  await pressEnterOn(page.getByRole('button', { name: 'Cancel the slot', exact: true }));
   const cancelled = await cancelResponse;
 
   const cancelledRows = await page
@@ -388,6 +390,23 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
     'M8',
     cancelled.status() === 200 && cancelledRows === 1 && remainingButtons === 0 && nextMatchGone === 0,
     `DELETE /api/matches/{id} -> HTTP ${cancelled.status()}, lignes « Cancelled » : ${cancelledRows} (1 — la ligne RESTE dans l’historique), boutons d’annulation restants : ${remainingButtons} (0), bloc « Next match » : ${nextMatchGone} (0)`,
+  );
+
+  // FX-FOCUS — ici DEUX choses disparaissent d'un coup : le bouton de la ligne et le bloc
+  // « Next match » entier. Le repli est le PANNEAU d'onglet visible (nommé par son onglet),
+  // faute d'un titre de section qui survive dans les deux onglets.
+  const afterSlotCancel = await focusLanding();
+  // ⚠️ On assert sur le RÔLE et le NOM, pas sur `tag === 'DIV'` : n'importe quel conteneur
+  // de la page est un DIV, l'assertion ne prouverait que « pas BODY ».
+  const slotAnnounced = afterSlotCancel.live.some((line) =>
+    line.includes('cancelled. It stays in the history'),
+  );
+  step(
+    'M8-bis',
+    afterSlotCancel.role === 'region' &&
+      afterSlotCancel.label.startsWith('Match history') &&
+      slotAnnounced,
+    `focus après annulation : <${afterSlotCancel.tag} role="${afterSlotCancel.role}"> « ${afterSlotCancel.label} » (la région « Match history », qui NOMME la liste ; JAMAIS BODY) — annonce trouvée = ${slotAnnounced}`,
   );
 
   // ------------------------------------------- §9 409 chevauchement sur page périmée

@@ -9,7 +9,9 @@
  *     requête `GET /teams/invitations/me` par affichage de `/teams` (le bloc fait sa propre
  *     query : on prouve qu'elle ne part pas en boucle) ;
  *   - le joueur invité voit le bloc, avec le **nom de l'équipe** et le ladder ;
- *   - **Decline** (200) : la ligne disparaît, la grille « My teams » reste vide ;
+ *   - **Decline** (200) : la ligne disparaît, la grille « My teams » reste vide ; et depuis
+ *     [FX-FOCUS], le focus atterrit sur le titre de la PAGE (le bloc entier ayant disparu
+ *     avec son propre titre) au lieu de tomber sur `<body>` ;
  *   - **deux équipes du même ladder** peuvent inviter le même joueur ; en **acceptant**
  *     l'une, l'autre invitation **disparaît toute seule** — c'est l'annulation en cascade
  *     du serveur, jamais une simulation côté client ;
@@ -32,7 +34,7 @@
 export const name = 'teams-invitations';
 export const surface = '/teams — bloc « Team invitations » : accepter / refuser une invitation';
 
-export async function run({ page, setPhase, step, countRequests, createUser, user, ORIGIN }) {
+export async function run({ page, setPhase, step, countRequests, createUser, user, ORIGIN, focusLanding, pressEnterOn }) {
   // Filet transverse : un seul 404 sur tout le parcours suffit à faire rougir la console
   // d'un correcteur. On les collecte pour pouvoir DIRE lesquels.
   const notFound = [];
@@ -160,7 +162,8 @@ export async function run({ page, setPhase, step, countRequests, createUser, use
     (r) => /\/api\/teams\/invitations\/[^/]+\/decline$/.test(r.url()),
     { timeout: 20000 },
   );
-  await page.getByRole('button', { name: `Decline the invitation from ${teamAName}` }).click();
+  // AU CLAVIER (`pressEnterOn`) : la restauration du focus ne se juge pas à la souris.
+  await pressEnterOn(page.getByRole('button', { name: `Decline the invitation from ${teamAName}` }));
   const declineRes = await declinePromise;
   const blockGone = await invitationBlock
     .waitFor({ state: 'detached', timeout: 15000 })
@@ -171,6 +174,16 @@ export async function run({ page, setPhase, step, countRequests, createUser, use
     'I4',
     declineRes.status() === 200 && blockGone && stillNoTeam === 1,
     `POST .../decline -> HTTP ${declineRes.status()}, bloc retiré = ${blockGone}, grille toujours vide = ${stillNoTeam === 1}`,
+  );
+
+  // FX-FOCUS — c'était la DERNIÈRE invitation : le bloc entier s'en va, titre compris.
+  // Le repli est donc le titre de la page, pas celui de la section (qui n'existe plus).
+  const afterDecline = await focusLanding();
+  const declineAnnounced = afterDecline.live.some((line) => line.includes('was declined'));
+  step(
+    'I4-bis',
+    afterDecline.tag === 'H1' && afterDecline.label === 'My teams' && declineAnnounced,
+    `focus après refus de la DERNIÈRE invitation : <${afterDecline.tag}> « ${afterDecline.label} » (H1 « My teams » attendu, JAMAIS BODY) — annonce trouvée = ${declineAnnounced}`,
   );
 
   // ------------------------------------------------------------------ §5 deux invitations
@@ -215,7 +228,7 @@ export async function run({ page, setPhase, step, countRequests, createUser, use
     (r) => /\/api\/teams\/invitations\/[^/]+\/accept$/.test(r.url()),
     { timeout: 20000 },
   );
-  await page.getByRole('button', { name: `Accept the invitation from ${teamAName}` }).click();
+  await pressEnterOn(page.getByRole('button', { name: `Accept the invitation from ${teamAName}` }));
   const acceptRes = await acceptPromise;
   // Aucune navigation entre le clic et cette assertion : c'est là toute la preuve.
   const cardAppeared = await page
@@ -234,6 +247,15 @@ export async function run({ page, setPhase, step, countRequests, createUser, use
     'I6',
     acceptRes.status() === 200 && cardAppeared && confirmed,
     `POST .../accept -> HTTP ${acceptRes.status()}, carte d’équipe apparue dans la grille sans rechargement = ${cardAppeared}, confirmation annoncée (role="status") = ${confirmed}`,
+  );
+
+  // FX-FOCUS — ici le bloc SURVIT (il affiche « You joined … »), donc l'atterrissage est le
+  // titre de section, exactement comme pour le roster.
+  const afterAccept = await focusLanding();
+  step(
+    'I6-bis',
+    afterAccept.tag === 'H2' && afterAccept.label === 'Team invitations',
+    `focus après acceptation : <${afterAccept.tag}> « ${afterAccept.label} » (H2 « Team invitations » attendu, JAMAIS BODY)`,
   );
 
   // L'invitation de l'équipe B n'a pas été refusée : le serveur l'a passée à `cancelled`

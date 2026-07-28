@@ -302,6 +302,57 @@ async function deleteAuditUser(user) {
 
 // ---------------------------------------------------------------- exécution
 
+/**
+ * FX-FOCUS — où le focus a-t-il atterri, et qu'a-t-on annoncé ?
+ *
+ * `<body>` est la réponse FAUSSE : c'est ce que fait le `<dialog>` natif quand l'élément
+ * qui l'a ouvert n'existe plus, et l'utilisateur au clavier est alors renvoyé en haut de
+ * page. On lit aussi les régions live, parce qu'un focus déplacé sans rien annoncer laisse
+ * un lecteur d'écran muet sur ce qui vient de disparaître.
+ *
+ * ⚠️ `role` et `name` sont rendus EN PLUS de `tag` : une assertion sur le seul `tag`
+ * (« c'est un DIV ») est satisfaite par n'importe quel conteneur de la page et ne prouve
+ * donc rien d'autre que « pas BODY ».
+ */
+async function focusLanding(page) {
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    const name = (node) => {
+      if (!node) return '';
+      const labelled = node.getAttribute('aria-labelledby');
+      const target = labelled ? document.getElementById(labelled) : null;
+      return (
+        node.getAttribute('aria-label') ||
+        (target ? target.textContent : '') ||
+        node.textContent ||
+        ''
+      )
+        .trim()
+        .slice(0, 60);
+    };
+    return {
+      tag: el ? el.tagName : null,
+      role: el ? el.getAttribute('role') : null,
+      id: el ? el.id : null,
+      label: name(el),
+      live: Array.from(document.querySelectorAll('[role="status"]'))
+        .map((n) => (n.textContent || '').trim())
+        .filter(Boolean),
+    };
+  });
+}
+
+/**
+ * Active un élément AU CLAVIER — `focus()` puis Entrée, jamais un clic.
+ *
+ * La restauration du focus ne se juge que sur un parcours clavier : à la souris, le focus
+ * de départ n'est pas sur le bouton, donc l'endroit où il atterrit ne veut rien dire.
+ */
+async function pressEnterOn(locator) {
+  await locator.focus();
+  await locator.page().keyboard.press('Enter');
+}
+
 export async function runScenario(scenario) {
   const fixtures = makeFixtures();
   // Créé même pour un scénario public : `/register` a besoin d'un email DÉJÀ pris pour
@@ -453,6 +504,8 @@ export async function runScenario(scenario) {
       user,
       ORIGIN,
       login,
+      focusLanding: () => focusLanding(page),
+      pressEnterOn,
       // Compte supplémentaire (ajout de membre, conflit de pseudo) — supprimé lui aussi.
       createUser: async () => {
         const extra = await createAuditUser(`x${users.length}`);
