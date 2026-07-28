@@ -248,6 +248,24 @@ def run():
         "⚠️ si 429 : la clé est retombée sur l'IP — c'est exactement le bug que B12 corrige.",
     )
 
+    # ── B13 — /auth/refresh : cookie ABSENT ≠ cookie REFUSÉ ─────────────────────────────
+    # Contrat figé ici parce qu'il est fragile dans les deux sens : ramener le cookie absent
+    # à 401 fait réapparaître une ligne rouge en console sur CHAQUE page anonyme (motif de
+    # rejet du projet), et « simplifier » le cookie invalide en 204 ferait passer un vrai
+    # échec d'authentification pour une absence de session.
+    # ⚠️ `req()` n'envoie aucun cookie : le cas « absent » est le comportement par défaut.
+    s.section("POST /auth/refresh — 204 sans cookie, 401 si le cookie est refusé (B13)")
+    st, _ = req("POST", "/auth/refresh")
+    s.check(
+        "aucun cookie → 204",
+        st,
+        204,
+        "⚠️ si 401 : Chrome réécrit une ligne rouge sur / , /login et /register.",
+    )
+    st, b = req("POST", "/auth/refresh", cookies={"refresh": "pas.un.jwt"})
+    s.check("cookie présent mais illisible → 401", st, 401)
+    s.check("… et c'est bien un refus explicite", b.get("error"), "Invalid refresh token")
+
     # ── La clé du compteur GLOBAL est-elle vraiment l'utilisateur ? ─────────────────────
     # Ces deux cas ne sont pas décoratifs. `rateLimitKey` ne peut lire `request.user` que si
     # le hook du limiteur passe APRÈS `authenticate`. C'est démontré pour les routes qui

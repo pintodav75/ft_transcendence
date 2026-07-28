@@ -152,7 +152,7 @@ export interface paths {
         put?: never;
         /**
          * Renouveler l'access token
-         * @description Lit le cookie refresh et émet un nouvel access token.
+         * @description Lit le cookie refresh et émet un nouvel access token. Le front appelle cette route à l'ouverture de chaque page, y compris anonyme, pour tenter de restaurer une session : l'absence de cookie n'est donc PAS un échec (204), seul un cookie présent mais refusé en est un (401).
          */
         post: {
             parameters: {
@@ -174,9 +174,17 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Refresh token absent ou invalide */
+                /** @description Aucun cookie de refresh : il n'y a pas de session à restaurer. **Corps vide** — le client doit traiter ce cas explicitement, sans le confondre avec un 200. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Cookie de refresh présent mais refusé : invalide, expiré, de mauvais type, ou utilisateur supprimé. ⚠️ **N'inclut plus le cookie absent** (204 depuis B13). Le cookie mort est **effacé** (`Set-Cookie` expiré) pour que l'appel suivant retombe sur le 204 silencieux plutôt que de répéter ce 401 indéfiniment ; une panne serveur, elle, rend 401 **sans** toucher au cookie. */
                 401: {
                     headers: {
+                        "Set-Cookie"?: string;
                         [name: string]: unknown;
                     };
                     content: {

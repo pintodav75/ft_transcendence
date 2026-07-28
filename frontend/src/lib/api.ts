@@ -143,6 +143,16 @@ export async function refreshAccessToken() {
       credentials: 'include',
     })
 
+    // 204 = aucun cookie de refresh, donc aucune session à restaurer (B13). Ce n'est pas une
+    // erreur, mais ce n'est pas non plus un succès : il n'y a pas de token à poser.
+    // ⚠️ La garde doit être ÉCRITE, pas subie : `parseResponse` rend `undefined` sur un corps
+    // vide, donc sans elle le destructuring ci-dessous jetterait un TypeError silencieusement
+    // avalé par le `catch`. Le comportement serait juste, par accident.
+    // ⚠️ Elle passe AVANT `response.ok` : un 204 est un 2xx.
+    if (response.status === 204) {
+      return false
+    }
+
     if (!response.ok) {
       return false
     }

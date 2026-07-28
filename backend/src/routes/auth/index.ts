@@ -93,19 +93,50 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
   server.post('/refresh', async (request, reply) => {
     try {
       const refreshToken = request.cookies.refresh;
-      if (!refreshToken) return reply.code(401).send({ error: 'Missing refresh token' });
-      const payload = server.jwt.verify<{ sub: string; type?: 'access' | 'refresh' }>(
-        refreshToken,
-      );
+      // ── B13 — PAS de cookie ≠ échec d'authentification ────────────────────────────────
+      // Le front appelle cette route à l'ouverture de CHAQUE page anonyme (`/`, `/login`,
+      // `/register`) pour tenter de restaurer une session. Un 401 y faisait écrire une ligne
+      // rouge par CHROME LUI-MÊME — pas par notre code, donc aucun `try/catch` ne peut
+      // l'effacer — avant le moindre clic du correcteur. Or « zéro erreur en console » est un
+      // motif de REJET du projet. Il n'y a rien à restaurer, et un cookie absent n'apprend
+      // rien à un attaquant : 204.
+      // ⚠️ Ne PAS étendre ce 204 aux autres branches : cookie présent mais invalide, expiré,
+      // de mauvais type, ou user supprimé sont de VRAIS échecs et restent en 401.
+      if (!refreshToken) return reply.code(204).send();
+
+      // ── Un cookie DÉFINITIVEMENT refusé est PURGÉ ────────────────────────────────────
+      // Sinon la ligne rouge que ce ticket vient d'éteindre revient, et en pire : elle
+      // devient PERMANENTE. Le front vide son état local mais n'appelle pas `/auth/logout`,
+      // donc le cookie mort survit, et Chrome réécrit son 401 à CHAQUE chargement de page,
+      // sans que l'utilisateur puisse rien y faire (il est déconnecté, il n'a plus de bouton
+      // Logout). Ce n'est pas théorique : chaque rotation du `JWT_SECRET` ou changement de
+      // format de token met TOUT LE MONDE dans cet état pour les 7 jours de TTL du cookie.
+      // En le purgeant, le chargement suivant retombe sur le 204 silencieux : auto-guérison.
+      const refused = () => {
+        clearRefreshCookie(reply);
+        return reply.code(401).send({ error: 'Invalid refresh token' });
+      };
+
+      // ⚠️ La vérification a son PROPRE try : une signature invalide ou expirée est un refus
+      // définitif (on purge), une panne de base ne l'est PAS (on ne purge surtout pas, sinon
+      // une coupure passagère déconnecte durablement tout le monde) — et le `catch` général
+      // plus bas ne sait pas distinguer les deux.
+      let payload: { sub: string; type?: 'access' | 'refresh' };
+      try {
+        payload = server.jwt.verify<{ sub: string; type?: 'access' | 'refresh' }>(refreshToken);
+      } catch {
+        return refused();
+      }
+
       // Un access token (ou un refresh d'avant le claim `type`) n'échange pas de session.
       // Même message que les autres échecs : aucun oracle « mauvais type » vs « invalide ».
-      if (payload.type !== 'refresh')
-        return reply.code(401).send({ error: 'Invalid refresh token' });
+      if (payload.type !== 'refresh') return refused();
       const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.sub));
-      if (!user) return reply.code(401).send({ error: 'Invalid refresh token' });
+      if (!user) return refused();
       const accessToken = signAccessToken(request.server, { sub: user.id });
       return reply.code(200).send({ accessToken });
     } catch (err) {
+      // Chemin des pannes (base injoignable…), PAS des refus : on ne touche pas au cookie.
       return reply.code(401).send({ error: 'Invalid refresh token' });
     }
   });
