@@ -4,9 +4,11 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { LadderSelect } from '@/components/home/LadderSelect';
 import { TeamCreation } from '@/components/home/TeamCreation';
+import { TeamInvitations } from '@/components/teams/TeamInvitations';
 import { TeamsCards } from '@/components/teams/TeamsCards';
 import { Button } from '@/components/ui/button';
-import { useMyTeams } from '@/lib/teams';
+import { Callout } from '@/components/ui/callout';
+import { MY_INVITATIONS_KEY, useMyTeams } from '@/lib/teams';
 
 export function Teams() {
   const queryClient = useQueryClient();
@@ -36,7 +38,14 @@ export function Teams() {
     setFormOpen(false);
     setCreatedTeamName(teamName);
     setCreatedTeamWarning(warning);
-    await queryClient.invalidateQueries({ queryKey: ['teams'] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['teams'] }),
+      // ⚠️ Creating a team CANCELS, server-side and in the same transaction, the pending
+      // invitations I had received on that ladder — I have a team there now, they could
+      // only ever end in a 409. Without this refetch they would stay on screen, and their
+      // Accept button would fire a request whose answer is already known.
+      queryClient.invalidateQueries({ queryKey: MY_INVITATIONS_KEY }),
+    ]);
   }
 
   return (
@@ -50,19 +59,13 @@ export function Teams() {
 
       {createdTeamName && (
         <div className="flex flex-col gap-2">
-          <p
-            role="status"
-            className="rounded-control border border-success/40 bg-success/10 px-4 py-3 text-sm text-success"
-          >
+          <Callout tone="success" role="status">
             “{createdTeamName}” was created.
-          </p>
+          </Callout>
           {createdTeamWarning && (
-            <p
-              role="status"
-              className="rounded-control border border-border-subtle bg-surface-card-strong/60 px-4 py-3 text-sm text-text-secondary"
-            >
+            <Callout tone="muted" role="status">
               {createdTeamWarning}
-            </p>
+            </Callout>
           )}
         </div>
       )}
@@ -71,6 +74,11 @@ export function Teams() {
         <TeamCreation onCreated={handleCreated} onCancel={() => setFormOpen(false)} />
       ) : (
         <>
+          {/* Above the grid, and self-contained: it renders nothing at all when there is
+              no invitation to answer. Hidden while the creation form is open — one task
+              at a time. */}
+          <TeamInvitations />
+
           {/* Filter the list by game; "All" (default) shows every team. Only
               the games the user actually fields a team in get a button — the
               others could only ever filter down to an empty grid. */}

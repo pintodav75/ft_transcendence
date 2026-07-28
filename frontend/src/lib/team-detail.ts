@@ -7,6 +7,7 @@ import type { components, paths } from '@/lib/api-types.gen';
 
 export type TeamDetail = components['schemas']['TeamDetail'];
 export type TeamMember = components['schemas']['TeamMember'];
+export type TeamInvitation = components['schemas']['TeamInvitation'];
 export type RequiredProvider = TeamDetail['requiredProvider'];
 
 type TeamDetailResponse =
@@ -23,9 +24,10 @@ export type RankingEntry = LadderRankingsResponse['rankings'][number];
 export type Competitor = RankingEntry['competitor'];
 export type TeamCompetitor = Extract<Competitor, { type: 'team' }>;
 
-// The backend refuses a roster of 10 (`total >= 10` -> 409 "team is full"). It is a
+// The backend refuses an eleventh slot (`used >= 10` -> 409 `roster_full`). It is a
 // flat cap, NOT derived from the format: a 2v2 team may bench extra players, so the
-// format only sizes a lineup.
+// format only sizes a lineup. Since B-INV a PENDING INVITATION holds a slot too — see
+// `rosterUsage` below.
 export const ROSTER_LIMIT = 10;
 
 /** Used where a value is legitimately unknown (no score, no Elo delta, no date). */
@@ -82,6 +84,27 @@ export function useLadderRankings(ladderId: string | undefined) {
 }
 
 // ---------------------------------------------------------------- derivations
+
+/**
+ * How many of the 10 roster slots are taken.
+ *
+ * The cap counts the SUM of members and pending invitations: the backend checks
+ * `members + pending >= 10` when the captain invites, and a decline or a cancellation
+ * gives the slot back. A counter showing members only would say "4/10" while the server
+ * answers 409 `roster_full` — the screen would be contradicting the rule it displays.
+ *
+ * ⚠️ NO ROLE GUARD HERE, and none anywhere else on `invitations`. `GET /teams/{id}` OMITS
+ * the key for a non-member (absent, not empty — same progressive disclosure as `lineup` on
+ * the match history), so `data?.invitations ?? []` already yields `[]` for a visitor.
+ * Re-deriving "may I see this?" client-side would be a second source of truth, and the two
+ * would drift the day the backend changes its mind.
+ */
+export function rosterUsage(members: TeamMember[], invitations: TeamInvitation[]) {
+  const pending = invitations.length;
+  const used = members.length + pending;
+
+  return { used, pending, full: used >= ROSTER_LIMIT };
+}
 
 export function isTeamCompetitor(competitor: Competitor): competitor is TeamCompetitor {
   return competitor.type === 'team';

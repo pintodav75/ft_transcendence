@@ -3,16 +3,23 @@ import { useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { RosterChips } from '@/components/teams/detail/RosterChips';
 import { SectionTitle } from '@/components/ui/section-title';
-import { TeamAddMember } from '@/components/teams/detail/TeamAddMember';
 import { TeamDangerZone } from '@/components/teams/detail/TeamDangerZone';
 import { TeamIdentity } from '@/components/teams/detail/TeamIdentity';
-import { removeTeamMemberErrorMessage, useRemoveTeamMember } from '@/lib/team-mutations';
+import { TeamInvitePlayer } from '@/components/teams/detail/TeamInvitePlayer';
+import {
+  cancelTeamInvitationErrorMessage,
+  removeTeamMemberErrorMessage,
+  useCancelTeamInvitation,
+  useRemoveTeamMember,
+} from '@/lib/team-mutations';
 
-import type { TeamDetail, TeamMember } from '@/lib/team-detail';
+import type { TeamDetail, TeamInvitation, TeamMember } from '@/lib/team-detail';
 
 type TeamManageProps = {
   team: TeamDetail;
   members: TeamMember[];
+  /** Pending invitations of this team — `[]` unless the caller is a member. */
+  invitations: TeamInvitation[];
 };
 
 /**
@@ -22,11 +29,16 @@ type TeamManageProps = {
  * role. The backend refuses every one of these calls to a non-captain anyway — this tab
  * is the readable half of that rule, not the enforcement.
  */
-export function TeamManage({ team, members }: TeamManageProps) {
+export function TeamManage({ team, members, invitations }: TeamManageProps) {
   // The member the captain is about to remove — `null` closes the dialog. Holding the
   // whole member (not just an id) is what lets the confirmation NAME the player.
   const [memberToKick, setMemberToKick] = useState<TeamMember | null>(null);
+  // Its own state and its own dialog below, NOT one generic dialog multiplexing both:
+  // cancelling an invitation and kicking a member differ in tone, wording and consequence,
+  // and a shared instance would have to re-derive which one it is showing on every render.
+  const [invitationToCancel, setInvitationToCancel] = useState<TeamInvitation | null>(null);
   const kick = useRemoveTeamMember(team.id);
+  const cancelInvitation = useCancelTeamInvitation(team.id);
 
   function confirmKick() {
     if (!memberToKick) return;
@@ -40,11 +52,23 @@ export function TeamManage({ team, members }: TeamManageProps) {
     setMemberToKick(null);
   }
 
+  function confirmCancelInvitation() {
+    if (!invitationToCancel) return;
+    cancelInvitation.mutate(invitationToCancel.id, {
+      onSuccess: () => setInvitationToCancel(null),
+    });
+  }
+
+  function dismissCancelInvitation() {
+    cancelInvitation.reset();
+    setInvitationToCancel(null);
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <TeamIdentity team={team} />
 
-      <TeamAddMember teamId={team.id} members={members} />
+      <TeamInvitePlayer teamId={team.id} members={members} invitations={invitations} />
 
       <section className="flex flex-col gap-3.5">
         <SectionTitle>Roster</SectionTitle>
@@ -53,6 +77,8 @@ export function TeamManage({ team, members }: TeamManageProps) {
           provider={team.requiredProvider}
           showAccountState
           onKick={setMemberToKick}
+          invitations={invitations}
+          onCancelInvitation={setInvitationToCancel}
         />
       </section>
 
@@ -67,7 +93,7 @@ export function TeamManage({ team, members }: TeamManageProps) {
         description={
           <>
             <strong className="text-text-primary">@{memberToKick?.pseudo}</strong> will lose
-            access to this team. You can add them back later.
+            access to this team. You can invite them back later.
           </>
         }
         confirmLabel="Remove player"
@@ -75,6 +101,32 @@ export function TeamManage({ team, members }: TeamManageProps) {
         error={kick.isError ? removeTeamMemberErrorMessage(kick.error) : null}
         onConfirm={confirmKick}
         onCancel={cancelKick}
+      />
+
+      {/* A SECOND instance next to the first, same pattern. `tone="primary"` and not
+          `danger`: withdrawing an invitation destroys nothing — the player never joined,
+          and the captain can invite them again on the next click. */}
+      <ConfirmDialog
+        open={invitationToCancel !== null}
+        title="Cancel this invitation?"
+        description={
+          <>
+            <strong className="text-text-primary">@{invitationToCancel?.user.pseudo}</strong>{' '}
+            will no longer be able to join this team, and the roster slot is freed. You can
+            invite them again later.
+          </>
+        }
+        confirmLabel="Cancel invitation"
+        cancelLabel="Keep it"
+        tone="primary"
+        pending={cancelInvitation.isPending}
+        error={
+          cancelInvitation.isError
+            ? cancelTeamInvitationErrorMessage(cancelInvitation.error)
+            : null
+        }
+        onConfirm={confirmCancelInvitation}
+        onCancel={dismissCancelInvitation}
       />
     </div>
   );
