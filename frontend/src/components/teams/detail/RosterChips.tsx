@@ -4,10 +4,11 @@ import { Link } from '@tanstack/react-router';
 import { Avatar } from '@/components/ui/avatar';
 import { InlineButton } from '@/components/ui/inline-button';
 import { Pill } from '@/components/ui/pill';
-import { providerLabel } from '@/lib/team-detail';
+import { providerLabel } from '@/lib/games';
 import { cn } from '@/lib/utils';
 
-import type { RequiredProvider, TeamInvitation, TeamMember } from '@/lib/team-detail';
+import type { RequiredProvider } from '@/lib/games';
+import type { TeamInvitation, TeamMember } from '@/lib/team-detail';
 
 type RosterChipsProps = {
   members: TeamMember[];

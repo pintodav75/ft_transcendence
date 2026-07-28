@@ -1887,7 +1887,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Le ladder demandé et son jeu parent */
+                /** @description Le ladder demandé, son jeu parent et le pool de maps du jeu */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1896,6 +1896,8 @@ export interface paths {
                         "application/json": {
                             ladder: components["schemas"]["Ladder"];
                             game: components["schemas"]["Game"];
+                            /** @description Pool de maps du JEU du ladder (table `game_maps`), trié par nom — la même source que celle où `POST /matches` pioche les maps d'un match. Toujours présent ; **vide** pour un jeu sans maps (lol, rl, chess), ce qui n'est pas une erreur. */
+                            maps: string[];
                         };
                     };
                 };
@@ -4514,7 +4516,7 @@ export interface components {
             /** @example Counter-Strike 2 5v5 */
             name: string;
             /**
-             * @description Durée pendant laquelle la team/user est verrouillée après le début d'un match. Aussi le délai minimum avant soumission de score.
+             * @description Durée pendant laquelle la team/user est verrouillée autour d'un match : elle ne peut pas prendre un second créneau à moins de lockoutMinutes de celui-ci, avant comme après. ⚠️ NE régit PAS la soumission de score : la seule garde y est scheduledAt (POST /matches/{id}/result refuse un match dont l'heure n'est pas passée, 400 « match not started yet »). L'ancienne phrase « aussi le délai minimum avant soumission de score » était fausse.
              * @example 60
              */
             lockoutMinutes: number;

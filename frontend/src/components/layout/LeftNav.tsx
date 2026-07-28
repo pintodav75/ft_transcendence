@@ -2,7 +2,7 @@
 // placeholders at the top;
 // language + auth pinned to the bottom (AuthNav).
 
-import { Play, Trophy, Search, Gamepad2, Swords } from 'lucide-react';
+import { Play, Search, Gamepad2, Swords } from 'lucide-react';
 
 import { MenuItem } from '@/components/ui/menu-item';
 import { AuthNav } from '@/components/layout/AuthNav';
@@ -20,9 +20,10 @@ export function LeftNav() {
         <MenuItem to="/teams">
           <Swords className="size-5" /> my teams
         </MenuItem>
-        <MenuItem to="/ranking">
-          <Trophy className="size-5" /> ranking
-        </MenuItem>
+        {/* FT-3 — plus d'entrée « ranking » : la page globale a été supprimée avec ce
+            ticket. Un classement se lit désormais SUR SON LADDER (`/ladders/$ladderId`),
+            atteint depuis une équipe ; un sélecteur de ladder dans le rail attendra la
+            carte qui décidera de son entrée de navigation. */}
         <MenuItem>
           <Search className="size-5" /> find party
         </MenuItem>

@@ -9,6 +9,7 @@ import {
 } from '../db/schema.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { ENGAGING_STATUSES } from '../utils/match-status.js';
+import { rlMax } from '../utils/rate-limit.js';
 import z from 'zod';
 import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { isBlocked } from '../utils/blocks.js';
@@ -98,7 +99,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
     '/me/password',
     {
       onRequest: [server.authenticate],
-      config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+      config: { rateLimit: { max: rlMax(5), timeWindow: '1 minute' } },
     },
     async (request, reply) => {
       try {
@@ -166,7 +167,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       // ou trois fois. 20 borne toujours le trafic MinIO (20 × 2 Mo = 40 Mo/min par compte)
       // sans gêner personne. ⚠️ Ce plafond est désormais par COMPTE : une IP disposant de N
       // comptes obtient N × 40 Mo/min — contrepartie assumée du changement de clé (server.ts).
-      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+      config: { rateLimit: { max: rlMax(20), timeWindow: '1 minute' } },
     },
     async (request, reply) => {
       if (!request.isMultipart())

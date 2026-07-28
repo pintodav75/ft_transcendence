@@ -34,7 +34,7 @@
 export const name = 'teams-invitations';
 export const surface = '/teams — bloc « Team invitations » : accepter / refuser une invitation';
 
-export async function run({ page, setPhase, step, countRequests, createUser, user, ORIGIN, focusLanding, pressEnterOn }) {
+export async function run({ page, awaitAnnouncement, setPhase, step, countRequests, createUser, user, ORIGIN, focusLanding, awaitFocusRestored, pressEnterOn }) {
   // Filet transverse : un seul 404 sur tout le parcours suffit à faire rougir la console
   // d'un correcteur. On les collecte pour pouvoir DIRE lesquels.
   const notFound = [];
@@ -96,7 +96,7 @@ export async function run({ page, setPhase, step, countRequests, createUser, use
   const teamAName = `Audit INV A ${user.stamp}`;
   await page.fill('#team-name', teamAName);
   await page.click('button:has-text("Create team")');
-  await page.locator('[role="status"]').first().waitFor({ timeout: 15000 });
+  await awaitAnnouncement('was created');
   await page.locator('ul li a').first().click();
   await page.waitForURL(/\/teams\/[0-9a-f-]{36}/, { timeout: 10000 });
   const teamAId = new URL(page.url()).pathname.split('/').pop();
@@ -251,6 +251,7 @@ export async function run({ page, setPhase, step, countRequests, createUser, use
 
   // FX-FOCUS — ici le bloc SURVIT (il affiche « You joined … »), donc l'atterrissage est le
   // titre de section, exactement comme pour le roster.
+  await awaitFocusRestored();
   const afterAccept = await focusLanding();
   step(
     'I6-bis',

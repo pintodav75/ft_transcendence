@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from '../../auth/password.js';
 import { signAccessToken, signRefreshToken, signTempToken } from '../../auth/tokens.js';
 import { setRefreshCookie, clearRefreshCookie } from '../../auth/cookies.js';
 import { eq } from 'drizzle-orm';
+import { rlMax } from '../../utils/rate-limit.js';
 
 const registerSchema = z.object({
   pseudo: z.string().trim().min(3).max(30),
@@ -28,7 +29,7 @@ const loginSchema = z.object({
 export const authBasicRoutes: FastifyPluginAsync = async (server) => {
   server.post(
     '/register',
-    { config: { rateLimit: { max: 3, timeWindow: '1 minute' } } },
+    { config: { rateLimit: { max: rlMax(3), timeWindow: '1 minute' } } },
     async (request, reply) => {
     try {
       const data = registerSchema.parse(request.body);
@@ -66,7 +67,7 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
 
   server.post(
     '/login',
-    { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } },
+    { config: { rateLimit: { max: rlMax(5), timeWindow: '1 minute' } } },
     async (request, reply) => {
     try {
       const data = loginSchema.parse(request.body);

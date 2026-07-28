@@ -64,6 +64,8 @@ export async function run({
   setPhase,
   step,
   focusLanding,
+  awaitFocusRestored,
+  awaitAnnouncement,
   pressEnterOn,
   countRequests,
   expectHttp,
@@ -115,7 +117,7 @@ export async function run({
   await form.locator('div.flex-wrap').first().locator('button').first().click();
   await page.fill('#team-name', `Audit FT2B ${user.stamp}`);
   await page.click('button:has-text("Create team")');
-  await page.locator('[role="status"]').first().waitFor({ timeout: 15000 });
+  await awaitAnnouncement('was created');
   await page.locator('ul li a').first().click();
   await page.waitForURL(/\/teams\/[0-9a-f-]{36}/, { timeout: 10000 });
 
@@ -534,6 +536,10 @@ export async function run({
 
   // FX-FOCUS — la puce annulée portait le bouton qui a ouvert la boîte ; sans point de
   // repli, le <dialog> natif rendrait le focus à <body>.
+  // ⚠️ AVANT `focusLanding()`, qui est un instantané sans attente : sans ça on lit l'annonce
+  // PRÉCÉDENTE (« … has been invited. ») et le check rougit alors que l'app est correcte.
+  await awaitAnnouncement(`The invitation to @${rival.pseudo} was cancelled.`);
+  await awaitFocusRestored();
   const afterCancel = await focusLanding();
   const cancelAnnounced = afterCancel.live.some((line) =>
     line === `The invitation to @${rival.pseudo} was cancelled.`,
@@ -657,6 +663,9 @@ export async function run({
     `DELETE /members/:userId -> HTTP ${kickRes.status()}, puce retirée = ${chipGone}`,
   );
 
+  // Même piège que B13c-bis : instantané sans attente -> on lirait l'annonce précédente.
+  await awaitAnnouncement(`@${rival.pseudo} was removed from the roster.`);
+  await awaitFocusRestored();
   const afterKick = await focusLanding();
   const kickAnnounced = afterKick.live.some(
     (line) => line === `@${rival.pseudo} was removed from the roster.`,

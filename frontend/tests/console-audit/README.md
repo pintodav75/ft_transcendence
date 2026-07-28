@@ -19,6 +19,21 @@ Codes de sortie : **0** console propre et tous les checks verts · **1** au moin
 problème imputable au périmètre · **2** le harnais lui-même a échoué (stack éteinte,
 sélecteur obsolète). ⚠️ Un **2** ne veut **pas** dire « console propre ».
 
+### 🚨 Ne rien écrire sous `frontend/` pendant une campagne
+
+Vite surveille toute l'arborescence : **enregistrer un fichier — même un `.md`, même hors du
+graphe de modules — déclenche un rechargement complet de la page**. La SPA rebootstrape
+(`/auth/refresh`, `/users/me`, puis toutes les queries de la page) et **retombe sur l'onglet
+par défaut**.
+
+Vécu le 28/07 : un README enregistré 55 s avant la fin d'une campagne a donné à `teams-manage`
+un `B14b` rouge (« 6 requêtes là où 0 sont attendues ») **puis** un `locator.focus` expiré à
+30 s — le bouton « Kick » n'existe que dans l'onglet Manage, disparu au rechargement. Sortie
+en **exit 2**. Le même scénario lancé seul : **35/35 en 23,7 s**.
+
+⚠️ Le rapport accuse le **ticket**, jamais l'éditeur : le diagnostic coûte cher. Écrire la doc
+**après** le run, ou itérer sur un scénario filtré.
+
 ### Le navigateur
 
 `playwright-core` ne télécharge aucun navigateur : le runner cherche, dans l'ordre,
@@ -116,6 +131,30 @@ est **ligne 51** dans la source.
 Conséquence : **ne jamais recopier un `fichier:ligne` du rapport dans un compte rendu**.
 Le fichier est fiable, la ligne non — la retrouver au `grep` avant de la citer.
 
+### Lire une région live : `awaitAnnouncement(texte)`, jamais `waitFor()` nu
+
+Depuis [FX-FOCUS] il y a **une seule** région live `role="status"` par écran, et elle est
+**montée en permanence** (une région insérée en même temps que son texte n'est pas annoncée
+de façon fiable). Conséquence :
+
+```js
+await page.locator('[role=status]').first().waitFor();   // ❌ rend la main IMMÉDIATEMENT
+const texte = await page.locator('[role=status]').first().innerText();
+```
+
+…lit soit du **vide**, soit **l'annonce précédente**. Le helper attend le contenu :
+
+```js
+await awaitAnnouncement('was created');       // reçu en argument de run({ … })
+```
+
+⚠️ **`focusLanding()` est un instantané synchrone** : il ne contient aucune attente, ni pour
+le focus ni pour l'annonce. Appeler `awaitAnnouncement()` **avant** lui — attendre un texte
+ne déplace pas le focus, donc ne fausse pas la mesure.
+
+Ce piège a produit **2 faux rouges** (`ft1c` 4.1b, `teams-manage` B13c-bis) alors même que la
+règle était déjà écrite en prose : c'est pour ça qu'elle est maintenant **outillée**.
+
 ### Deux pièges à connaître avant d'écrire un scénario
 
 1. **`page.goto` recharge toute la SPA.** Le bandeau du serveur de dev est alors
@@ -138,6 +177,61 @@ Au 28/07/2026 il ne reste **qu'une** entrée : le bandeau React DevTools + le se
 a été **payé par [B13]** — la route rend désormais 204 quand il n'y a pas de cookie, et
 l'exemption a été retirée. Ne pas la remettre : c'est le retrait de cette ligne qui fait
 tomber les trois scénarios anonymes si quelqu'un ramène le 401.
+
+## Les quotas partagés par TOUTE la campagne (FT-3)
+
+Deux compteurs du backend sont indexés sur l'**IP**, donc partagés par tous les scénarios :
+
+- **100 req/min, quota global.** Les routes de référence (`/games`, `/ladders`,
+  `/ladders/{id}`, `/ladders/{id}/rankings`, `/auth/refresh`) sont **publiques** :
+  `request.user` y est vide, donc `rateLimitKey` retombe sur l'IP **même quand un Bearer est
+  envoyé**. Chaque `page.goto` rejoue `restoreSession()`, chaque page de teams charge
+  `/games` + `/ladders`… Mesuré : à partir du 4ᵉ scénario la campagne dépassait 100 req/min,
+  et le 429 qui suit est **indiscernable d'un vrai défaut** dans le rapport (session non
+  restaurée → redirection vers la landing → `/games` 429 → 3 réessais de TanStack Query =
+  27 entrées imputées à un ticket innocent, choisi par l'ordre alphabétique des fichiers).
+  → `run.mjs` appelle `awaitGlobalQuota()` **avant chaque scénario** : un `GET /api/ping`
+  (qui porte les en-têtes `x-ratelimit-*` du même compteur) et, si besoin, une attente.
+- **3 inscriptions/min.** `awaitRegisterSlot()` modélisait une fenêtre glissante de 61 s là
+  où le serveur en tient une **fixe** ; le décalage envoyait de temps en temps une 4ᵉ
+  inscription, dont le 429 s'affichait dans le formulaire de `auth-register`. Le modèle
+  prend désormais **75 s** de marge.
+
+⚠️ Règle générale : **le harnais ne doit jamais fabriquer le rouge qu'il prétend mesurer.**
+
+### `RATE_LIMIT_FACTOR` — pourquoi ces attentes ont (presque) disparu
+
+Ces deux mécanismes **attendent** au lieu d'encaisser un 429, et c'était le poste de temps
+dominant d'un ticket front : ~10 min de sommeil par campagne, plus ~60 s à chaque relance
+filtrée (le quota global vient d'être brûlé par la relance précédente).
+
+Le backend multiplie désormais **tous** ses quotas par `RATE_LIMIT_FACTOR` (`.env`, défaut 1,
+mis à **1000** en dev). Les deux garde-fous restent en place et **s'alignent tout seuls** :
+`awaitRegisterSlot` lit `x-ratelimit-limit` sur la réponse de `register` au lieu de supposer
+3/min, et `awaitGlobalQuota` lisait déjà les en-têtes. Rien à configurer côté harnais — le
+serveur est seule source de vérité. ⚠️ `RATE_LIMIT_FACTOR` **doit revenir à 1** avant la
+livraison ; le backend écrit un WARN à chaque démarrage tant que ce n'est pas le cas.
+
+⚠️ **Conséquence sur le diagnostic, et elle a mordu** : un scénario rouge en campagne mais
+vert seul n'est **plus** un quota — c'est presque toujours une **course du harnais** qui se
+gagnait grâce aux pauses supprimées. Chercher un `waitFor` qui n'attend rien (voir la section
+sur les régions live) **avant** d'accuser le code applicatif.
+
+## `ladder-detail` (FT-3) — et ce qu'il ne peut pas couvrir
+
+`scenarios/ladder-detail.mjs` audite `/ladders/$ladderId` : id malformé (écran d'erreur,
+**zéro requête**), uuid inconnu (404 déclaré par `expectHttp`), arrivée **par le lien
+« See the full ladder »** d'une page équipe sans rejouer `GET /ladders/{id}/rankings` (même
+entrée de cache), titre comparé au JSON de l'API, classement vide, pool de maps comparé
+map par map à l'API, section maps **absente** sur un jeu sans pool (chess, lol, rl), absence
+de toute formulation de file d'attente, et 375 px sans débordement. **10 checks.**
+
+⚠️ Les **lignes** du classement ne sont jamais montées : une ligne de rating naît d'un match
+**terminé** (deux équipes, une acceptation, deux scores concordants, `scheduledAt` passé), ce
+qu'un scénario ne sait pas fabriquer. La base de dev en est donc dépourvue et c'est l'état
+**vide** qui est couvert. Le rendu des lignes (liens, `aria-label`, 375 px, focus clavier) a
+été vérifié par une sonde jetable sur une base semée en SQL, puis nettoyée — refaire ce
+détour si `LadderRow` change.
 
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 

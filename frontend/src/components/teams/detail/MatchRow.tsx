@@ -5,14 +5,13 @@ import { InlineButton } from '@/components/ui/inline-button';
 import { MatchStatusPill } from '@/components/teams/detail/MatchStatusPill';
 import { matchAccentClass, matchStatusView } from '@/components/teams/detail/match-status';
 import {
-  EM_DASH,
   formatEloDelta,
   formatLineup,
   formatMatchDate,
   formatScore,
   isCancellableSlot,
 } from '@/lib/team-detail';
-import { cn } from '@/lib/utils';
+import { EM_DASH, cn } from '@/lib/utils';
 
 import type { TeamMatch } from '@/lib/team-detail';
 

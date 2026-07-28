@@ -22,7 +22,7 @@ import { chatRoutes } from './routes/chat.js';
 import { redisClient } from './storage/redis.js';
 import fastifyCors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
-import { rateLimitKey } from './utils/rate-limit.js';
+import { rateLimitKey, rlMax, RATE_LIMIT_FACTOR } from './utils/rate-limit.js';
 import { laddersRoutes } from './routes/ladders.js';
 import { externalAccountsRoutes } from './routes/external-accounts.js';
 import { teamsRoutes } from './routes/teams.js';
@@ -115,11 +115,29 @@ await server.register(fastifyCors, {
 // `/start`, `x-ratelimit-limit: 100` sur `/callback`, contre 3 sur `/auth/register`).
 // On l'accepte parce que l'alternative — 100 req/min partagées par tout un NAT — casse l'app
 // pour des utilisateurs légitimes : un risque certain contre un risque théorique.
+//
+// ⚠️ `rlMax` : tous les quotas de l'API sont multipliés par `RATE_LIMIT_FACTOR` (défaut 1).
+// C'est une variable de CONFORT pour les harnais (audit console, e2e Python), pas un
+// interrupteur — le plugin, les clés et les hooks sont inchangés. Détail dans
+// `utils/rate-limit.ts`. Elle DOIT valoir 1 à la livraison : la bannière ci-dessous le répète
+// à chaque démarrage tant que ce n'est pas le cas.
 await server.register(rateLimit, {
-  max: 100,
+  max: rlMax(100),
   timeWindow: '1 minute',
   keyGenerator: rateLimitKey,
 });
+
+// ⚠️ `console.warn`, PAS `server.log.warn` : ce serveur est instancié sans `logger`, donc
+// `server.log` est le logger muet de Fastify — la bannière ne serait écrite nulle part
+// (vérifié : rien dans `docker compose logs backend`). Or son unique raison d'être est
+// d'être VUE. Même choix que `config/validate-env.ts`.
+if (RATE_LIMIT_FACTOR !== 1) {
+  console.warn(
+    `⚠️  RATE_LIMIT_FACTOR=${RATE_LIMIT_FACTOR} — tous les quotas sont multipliés par ${RATE_LIMIT_FACTOR} ` +
+      `(register ${rlMax(3)}/min, global ${rlMax(100)}/min). Confort de développement UNIQUEMENT : ` +
+      `remettre RATE_LIMIT_FACTOR=1 dans .env avant toute livraison ou démonstration.`,
+  );
+}
 
 await server.register(websocket);
 await server.register(chatRoutes, { prefix: '/ws' });
