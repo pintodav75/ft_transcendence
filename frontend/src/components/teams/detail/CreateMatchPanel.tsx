@@ -100,6 +100,7 @@ export function CreateMatchPanel({
     register,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<CreateMatchFormValues>({
     // The size never changes for a mounted panel: it comes from the team's ladder.
@@ -157,8 +158,30 @@ export function CreateMatchPanel({
           // Showing the message without redrawing the list would let the next click fail
           // exactly the same way.
           if (isExpiredSlotError(error)) {
-            setNowMs(Date.now());
+            const freshNow = Date.now();
+            setNowMs(freshNow);
             setValue('time', '');
+
+            // FX-MIDNIGHT — la liste des jours vient d'être régénérée à partir de `freshNow`.
+            // Si le panneau est resté ouvert AU PASSAGE DE MINUIT, le `day` en mémoire est
+            // minuit de la veille : il ne correspond plus à aucune `<option>`. Le menu
+            // affichait alors un jour, le formulaire en retenait un autre, et la liste
+            // d'heures sortait vide (« No quarter left on this day »).
+            // ⚠️ On RECALCULE ici : `days` et `firstUsableDay` du rendu courant sont dérivés
+            // de l'ANCIEN `nowMs` (le `setNowMs` ci-dessus ne prend effet qu'au rendu
+            // suivant), les réutiliser réécrirait la valeur périmée qu'on veut corriger.
+            // ⚠️ On ne remet PAS le jour au premier utilisable de façon inconditionnelle :
+            // un capitaine qui avait choisi « dans 3 jours » n'a aucune raison d'être ramené
+            // à aujourd'hui parce qu'un quart d'heure vient de passer. On ne touche au
+            // champ que s'il désigne un jour qui n'existe plus.
+            const freshDays = slotDays(freshNow);
+            const stillListed = freshDays.some((day) => day.value === getValues('day'));
+            if (!stillListed) {
+              const usable =
+                freshDays.find((day) => slotTimes(day.startMs, freshNow).length > 0) ??
+                freshDays[0];
+              setValue('day', usable?.value ?? '');
+            }
           }
         },
       },
