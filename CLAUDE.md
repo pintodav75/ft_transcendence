@@ -59,7 +59,7 @@ Reste aussi la **préparation de la soutenance** (chaque module revendiqué doit
 
 ### Prochaines actions
 
-- 🔧 **LOT DE FIX EN COURS (décision David, 28/07)** : avant d'attaquer FT-3, on vide la liste Trello **Issues / bug fixes**, une carte à la fois — branche → `reviewer-*` → merge. Ordre : ~~**[B12]**~~ ✅ · ~~**[B13]**~~ ✅ · ~~**[BX-DEL]**~~ ✅ · ~~**[FX-FOCUS]**~~ ✅ · **[FX-MIDNIGHT]** (https://trello.com/c/L9GCUBkQ), le dernier. **[B12B]** (https://trello.com/c/xC70Wqjf) est née de la review de B12 et n'est **pas** dans ce lot. **Un seul message Discord pour tout le lot, à la fin.**
+- ✅ **LOT DE FIX TERMINÉ (28/07)** : les 5 cartes de *Issues / bug fixes* sont mergées — **[B12]** (rate limit 2FA par compte), **[B13]** (204 sur `/auth/refresh`), **[BX-DEL]** (suppression de compte, **migration `0023`**), **[FX-FOCUS]** (focus rendu après une suppression), **[FX-MIDNIGHT]** (jour incohérent à minuit). La liste ne contient plus que **[B12B]** (https://trello.com/c/xC70Wqjf), née de la review de B12 : `/2fa/enable` et `/2fa/disable` vérifient un code à 6 chiffres à 100/min, 20× le quota de `/verify`. **Prochain gros ticket : [FT-3]** (page d'un ladder). ⚠️ **Au prochain pull : `docker compose restart backend`** (migration 0023).
 
 - **FT-2 a été découpé en trois le 27/07** (le ticket unique mélangeait lecture, 5 mutations et un composant de confirmation inexistant). Maquette de référence commune : **`vsmode-team-detail-demo.html`** à la racine — ⚠️ sa propre bande de stats y est illisible (son `.a-scrim` la recouvre), ce n'est pas un écart à corriger.
   - **[FT-2A]** https://trello.com/c/8EdedO3e — consultation. **MERGÉ** (commit `478c62b`, merge `9ef6406`).
