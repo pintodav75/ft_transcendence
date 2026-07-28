@@ -15,6 +15,7 @@ import {
 } from '../db/schema.js';
 import { eq, ne, and, asc, desc, count, inArray, sql } from 'drizzle-orm';
 import { notify, pushNotifications } from '../utils/notifications.js';
+import { ENGAGING_STATUSES } from '../utils/match-status.js';
 import { isBlocked } from '../utils/blocks.js';
 import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { IMAGE_MIME } from './users.js';
@@ -1460,6 +1461,34 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
               error: 'only the captain can dissolve the team',
             };
 
+          // ── BX-DEL — on ne dissout pas une équipe qui a un match sur le feu ────────────
+          // `match_sides.team_id` est en `set null` : dissoudre une équipe engagée laissait
+          // un camp SANS ÉQUIPE. Un slot `pending` orphelin disparaît des listes (le filtre
+          // est NULL-safe) mais reste **acceptable par son id** — un tiers pouvait donc le
+          // prendre, jouer contre un fantôme, et faire bouger l'Elo d'une vraie équipe.
+          // 🔑 DANS la transaction et APRÈS le verrou : hors verrou, une création de match
+          // concurrente s'intercalerait entre le contrôle et le DELETE (piège #14).
+          // ⚠️ Même liste de statuts que la garde de `DELETE /users/me` et que les conflits
+          // de créneau — c'est pour ça que `ENGAGING_STATUSES` a été extraite.
+          const [engaged] = await tx
+            .select({ matchId: matchesTable.id })
+            .from(matchSidesTable)
+            .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
+            .where(
+              and(
+                eq(matchSidesTable.teamId, teamId),
+                inArray(matchesTable.status, ENGAGING_STATUSES),
+              ),
+            )
+            .limit(1);
+          if (engaged)
+            return {
+              ok: false as const,
+              status: 409,
+              error: 'cancel or finish the team matches before dissolving it',
+              code: 'team_engaged_in_match' as const,
+            };
+
           // 🔑 Roster lu APRÈS le verrou et AVANT le DELETE : la suppression CASCADE
           // sur `team_members`, et plus aucun ajout ne peut s'intercaler entre les deux.
           const members = await tx
@@ -1490,7 +1519,12 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           return { ok: true as const, notifs, logoUrl: team.logoUrl };
         });
 
-        if (!outcome.ok) return reply.code(outcome.status).send({ error: outcome.error });
+        // `code` n'est présent que sur les refus qui en portent un (409) : le front mappe
+        // dessus, il ne parse jamais la prose. Les 403/404 gardent leur forme historique.
+        if (!outcome.ok)
+          return reply
+            .code(outcome.status)
+            .send({ error: outcome.error, ...('code' in outcome ? { code: outcome.code } : {}) });
         pushNotifications(outcome.notifs);
         // APRÈS le commit, jamais dedans : un rollback tardif ressusciterait une équipe dont on
         // aurait déjà détruit le logo. L'inverse — l'équipe disparaît, l'objet reste une seconde

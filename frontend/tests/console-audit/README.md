@@ -139,11 +139,20 @@ a été **payé par [B13]** — la route rend désormais 204 quand il n'y a pas 
 l'exemption a été retirée. Ne pas la remettre : c'est le retrait de cette ligne qui fait
 tomber les trois scénarios anonymes si quelqu'un ramène le 401.
 
-## Un scénario qui laisse des comptes derrière lui
+## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 
 `teams-matchmaking` (FT-2C) est le seul scénario qui **crée de vrais matchs**. Le runner ne
-parvient donc pas à supprimer ses deux comptes alignés : `match_participants.user_id` est en
-`onDelete: 'restrict'` (`backend/src/db/schema.ts`), et `DELETE /users/me` échoue pour tout
-compte ayant été aligné une fois. Ce n'est **pas** un défaut du scénario, c'est une
-limitation back à ticketer (en l'état, un joueur ne peut plus jamais supprimer son compte).
-En attendant, le rapport nomme les comptes restants et le nettoyage se fait à la main en SQL.
+parvenait pas à supprimer ses deux comptes alignés : `match_participants.user_id` était en
+`onDelete: 'restrict'`, donc `DELETE /users/me` rendait un 500 pour tout compte ayant été
+aligné une fois. **Corrigé le 28/07 par [BX-DEL]** (migration `0023`, la FK passe en
+`cascade`) : le nettoyage repasse par la route.
+
+⚠️ **Mais le symptôme n'a pas disparu : il a changé de code.** Le 500 est devenu un **409
+assumé** — la route refuse tant que le compte est aligné dans un match non terminé
+(`engaged_in_match`) ou **capitaine d'une équipe** (`captain_of_team`). Or `teams-matchmaking`
+ouvre 5 slots sans les refermer et crée une équipe : ses comptes survivent toujours, et le
+rapport les nomme. Pour redevenir auto-nettoyant, le scénario doit **annuler ses slots puis
+dissoudre l'équipe** — c'est exactement le parcours de sortie imposé aux vrais utilisateurs,
+donc une couverture utile plutôt qu'une corvée. En attendant, nettoyage manuel :
+`delete from users where email like 'audit%'` une fois les matchs purgés — jamais un
+contournement de la garde.

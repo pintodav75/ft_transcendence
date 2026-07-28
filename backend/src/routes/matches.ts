@@ -23,13 +23,11 @@ import {
   getAdminIds,
   type CreatedNotification,
 } from '../utils/notifications.js';
+import { ENGAGING_STATUSES, LOCKING_STATUSES } from '../utils/match-status.js';
 
-// §5.2 — seuls les matchs ACTIFS verrouillent : un match terminé ou annulé libère aussitôt.
-const LOCKING_STATUSES: ('in_progress' | 'awaiting_confirmation' | 'disputed')[] = [
-  'in_progress',
-  'awaiting_confirmation',
-  'disputed',
-];
+// ⚠️ `LOCKING_STATUSES` et `ENGAGING_STATUSES` vivent dans `utils/match-status.ts` depuis
+// BX-DEL : `routes/users.ts` doit refuser une suppression de compte sur exactement les mêmes
+// matchs que ceux qui bloquent un créneau ici.
 
 // Les slots ne peuvent tomber que sur un quart fixe : :00, :15, :30, :45.
 const SLOT_GRID_MINUTES = 15;
@@ -37,13 +35,6 @@ const SLOT_GRID_MINUTES = 15;
 // Il faut au moins ce délai avant l'heure du match — pour créer ET pour accepter.
 // Un slot qui passe sous cette barre est périmé : plus personne ne peut l'accepter.
 const MIN_LEAD_MINUTES = 15;
-
-// Un camp est ENGAGÉ par un slot ouvert (il peut être accepté à tout moment) comme par
-// un match actif. Un match `completed` ou `cancelled` n'engage plus personne.
-const ENGAGING_STATUSES: ('pending' | 'in_progress' | 'awaiting_confirmation' | 'disputed')[] = [
-  'pending',
-  ...LOCKING_STATUSES,
-];
 
 // Anti-spam : rien n'empêcherait une team d'ouvrir 50 slots pour saturer le tableau.
 const MAX_OPEN_SLOTS = 5;

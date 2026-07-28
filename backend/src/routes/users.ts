@@ -1,7 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/index.js';
-import { usersTable } from '../db/schema.js';
-import { eq, sql } from 'drizzle-orm';
+import {
+  usersTable,
+  matchesTable,
+  matchSidesTable,
+  matchParticipantsTable,
+  teamsTable,
+} from '../db/schema.js';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { ENGAGING_STATUSES } from '../utils/match-status.js';
 import z from 'zod';
 import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { isBlocked } from '../utils/blocks.js';
@@ -280,8 +287,63 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         if (!verified) return reply.code(401).send({ error: 'invalid code' });
       }
 
-      await removeHostedObject(request.log, user.avatarUrl, 'avatar');
+      // ── BX-DEL — on ne part pas en laissant des affaires en cours ────────────────────
+      // Règle produit (David, 28/07) : « si tu veux delete, il faut annuler tes matchs en
+      // cours ». Deux refus, deux remèdes DIFFÉRENTS, donc deux `code` distincts — le front
+      // mappe dessus et ne parse jamais la prose (même contrat que B-INV).
+      //
+      // ① ALIGNÉ dans un match non terminé. Un match `completed` ou `cancelled` ne bloque
+      //    rien : c'est tout l'objet du ticket, la FK `restrict` refusait AUSSI les matchs
+      //    vieux de six mois.
+      // ⚠️ On part de `match_participants` filtré sur l'user (index
+      //    `match_participants_user_idx`) et non des matchs engagés de toute la plateforme :
+      //    le coût suit alors l'activité du COMPTE, pas le nombre de slots ouverts du ladder.
+      const [aligned] = await db
+        .select({ matchId: matchesTable.id })
+        .from(matchParticipantsTable)
+        .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
+        .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
+        .where(
+          and(
+            eq(matchParticipantsTable.userId, userId),
+            inArray(matchesTable.status, ENGAGING_STATUSES),
+          ),
+        )
+        .limit(1);
+      if (aligned)
+        return reply.code(409).send({
+          error: 'finish or cancel your ongoing matches before deleting your account',
+          code: 'engaged_in_match',
+        });
+
+      // ② CAPITAINE d'une équipe, engagée ou non. 🔑 `teams.captain_id` est en CASCADE :
+      //    sans ce refus, le départ du capitaine EFFACE l'équipe, son roster, sa ligne
+      //    `rankings` (Elo, W/L, place au classement du ladder) et l'identité de l'adversaire
+      //    dans son propre historique (`opponent: null`) — le tout **sans notifier personne**,
+      //    les coéquipiers découvrant la disparition par un 404. Sur `master`, la FK
+      //    `restrict` freinait ce chemin par accident ; le passer en `cascade` sans cette
+      //    garde l'aurait ouvert à tous les capitaines.
+      // ⚠️ Ce refus SUBSUME le cas « capitaine engagé hors composition » : il n'y a plus
+      //    besoin de croiser les matchs avec `teams.captain_id`. Le pendant obligatoire vit
+      //    dans `DELETE /teams/:id`, qui refuse de dissoudre une équipe engagée — sinon on
+      //    déplacerait simplement le trou d'un cran (dissoudre, puis partir).
+      const [owned] = await db
+        .select({ id: teamsTable.id })
+        .from(teamsTable)
+        .where(eq(teamsTable.captainId, userId))
+        .limit(1);
+      if (owned)
+        return reply.code(409).send({
+          error: 'dissolve your team before deleting your account',
+          code: 'captain_of_team',
+        });
+
       await db.delete(usersTable).where(eq(usersTable.id, userId));
+      // APRÈS la suppression, jamais avant : si le DELETE échouait (interblocage, FK future),
+      // l'avatar serait déjà détruit et le compte survivrait en pointant dans le vide.
+      // L'inverse — le compte part, l'objet MinIO traîne une seconde — est sans conséquence.
+      // Même ordre que la dissolution d'équipe, qui supprime son logo après le commit.
+      await removeHostedObject(request.log, user.avatarUrl, 'avatar');
       clearRefreshCookie(reply);
       return reply.code(200).send({ ok: true });
     } catch (err) {

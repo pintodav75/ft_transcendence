@@ -329,7 +329,7 @@ Liste effective des joueurs présents dans chaque camp. 1 ligne par joueur par m
 - `UNIQUE(match_side_id, user_id)` : un user pas 2 fois dans le même camp d'un match.
 
 **Choix structurants** :
-- **ON DELETE RESTRICT sur `user_id`** : exception aux autres tables. Si un user veut supprimer son compte, il faut décider côté code soit de refuser, soit d'anonymiser les match_participants (TODO à l'implémentation). Préserver l'historique évite que les stats du vainqueur deviennent fausses.
+- ~~**ON DELETE RESTRICT sur `user_id`**~~ → **CASCADE depuis [BX-DEL]** (migration `0023`, 28/07/2026). Le `restrict` était une exception aux autres tables, et il rendait la suppression de compte **impossible à vie** (500 opaque) pour tout joueur ayant été aligné une fois. Le TODO « refuser ou anonymiser » est tranché : ni l'un ni l'autre au niveau de la FK — **une contrainte ne sait pas lire un statut**. La règle produit vit dans `DELETE /users/me`, qui rend **409** tant qu'un match non terminé aligne le compte, et la cascade ne fait perdre que « qui était aligné » : score, vainqueur et deltas d'Elo vivent sur `matches` / `match_sides`, les stats du vainqueur restent donc exactes.
 
 ---
 
@@ -599,7 +599,7 @@ C'est la **durée d'une fenêtre de match** (§5.2) : la plateforme suppose qu'u
 | 5 | **Dénormalisation de `ladder_id` dans `team_members`** | Permet la contrainte "1 user dans 1 team par ladder" en SQL natif (Option B vs trigger ou check applicatif) |
 | 6 | **3 tables pour les matchs** (matches / sides / participants) | Sépare clean métadonnées / camp / joueurs. Permet d'ajouter des colonnes par camp (scores, surrender, etc.) sans dupliquer |
 | 7 | **`winner_side_id` dans `matches`** ET `submitted_winner_side_id` dans `match_sides` | Distingue vérité finale vs soumission individuelle (utile pour les disputes) |
-| 8 | **ON DELETE RESTRICT sur `match_participants.user_id`** | Préserve l'historique des matchs. Suppression de compte = problème à régler côté code (refus ou anonymisation) |
+| 8 | ~~ON DELETE RESTRICT~~ → **CASCADE sur `match_participants.user_id`** (BX-DEL, 28/07) | L'historique est préservé par `matches` / `match_sides` (score, vainqueur, Elo), pas par la ligne de composition. Le refus est porté par `DELETE /users/me` (**409**, match non terminé ou capitaine d'une équipe), jamais par la FK |
 | 9 | **Rankings dual-mode user XOR team** via CHECK contrainte | Unique table pour les classements solo et team, gérée par contrainte XOR atomique |
 | 10 | **ELO K=32 fixe, départ 1000** | Standard, simple. Adaptatif possible plus tard si besoin |
 | 11 | **Pas de matchs nuls** dans le schéma | Chess gère les nuls en rejouant côté chess.com. Simplifie les rankings et les disputes |
