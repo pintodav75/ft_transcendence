@@ -14,6 +14,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { panelId, tabId } from '@/components/ui/tab-ids';
 import { buttonClasses } from '@/components/ui/button-variants';
 import { ApiError } from '@/lib/api';
+import { useAnnouncement } from '@/lib/use-announcement';
 import { useAuthStore } from '@/stores/auth-store';
 import { useSortedGames } from '@/lib/games';
 import {
@@ -86,6 +87,18 @@ export function TeamDetail() {
   // Focus has to come BACK to the opener when the panel closes; the browser only does that
   // for itself with a native <dialog>.
   const createButtonRef = useRef<HTMLButtonElement>(null);
+  // FX-FOCUS — point d'atterrissage après une annulation de créneau. Le bouton qui a
+  // ouvert la boîte a disparu : la ligne perd son action, et le bloc « Next match » entier
+  // s'en va. Même règle que pour le roster — « l'élément survivant le plus proche qui NOMME
+  // la liste » : dans l'onglet Matches c'est la région « Match history » du tableau ; dans
+  // Overview aucun titre ne survit (la section « Next match » disparaît en entier), on se
+  // rabat donc sur le panneau, qui est nommé par son onglet.
+  const overviewPanelRef = useRef<HTMLDivElement>(null);
+  const matchHistoryRef = useRef<HTMLDivElement>(null);
+  // UNE région live pour la page, donc UN message : deux états concurrents (« ouvert » et
+  // « annulé ») laissaient le plus ancien gagner et la région finissait par contredire la
+  // bannière visible. Défaut trouvé en review de FX-FOCUS.
+  const slotAnnouncement = useAnnouncement();
   // The signed-in user's id: the ONLY thing the role is derived from, compared against
   // `team.captainId`. Selector form so the page re-renders on the user, not on the token.
   const currentUserId = useAuthStore((state) => state.user?.id);
@@ -192,6 +205,7 @@ export function TeamDetail() {
     // A new attempt supersedes the previous confirmation: leaving "Slot opened for…" on
     // screen next to an open form would leave the captain unsure which one it describes.
     setOpenedSlotAt(null);
+    slotAnnouncement.reset();
     setCreatingMatch((open) => !open);
   }
 
@@ -201,6 +215,9 @@ export function TeamDetail() {
   }
 
   function handleSlotCreated(scheduledAt: string) {
+    slotAnnouncement.announce(
+      `Slot opened for ${formatMatchDate(scheduledAt, 'long')}, now waiting for an opponent.`,
+    );
     setOpenedSlotAt(scheduledAt);
     setCreatingMatch(false);
     createButtonRef.current?.focus();
@@ -213,6 +230,9 @@ export function TeamDetail() {
     // inside the dialog, so no promise is left dangling in the handler.
     cancelSlot.mutate(slotToCancel.id, {
       onSuccess: () => {
+        slotAnnouncement.announce(
+          `Slot of ${formatMatchDate(slotToCancel.scheduledAt, 'long')} cancelled. It stays in the history, marked cancelled.`,
+        );
         setSlotToCancel(null);
         // The confirmation may well have been describing the slot just withdrawn.
         setOpenedSlotAt(null);
@@ -293,9 +313,7 @@ export function TeamDetail() {
           `sr-only` is `position: absolute`, so an empty region costs no layout — the visible
           banner below is a separate, purely visual element. */}
       <p role="status" className="sr-only">
-        {openedSlotAt && !creatingMatch
-          ? `Slot opened for ${formatMatchDate(openedSlotAt, 'long')}, now waiting for an opponent.`
-          : ''}
+        {slotAnnouncement.message}
       </p>
 
       {openedSlotAt && !creatingMatch && (
@@ -319,6 +337,7 @@ export function TeamDetail() {
       {/* Every panel stays in the DOM, the inactive ones `hidden`: each tab's
           aria-controls then points at an element that really exists. */}
       <div
+        ref={overviewPanelRef}
         id={panelId(uid, 'overview')}
         role="tabpanel"
         aria-labelledby={tabId(uid, 'overview')}
@@ -356,6 +375,7 @@ export function TeamDetail() {
           isError={matchesQuery.isError}
           isMember={isMember}
           onCancelSlot={isCaptain ? setSlotToCancel : undefined}
+          historyRef={matchHistoryRef}
         />
       </div>
 
@@ -415,6 +435,8 @@ export function TeamDetail() {
         error={cancelSlot.isError ? cancelMatchErrorMessage(cancelSlot.error) : null}
         onConfirm={confirmCancelSlot}
         onCancel={dismissCancelSlot}
+        // The Cancel button lives in whichever tab is open, so the landing point follows it.
+        returnFocusRef={currentTab === 'matches' ? matchHistoryRef : overviewPanelRef}
       />
     </div>
   );

@@ -1,6 +1,7 @@
 import { MatchRow } from '@/components/teams/detail/MatchRow';
 import { hasLineups, openDisputeCount } from '@/lib/team-detail';
 
+import type { Ref } from 'react';
 import type { TeamMatch } from '@/lib/team-detail';
 
 type TeamMatchesProps = {
@@ -13,6 +14,13 @@ type TeamMatchesProps = {
    * is what adds the actions column — the role check lives on the page, not here.
    */
   onCancelSlot?: (match: TeamMatch) => void;
+  /**
+   * Handle sur la région « Match history », utilisée comme point d'atterrissage du focus
+   * après une annulation de créneau (cf. `ConfirmDialog.returnFocusRef`) : la ligne qui
+   * portait le bouton disparaît, cette région NOMME la liste d'où elle vient de partir.
+   * Elle est déjà `tabIndex={0}` pour son défilement horizontal — rien à ajouter.
+   */
+  historyRef?: Ref<HTMLDivElement>;
 };
 
 // Match history tab. Entering a result and attaching dispute evidence stay out: both need
@@ -23,6 +31,7 @@ export function TeamMatches({
   isError,
   isMember,
   onCancelSlot,
+  historyRef,
 }: TeamMatchesProps) {
   if (isPending) {
     return <p className="text-sm text-text-muted">Loading the match history…</p>;
@@ -83,6 +92,7 @@ export function TeamMatches({
         overflow, which is what keeps the page itself from scrolling sideways.
       */}
       <div
+        ref={historyRef}
         tabIndex={0}
         role="region"
         aria-label="Match history, scroll sideways to see every column"

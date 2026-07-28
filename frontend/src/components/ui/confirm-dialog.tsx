@@ -3,7 +3,7 @@ import { useEffect, useId, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { FormMessage } from '@/components/ui/form-message';
 
-import type { MouseEvent, ReactNode } from 'react';
+import type { MouseEvent, ReactNode, RefObject } from 'react';
 
 type ConfirmDialogProps = {
   open: boolean;
@@ -19,6 +19,17 @@ type ConfirmDialogProps = {
   error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * Where to send focus when the element that OPENED the dialog no longer exists.
+   *
+   * The native `<dialog>` restores focus to its opener on close — but a confirmed removal
+   * often destroys that opener (the roster chip disappears with its Kick button, the slot
+   * row loses its Cancel). The browser then has nothing to restore to and drops focus on
+   * `<body>`: a keyboard user is thrown back to the top of the page and has to re-tab the
+   * whole screen. Point this at the closest ancestor GUARANTEED to survive the removal —
+   * the heading of the list, or the panel that contains it — and give it `tabIndex={-1}`.
+   */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 };
 
 /**
@@ -41,9 +52,12 @@ export function ConfirmDialog({
   error,
   onConfirm,
   onCancel,
+  returnFocusRef,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  // L'élément qui a ouvert la boîte, retenu à l'ouverture (cf. l'effet ci-dessous).
+  const openerRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -54,6 +68,9 @@ export function ConfirmDialog({
     if (open) {
       // showModal() throws InvalidStateError on an already-open dialog.
       if (!dialog.open) {
+        // Retenu AVANT showModal(), pendant que l'élément déclencheur a encore le focus :
+        // c'est la seule façon de savoir, à la fermeture, s'il existe toujours.
+        openerRef.current = document.activeElement as HTMLElement | null;
         dialog.showModal();
         // The browser would otherwise focus the first tabbable child. Landing on the
         // DESTRUCTIVE button means a stray Enter kicks a player; Cancel is the safe default.
@@ -64,8 +81,22 @@ export function ConfirmDialog({
 
     // Skipping this would leave the dialog in the top layer — above everything, and
     // invisible to React, which already believes it is closed.
-    if (dialog.open) dialog.close();
-  }, [open]);
+    if (!dialog.open) return;
+    dialog.close();
+
+    // 🔑 On teste si l'élément déclencheur EXISTE ENCORE, et surtout PAS où le focus a
+    // atterri. ⚠️ Défaut mesuré en review : juste après `close()`, `document.activeElement`
+    // peut encore être le bouton de confirmation (que le `<dialog>` vient de masquer), et
+    // Chrome ne bascule sur `<body>` que ~60 ms plus tard — une détection par `activeElement`
+    // ratait donc le cas, sauf quand une phase `pending` avait désactivé le bouton et
+    // provoqué le blur au préalable. Autrement dit elle ne marchait que par effet de bord
+    // d'une prop sans rapport, et le premier appelant sans `pending` aurait eu un no-op
+    // silencieux. `isConnected` est vrai/faux tout de suite, sans dépendre du timing.
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener && opener.isConnected) return; // la plateforme a de quoi restaurer : on la laisse
+    returnFocusRef?.current?.focus();
+  }, [open, returnFocusRef]);
 
   useEffect(() => {
     const dialog = dialogRef.current;

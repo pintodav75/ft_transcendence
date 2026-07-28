@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+
+import { useAnnouncement } from '@/lib/use-announcement';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -12,7 +14,24 @@ import {
   useDeclineTeamInvitation,
 } from '@/lib/team-mutations';
 
+import type { RefObject } from 'react';
 import type { MyTeamInvitation } from '@/lib/teams';
+
+type TeamInvitationsProps = {
+  /**
+   * Ce que la page hôte prête à ce bloc pour le seul cas où il DISPARAÎT ENTIÈREMENT :
+   * refuser la dernière invitation démonte la section, et avec elle son titre (le point
+   * d'atterrissage habituel du focus) ET sa région live (donc l'annonce, qui s'effacerait
+   * avant d'être lue). Les deux ont la même cause, ils viennent donc ensemble.
+   *
+   * Optionnel : sans lui le composant fonctionne exactement comme avant, et sa promesse
+   * d'origine — déposable tel quel sur `/profile` ou dans le rail social — est intacte.
+   */
+  host?: {
+    focusRef: RefObject<HTMLElement | null>;
+    announce: (message: string) => void;
+  };
+};
 
 /**
  * The teams that have invited me, with Accept / Decline.
@@ -25,13 +44,18 @@ import type { MyTeamInvitation } from '@/lib/teams';
  * ⚠️ Renders NOTHING when there is no invitation. An "you have no invitation" block would be
  * permanent noise on every visit for a case that is rare by nature.
  */
-export function TeamInvitations() {
+export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
   const { data, isError } = useMyTeamInvitations();
   const accept = useAcceptTeamInvitation();
   const decline = useDeclineTeamInvitation();
   // Survives the list going empty: accepting my last invitation removes the row that
   // triggered it, so the confirmation has to live outside the list to still be readable.
   const [joinedTeamName, setJoinedTeamName] = useState<string | null>(null);
+  // FX-FOCUS — répondre supprime la ligne AVEC ses deux boutons. Il n'y a même pas de
+  // `<dialog>` ici pour tenter une restauration : sans point d'atterrissage, le focus tombe
+  // sur `<body>` et l'utilisateur au clavier repart du haut de la page.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const answered = useAnnouncement();
 
   const invitations = data?.invitations ?? [];
 
@@ -62,23 +86,50 @@ export function TeamInvitations() {
     // No navigation on success. The grid below refreshes on its own (`['teams']` is
     // invalidated by the hook) and the new team appears — which is the proof asked for,
     // without replaying the navigate/removeQueries minefield of the dissolution flow.
-    accept.mutate(invitation.id, { onSuccess: () => setJoinedTeamName(invitation.team.name) });
+    accept.mutate(invitation.id, {
+      onSuccess: () => {
+        // Le focus est déplacé AVANT le rendu qui démonte la ligne : il est alors déjà
+        // ailleurs, donc la disparition ne l'emporte pas.
+        headingRef.current?.focus();
+        answered.announce(`You joined ${invitation.team.name}.`);
+        setJoinedTeamName(invitation.team.name);
+      },
+    });
   }
 
   function handleDecline(invitation: MyTeamInvitation) {
     clearFeedback();
-    decline.mutate(invitation.id);
+    decline.mutate(invitation.id, {
+      onSuccess: () => {
+        // ⚠️ Refuser la DERNIÈRE invitation démonte tout le bloc, titre compris (le garde
+        // `invitations.length === 0 && !joinedTeamName` juste au-dessus). Accepter, lui, le
+        // garde en vie pour afficher « You joined … ». D'où le repli fourni par la page.
+        const message = `The invitation from ${invitation.team.name} was declined.`;
+        const lastOne = invitations.length === 1;
+        if (lastOne && host) {
+          host.focusRef.current?.focus();
+          host.announce(message);
+          return;
+        }
+        headingRef.current?.focus();
+        answered.announce(message);
+      },
+    });
   }
 
   return (
     <section className="flex flex-col gap-3">
-      <SectionTitle>Team invitations</SectionTitle>
+      <SectionTitle headingRef={headingRef}>Team invitations</SectionTitle>
 
-      {joinedTeamName && (
-        <Callout tone="success" role="status">
-          You joined “{joinedTeamName}”.
-        </Callout>
-      )}
+      {/* Montée en permanence, seul son texte change : une région insérée en même temps que
+          son contenu n'est pas annoncée de façon fiable. */}
+      <p role="status" className="sr-only">
+        {answered.message}
+      </p>
+
+      {/* Plus de `role="status"` sur ce Callout : l'annonce passe par la région ci-dessus,
+          une seule voix pour un seul événement. Ce bloc redevient purement visuel. */}
+      {joinedTeamName && <Callout tone="success">You joined “{joinedTeamName}”.</Callout>}
 
       {/* role="list" is explicit: Tailwind's preflight drops the marker, and Safari then
           drops list semantics from the accessibility tree with it. */}
