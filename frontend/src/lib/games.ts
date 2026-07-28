@@ -45,6 +45,16 @@ export type Ladder = {
   gameId: string;
   format: string;
   name: string;
+  /**
+   * Lockout window of §5.2, in minutes (60 in 5v5, 30 elsewhere). A match at `s` occupies
+   * `]s − lockout, s + lockout[` for its side, which is what lets the client GREY OUT the
+   * quarters a team is already engaged on instead of sending a POST bound for a 409.
+   *
+   * ⚠️ The field was already in the response (`Ladder` schema of `openapi.yaml`, and
+   * `GET /ladders` does a bare `select()`): this hand-written type simply omitted it. No
+   * backend change, nothing to regenerate.
+   */
+  lockoutMinutes: number;
 };
 
 export function useLadders() {

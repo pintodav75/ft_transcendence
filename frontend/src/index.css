@@ -93,6 +93,16 @@
     background: var(--color-background-app);
     color: var(--color-text-primary);
     font-family: var(--font-sans);
+    /* Tells the browser its own widgets are on a dark theme: the drop-down list of a
+       native <select>, the scrollbars and the form controls then render dark instead of
+       white-on-white. Not decoration — without it the slot picker is unreadable. */
+    color-scheme: dark;
+    /* Reserves the scrollbar's gutter even when the page does not scroll. The centre
+       column of the app shell is `flex-1`, i.e. FLUID: without this, a tab taller than
+       the viewport summons the scrollbar, the usable width drops by its ~15 px and the
+       whole column visibly narrows — then widens again on a shorter tab. Switching
+       Overview / Matches / Manage made the layout twitch on every click. */
+    scrollbar-gutter: stable;
   }
 
   body {

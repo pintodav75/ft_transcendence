@@ -8,11 +8,22 @@ type TeamMatchesProps = {
   isPending: boolean;
   isError: boolean;
   isMember: boolean;
+  /**
+   * Captain only: opens the confirmation for withdrawing an open slot. Its mere presence
+   * is what adds the actions column — the role check lives on the page, not here.
+   */
+  onCancelSlot?: (match: TeamMatch) => void;
 };
 
-// Match history tab. Read-only: creating a slot, cancelling one and adding dispute
-// evidence belong to FT-2C.
-export function TeamMatches({ matches, isPending, isError, isMember }: TeamMatchesProps) {
+// Match history tab. Entering a result and attaching dispute evidence stay out: both need
+// the winning SIDE's id, which this route does not expose — they belong to /matches/$matchId.
+export function TeamMatches({
+  matches,
+  isPending,
+  isError,
+  isMember,
+  onCancelSlot,
+}: TeamMatchesProps) {
   if (isPending) {
     return <p className="text-sm text-text-muted">Loading the match history…</p>;
   }
@@ -41,6 +52,7 @@ export function TeamMatches({ matches, isPending, isError, isMember }: TeamMatch
   // non-member, and an empty column header would be a lie.
   const showLineup = hasLineups(list);
   const disputes = openDisputeCount(list);
+  const showActions = Boolean(onCancelSlot);
 
   return (
     <div className="flex flex-col gap-4">
@@ -61,12 +73,20 @@ export function TeamMatches({ matches, isPending, isError, isMember }: TeamMatch
         focusable and labelled on purpose — below ~600px the Status column sits outside the
         viewport, and a scroll container that cannot take focus makes its hidden content
         unreachable by keyboard (WCAG 2.1.1).
+
+        ⚠️ `relative` is LOAD-BEARING, not decoration. `sr-only` is `position: absolute`, and
+        an absolutely positioned box is only clipped by an ancestor that is its CONTAINING
+        BLOCK. With a static container, the screen-reader-only text of the Actions header
+        (a 1 px box laid out ~628 px in, i.e. past the viewport) resolved against the initial
+        containing block and stretched the DOCUMENT's scroll width by 253 px at 375 px —
+        measured. Making this box positioned brings those descendants back under its
+        overflow, which is what keeps the page itself from scrolling sideways.
       */}
       <div
         tabIndex={0}
         role="region"
         aria-label="Match history, scroll sideways to see every column"
-        className="focus-ring overflow-x-auto"
+        className="focus-ring relative overflow-x-auto"
       >
         <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
           <caption className="sr-only">Match history, most recent first</caption>
@@ -92,11 +112,24 @@ export function TeamMatches({ matches, isPending, isError, isMember }: TeamMatch
               <th scope="col" className="px-3 pb-2.5 text-right font-semibold">
                 Status
               </th>
+              {showActions && (
+                // No visible label: the column holds one self-describing button and a
+                // header would only eat width. The name still exists for a screen reader.
+                <th scope="col" className="px-3 pb-2.5">
+                  <span className="sr-only">Actions</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {list.map((match) => (
-              <MatchRow key={match.id} match={match} showLineup={showLineup} />
+              <MatchRow
+                key={match.id}
+                match={match}
+                showLineup={showLineup}
+                showActions={showActions}
+                onCancelSlot={onCancelSlot}
+              />
             ))}
           </tbody>
         </table>
