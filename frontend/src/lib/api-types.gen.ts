@@ -606,7 +606,7 @@ export interface paths {
         post?: never;
         /**
          * Supprimer mon compte
-         * @description Suppression définitive. Exige `password` si l'user en a un (sinon ignoré pour les comptes OAuth-only) et `totpCode` si la 2FA est activée. Supprime en cascade friendships, messages, blocks. L'avatar MinIO est aussi retiré (non-bloquant). Le cookie refresh est nettoyé.
+         * @description Suppression définitive. Exige `password` si l'user en a un (sinon ignoré pour les comptes OAuth-only) et `totpCode` si la 2FA est activée. Supprime en cascade friendships, messages, blocks, le classement personnel et les lignes de composition (`match_participants`). **Les matchs eux-mêmes ne sont pas touchés** : score, vainqueur et deltas d'Elo vivent sur `matches` / `match_sides`, seul « qui était aligné » disparaît des vieilles compositions. L'avatar MinIO est retiré après coup (non-bloquant). Le cookie refresh est nettoyé. ⚠️ **Deux refus en 409**, avec deux remèdes différents : un match **non terminé** qui aligne le compte (`engaged_in_match` ; un match `completed` ou `cancelled` ne bloque rien), et le fait d'être **capitaine d'une équipe** (`captain_of_team` — la FK est en cascade, partir effacerait l'équipe et son classement pour tout le roster).
          */
         delete: {
             parameters: {
@@ -660,6 +660,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Le compte est engagé dans un match non terminé (aligné dans une composition, ou capitaine d'une équipe dont un camp est engagé). Le client doit tester `code`, **pas** parser `error`. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccountDeletionError"];
                     };
                 };
                 500: components["responses"]["InternalError"];
@@ -2176,6 +2185,8 @@ export interface paths {
          * Dissoudre une équipe
          * @description Supprime la team (capitaine only). Les membres **et les invitations en attente** partent en **cascade DB** — les invités ne sont pas notifiés (l'équipe qui les sollicitait n'existe plus).
          *
+         *     ⚠️ **Refusée (409 `team_engaged_in_match`) tant qu'un camp de l'équipe est engagé** dans un match `pending`, `in_progress`, `awaiting_confirmation` ou `disputed` : `match_sides.team_id` est en `set null`, dissoudre laisserait un camp **sans équipe** — un slot orphelin invisible dans les listes mais toujours acceptable par son id.
+         *
          *     ⚠️ Écrit sous le **même verrou consultatif d'équipe** que les routes d'invitation, pris **avant** le `SELECT … FOR UPDATE`. La cascade fait de cette route une écrivaine de `team_invitations` — sans ce verrou elle s'interbloquait avec une acceptation concurrente (elle tient la ligne `teams`, l'acceptation tient la ligne d'invitation, chacune veut celle de l'autre), et c'est le **capitaine** qui recevait un `500` sur une dissolution parfaitement légitime.
          */
         delete: {
@@ -2215,6 +2226,19 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Un camp de l'équipe est engagé dans un match non terminé. Le client doit tester `code`, **pas** parser `error`. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            /** @enum {string} */
+                            code: "team_engaged_in_match";
+                        };
                     };
                 };
                 500: components["responses"]["InternalError"];
@@ -4638,6 +4662,16 @@ export interface components {
                 gameId: string;
             };
             invitedBy: components["schemas"]["TeamInvitationUser"];
+        };
+        /** @description Refus de `DELETE /users/me`. Même contrat que `TeamInvitationError` : `code` est stable et destiné au mapping, `error` est un texte d'affichage qui peut changer. */
+        AccountDeletionError: {
+            /** @description Message lisible, destiné à l’affichage. */
+            error: string;
+            /**
+             * @description `engaged_in_match` — un match `pending`, `in_progress`, `awaiting_confirmation` ou `disputed` aligne encore ce compte : il faut le jouer ou l'annuler d'abord. `captain_of_team` — le compte est capitaine d'une équipe : il faut la dissoudre (`DELETE /teams/{id}`) avant de partir, sinon la cascade l'effacerait pour tout le roster. Les deux se testent dans cet ordre.
+             * @enum {string}
+             */
+            code: "engaged_in_match" | "captain_of_team";
         };
         /** @description Erreur des routes d'invitation. Le client doit tester `code`, **pas** parser `error` : `error` est un texte d'affichage susceptible de changer, `code` est stable. */
         TeamInvitationError: {

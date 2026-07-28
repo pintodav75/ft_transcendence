@@ -50,12 +50,15 @@
  *     alignement de la colonne d'actions) et la **restauration du focus** après annulation :
  *     la ligne qui portait le bouton perd son bouton, le focus retombe sur `<body>`.
  *
- * ⚠️ CE SCÉNARIO LAISSE DEUX COMPTES DERRIÈRE LUI, et c'est une TROUVAILLE, pas un défaut du
- * scénario : `match_participants.user_id` est en `onDelete: 'restrict'` (`db/schema.ts`), donc
- * `DELETE /users/me` **échoue pour tout compte ayant été aligné une fois dans un match**. Le
- * capitaine et son coéquipier aligné restent en base ; le 3e joueur, jamais aligné, part
- * normalement. À ticketer côté back — en l'état, un joueur ne peut plus jamais supprimer son
- * compte. Nettoyage manuel :
+ * ⚠️ CE SCÉNARIO LAISSE DES COMPTES DERRIÈRE LUI, et c'est une TROUVAILLE, pas un défaut du
+ * scénario. Le motif a CHANGÉ le 28/07 avec [BX-DEL] : ce n'était plus un 500 (`onDelete:
+ * 'restrict'` sans condition de statut, corrigé en `cascade`), c'est maintenant un **409
+ * assumé**. `DELETE /users/me` refuse tant que le compte est aligné dans un match non terminé
+ * (`engaged_in_match`) ou capitaine d'une équipe (`captain_of_team`). Or le scénario ouvre des
+ * slots sans tous les refermer et crée une équipe. Pour être auto-nettoyant il devrait, en
+ * fin de parcours, annuler ses slots PUIS dissoudre l'équipe — c'est le parcours de sortie
+ * imposé aux vrais utilisateurs, donc ce serait aussi une couverture utile. Nettoyage manuel
+ * en attendant :
  *   delete from users where email like 'audit%@example.com';   -- après avoir purgé les matchs
  */
 export const name = 'teams-matchmaking';

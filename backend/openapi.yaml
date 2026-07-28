@@ -560,6 +560,24 @@ components:
           $ref: '#/components/schemas/TeamInvitationUser'
       required: [id, status, createdAt, team, invitedBy]
 
+    AccountDeletionError:
+      type: object
+      description: >
+        Refus de `DELETE /users/me`. Même contrat que `TeamInvitationError` : `code` est
+        stable et destiné au mapping, `error` est un texte d'affichage qui peut changer.
+      properties:
+        error: { type: string, description: 'Message lisible, destiné à l’affichage.' }
+        code:
+          type: string
+          enum: [engaged_in_match, captain_of_team]
+          description: >
+            `engaged_in_match` — un match `pending`, `in_progress`, `awaiting_confirmation`
+            ou `disputed` aligne encore ce compte : il faut le jouer ou l'annuler d'abord.
+            `captain_of_team` — le compte est capitaine d'une équipe : il faut la dissoudre
+            (`DELETE /teams/{id}`) avant de partir, sinon la cascade l'effacerait pour tout
+            le roster. Les deux se testent dans cet ordre.
+      required: [error, code]
+
     TeamInvitationError:
       type: object
       description: >
@@ -1072,8 +1090,15 @@ paths:
       description: >
         Suppression définitive. Exige `password` si l'user en a un (sinon ignoré
         pour les comptes OAuth-only) et `totpCode` si la 2FA est activée. Supprime
-        en cascade friendships, messages, blocks. L'avatar MinIO est aussi
-        retiré (non-bloquant). Le cookie refresh est nettoyé.
+        en cascade friendships, messages, blocks, le classement personnel et les lignes de
+        composition (`match_participants`). **Les matchs eux-mêmes ne sont pas touchés** :
+        score, vainqueur et deltas d'Elo vivent sur `matches` / `match_sides`, seul « qui
+        était aligné » disparaît des vieilles compositions. L'avatar MinIO est retiré après
+        coup (non-bloquant). Le cookie refresh est nettoyé.
+        ⚠️ **Deux refus en 409**, avec deux remèdes différents : un match **non terminé** qui
+        aligne le compte (`engaged_in_match` ; un match `completed` ou `cancelled` ne bloque
+        rien), et le fait d'être **capitaine d'une équipe** (`captain_of_team` — la FK est en
+        cascade, partir effacerait l'équipe et son classement pour tout le roster).
       security:
         - bearerAuth: []
       requestBody:
@@ -1117,6 +1142,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Le compte est engagé dans un match non terminé (aligné dans une composition, ou
+            capitaine d'une équipe dont un camp est engagé). Le client doit tester `code`,
+            **pas** parser `error`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDeletionError'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2356,6 +2390,12 @@ paths:
         sollicitait n'existe plus).
 
 
+        ⚠️ **Refusée (409 `team_engaged_in_match`) tant qu'un camp de l'équipe est engagé**
+        dans un match `pending`, `in_progress`, `awaiting_confirmation` ou `disputed` :
+        `match_sides.team_id` est en `set null`, dissoudre laisserait un camp **sans équipe**
+        — un slot orphelin invisible dans les listes mais toujours acceptable par son id.
+
+
         ⚠️ Écrit sous le **même verrou consultatif d'équipe** que les routes d'invitation, pris
         **avant** le `SELECT … FOR UPDATE`. La cascade fait de cette route une écrivaine de
         `team_invitations` — sans ce verrou elle s'interbloquait avec une acceptation
@@ -2390,6 +2430,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Un camp de l'équipe est engagé dans un match non terminé. Le client doit tester
+            `code`, **pas** parser `error`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, enum: [team_engaged_in_match] }
+                required: [error, code]
         '500':
           $ref: '#/components/responses/InternalError'
 
