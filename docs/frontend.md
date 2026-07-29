@@ -1,6 +1,8 @@
 # Frontend — détail par ticket
 
-> Extrait de CLAUDE.md (refacto 25/07). F0/F0-A/B/C/D, FR1, FR2, F-Nav, FL + règles front et dette connue.
+> Extrait de CLAUDE.md (refacto 25/07). Détail par ticket front, du socle F0 à la fiche de match.
+>
+> **Ordre de lecture** : le socle (F0/F0-A/B/C/D, FR1, FR2, FL et la **première** version de F-Nav) est décrit dans la longue section ci-dessous ; les tickets à partir de FT-1 ont chacun leur section datée, en ordre chronologique. À jour au **29/07/2026** (dernier ticket documenté : **FT-4B**).
 
 ### Frontend — F0 + F0-A + F0-B + F0-C + FR1 + F0-D + F-Nav + FR2 (Login + 2FA)
 
@@ -66,6 +68,8 @@
 
 **F-Nav — coquille de navigation + pages Teams & Ranking (commit `feat(frontend): partial F-nav`, sur `master` via `test/search-bar-ranking`)** :
 
+> ⚠️ **CETTE VERSION DU RAIL EST SUPERSÉDÉE.** Le rail a été **recodé le 29/07** d'après la maquette (`4a5c4bb`) et `LeftRail` a **absorbé `LeftNav`** — il existait en double. Voir la section **[F-Nav — rail gauche conforme à la maquette (29/07/2026)]** plus bas ; ce qui suit décrit l'état d'origine et reste utile pour les pages et les données qu'il a apportées, pas pour la structure du rail.
+
 - 🧭 **Coquille de navigation (F-Nav)** : rail gauche flottant `LeftNav` (`Logo` + menu `MenuItem` : play [stub], my teams → `/teams`, ~~ranking → `/ranking`~~ (retirée par FT-3), find party [stub], games → `/games`) avec `AuthNav` épinglé en bas — sélecteur de langue EN/FR/ES **non câblé** + actions auth **réelles** (login/sign up hors session, profile/logout en session ; `logout` du store puis redirect `/`). Rail droit `RightNav` réutilisé de F0-B.
 - 🗂️ **Layout de section `/teams`** (`pages/teams/route.tsx`) : porte les rails + `SiteFooter` et rend un `<Outlet/>`, pour que liste et détail ne répètent pas la coquille. Wrappers file-based : `routes/teams/route.tsx` (layout), `routes/teams/index.tsx`, `routes/teams/$teamId.tsx`.
 - 👥 **Mes équipes (`pages/teams/index.tsx`)** : `GET /teams` puis **un `GET /teams/:id` par équipe en parallèle** (`Promise.all`) pour les visages du roster (un échec isolé → roster vide, jamais de page blanche). Filtre par jeu via `LadderSelect` mode `game`, bouton **Créer une équipe** → `TeamCreation`. Chaque `TeamCard` est un `<Link to="/teams/$teamId">`.
@@ -110,6 +114,19 @@
 
 
 ---
+
+### FT-1 + FT-1B — page « My teams » et création d'équipe (26/07/2026)
+
+Merge `640248b` (FT-1B : commit `90736e4`). `/teams` liste les équipes du joueur en **grille d'affiches** — la tuile est l'artwork du jeu (le même `.webp` que les cartes de la landing) avec le logo de l'équipe par-dessus, une couronne si le joueur est capitaine, la tuile entière cliquable vers la page détail. **Un seul `GET /teams`** sert toute la grille. Le formulaire de création (nom, ladder, logo optionnel) vit sur la même page et invalide `['teams']` après succès ; `POST /teams` accepte un `logoUrl` optionnel et rend un **409 à code structuré**.
+
+**Livré** — `components/teams/TeamCard.tsx`, `components/teams/TeamsCards.tsx`, `lib/create-team-schema.ts`, helpers de `lib/teams.ts`, `pages/teams/index.tsx` réécrite.
+
+**Retours de review intégrés, à ne pas défaire :**
+
+- **La grille est en `minmax(min(18rem, 100%), 1fr)`** — sans le `min()`, la piste garde un plancher de 288 px et **déborde sur un écran de 320 px**.
+- **Le filtre par jeu ne liste que les jeux où le joueur a au moins une équipe**, « All » restant toujours visible : un filtre qui ne filtre rien est un bouton mort.
+- **Tri par jeu puis alphabétique** : deux affiches identiques éloignées l'une de l'autre se lisaient comme un doublon.
+- **`RightRail` porté à 312 px**, la largeur du rail social de la maquette — pour que les pages soient calées dès maintenant sur la place qu'elles auront vraiment (voir [[reference-home-maquette]] et `project_front_layout_constraints`).
 
 ### FT-2A — page détail d'une équipe, consultation (27/07/2026)
 
@@ -171,6 +188,22 @@ Onglet **Manage** réservé au capitaine (renommer, envoyer et retirer le logo, 
 
 ---
 
+### FT-INV — invitations d'équipe (28/07/2026)
+
+Commit `0108084`, merge `ab9a4c6`. **Mergé dos à dos avec [B-INV]** (commit `ad97df0`, merge `a724fe4`) et branché **sur B-INV**, pas sur `master` : B-INV **supprime** `POST /teams/{id}/members`, la route que le front de FT-2B appelait déjà depuis `master` — mergé seul, `master` n'aurait pas buildé.
+
+Rejoindre une équipe n'est plus un **ajout forcé** : « Add a player » devient « Invite a player », les invitations en attente apparaissent en puces **« Pending »** dans le même `<ul>` que le roster (**annuler ≠ exclure**), le compteur devient **`Roster slots`** et inclut les invitations, et un bloc « Team invitations » (Accept / Decline) est posé sur `/teams`.
+
+**Ce qui est structurant :**
+
+- **Le mapping d'erreurs passe de la prose serveur aux `code` stables** (`TeamInvitationError`). L'ancien code affichait le message serveur *verbatim* faute de code : ce n'est plus une excuse (invariant #8).
+- **Trois invalidations de cache volontairement DIFFÉRENTES** : inviter / annuler → `['team', id]` en `exact: true` **sans** les matchs (un invité n'est dans aucune compo) ; **accepter → par PRÉFIXE**, parce que `isMember` de `/teams/{id}/matches` bascule pour moi ; refuser → `['team-invitations','me']` seul.
+- **Écart assumé vs la carte** : la réponse aux invitations vit sur **`/teams`** et non sur `/profile`, qui est un stub. Le composant est sans props et fait sa propre query, donc remontable tel quel plus tard.
+- **Deux compteurs différents, assumés** : l'en-tête compte les **membres** (il est public — un visiteur ne peut pas compter ce qu'il n'a pas le droit de voir), l'onglet Manage compte le **plafond**. L'ambiguïté est levée par le mot « slots », pas par un chiffre faux.
+- `components/ui/callout.tsx` extrait au second usage.
+
+**Leçon de méthode** : la passe a duré 37 min, presque entièrement dans `npm run audit` — d'où la règle de filtrer pendant l'itération (`npm run audit <scénario>`) et de ne lancer la campagne complète **qu'à la fin**.
+
 ### FT-2C — ouvrir et annuler un créneau de match (28/07/2026)
 
 Commit `1d74b90`, merge `f0e2369`. Le capitaine ouvre un créneau depuis un **panneau déroulé sous l'en-tête** de `/teams/$teamId` (deux menus : jour puis quart d'heure ; composition à cocher) et annule son slot ouvert depuis « Next match » ou depuis la ligne du tableau, derrière `ConfirmDialog`. C'est le dernier maillon qui rend le cycle challenge/accept atteignable à la souris.
@@ -197,6 +230,56 @@ Commit `1d74b90`, merge `f0e2369`. Le capitaine ouvre un créneau depuis un **pa
 - Panneau laissé ouvert **au passage de minuit** puis erreur « créneau passé » : le menu jour affiche une valeur absente de la liste régénérée, les heures sortent vides. Se règle en resélectionnant un jour.
 - Le **409 « plafond »** est inatteignable par l'UI (à 5 slots le formulaire n'est plus monté) : le scénario teste l'état pré-empté, pas la branche de message. Idem pour 403, 429 et le 400 `unlinkedPlayers`, mappés mais jamais déclenchés.
 - ✅ **Le scénario ne laisse plus de comptes en base** (`audit…@example.com`) — réglé le 28/07 par **[BX-DEL]**. La FK `match_participants.user_id` est passée de `restrict` à `cascade` (fin du **500**), et le runner suit maintenant l'ORDRE que la nouvelle garde impose : **annuler les matchs → dissoudre les équipes → supprimer le compte**, sans quoi il se prend un 409 `engaged_in_match` ou `team_engaged_in_match`. C'est le parcours de sortie des vrais utilisateurs, donc `deleteAuditUser()` en est aussi une couverture. Vérifié sur `teams-matchmaking` (5 slots + une équipe) : 0 compte résiduel.
+
+### FT-3 — page complète d'un ladder (28/07/2026)
+
+Commit `715aa9c`, merge `65de356`. Remplace le placeholder posé par FT-2A : le lien « See the full ladder » menait à une coquille vide. La page `/ladders/$ladderId` sert l'identité du ladder (artwork via `GameImage` réutilisé), les **règles en langage clair**, le **pool de maps** et le **classement complet** (joueurs **et** équipes, discriminés par `competitor.type`), lignes cliquables vers `/teams/$teamId` ou `/players/$pseudo`, la ligne de sa propre équipe surlignée et non-cliquable.
+
+**Côté back** — `GET /ladders/{id}` rend désormais le **pool de maps du JEU**, lu dans la **même table que `POST /matches`** : servir la donnée plutôt que la recopier côté front est ce qui empêche la page d'annoncer des maps que le serveur n'attribuera jamais. Un jeu sans pool (lol, rl, chess) rend un tableau vide et la section est masquée — **la règle est portée par la DONNÉE, pas par une liste de jeux en dur** (seuls **cs2 (7)** et **valorant (6)** en ont). `openapi.yaml` mentait sur `lockoutMinutes` (« aussi le délai minimum avant soumission de score » : la seule garde est `scheduledAt`), corrigé et `api-types.gen.ts` régénéré — description seule, aucun type modifié.
+
+**Les 5 règles sont affichées valeurs importées, jamais recopiées** : créneau sur un quart d'heure à 15 min minimum (pour ouvrir **et** pour accepter), Bo3, lockout lu du ladder, **litige ouvert AUTOMATIQUEMENT sur désaccord** — y compris même vainqueur avec un score différent (2-0 vs 2-1) — et slot non accepté annulé dès qu'il passe **sous 15 min de son propre coup d'envoi**.
+
+**Trois écarts assumés, à ne pas « corriger » par erreur :**
+
+1. ⚠️ **La carte Trello ment sur une règle** : elle annonce « slot sans adversaire annulé au bout de 24 h ». **FAUX** — `cancelExpiredSlots` (`jobs/index.ts`) l'annule dès qu'il passe sous `MIN_LEAD_MINUTES` de son propre coup d'envoi, l'instant où plus personne ne peut l'accepter. Les 24 h sont un **autre** mécanisme (match joué mais non rapporté). C'est la règle du **code** qui est affichée.
+2. ⚠️ **`/ranking` SUPPRIMÉE** (page, route, `RankingTable`, entrée de nav) au lieu d'être migrée — décision de David. **DETTE OUVERTE** : plus aucun point d'entrée vers un classement pour un compte **sans équipe**.
+3. ⚠️ **NI pagination NI conteneur défilant**, décision prise **avec la mesure** : à 200 compétiteurs la page fait **11 431 px (16 écrans)**, 2941 nœuds DOM, 1278 ms. Le coût DOM n'est pas le sujet — on accepte de descendre la page et on garde le **Ctrl+F sur tout le classement** (une pagination ferait atterrir un 137ᵉ sur une page 1 sans lui). Rationale figée dans le docblock de `LadderBoard.tsx`. **Ne pas re-ticketer avant qu'un ladder dépasse la centaine.**
+
+🔑 **Défaut invisible trouvé au passage** : à 375 px le nom du compétiteur était rendu **0 px de large** (tracks fixes + gaps + padding = 268 px d'une boîte de 276, avatar `shrink-0`), **73 px sortaient en silence** car `LadderBoard` clippe. Le check de largeur ne pouvait pas le voir : il mesurait `documentElement`, il était **vert par construction**. Corrigé **le check d'abord** (`L9b` mesure la boîte ET la largeur rendue du nom), le défaut ensuite — sous `sm` les 3 nombres passent sous le nom via **`sm:contents`**, au-dessus la grille à 5 colonnes est restaurée à l'identique.
+
+**Extractions (règle du second usage)** : `LadderRow` + `LadderBoard` sortent de `LadderExcerpt`, qui n'en garde que l'emballage « fenêtre ±2 places » ; helpers de classement dans `lib/ladders.ts` ; `ui/error-panel.tsx` extrait. ⚠️ **Le code venait d'un chat mobile, sans `coder-front` ni review** : le rapport `reviewer-front` a sorti **3 bloquants + 9 non-bloquants**, tous soldés avant merge.
+
+### F-Nav — rail gauche conforme à la maquette (29/07/2026)
+
+Commit `4a5c4bb`, merge `822a6eb`. **`LeftRail` absorbe `LeftNav`** : le rail existait **en double**. Un seul composant porte désormais le wordmark, la recherche, la navigation et le bloc compte.
+
+**Livré une 1ʳᵉ fois sans suivre la maquette, puis RECODÉ.** `vsmode-home-demo.html` (`.left` / `.nav-item` / `.sep`) fait foi pour la **structure et les dimensions**, `index.css` pour couleurs / radius / ombres. Écarts corrigés : 288 → **264 px**, `p-6` → **18/16**, wordmark 48 px italique → **30 px droit**, icônes 20 → **16 px**, et la recherche sortie du `<nav>` (ce n'est pas un lien).
+
+🔑 **La maquette contenait déjà la solution d'un défaut trouvé en review** : l'actif se distingue du survol par la **bordure** (`.nav-item.active` ajoute `border-color`, `:hover:not(.active)` n'y touche pas) — la 1ʳᵉ passe avait gardé le fond et jeté la bordure, rendant les deux états **identiques au pixel**.
+
+- **6 items, tous câblés** : Home, My teams, Solo, Games, Matchmaking, History. **Aucun item grisé** : les 3 pages absentes sont créées **vierges** plutôt que désactivées. ⚠️ `MenuItem` garde `muted`/`disabled` **sans appelant** (l'état `.off` de la maquette, qu'un futur ticket redemandera) ; la prop `params` a été **supprimée** — morte **et** non sûre, le wrapper cassait l'appariement `to`/`params`.
+- **`ranking` disparaît du rail** (absent de la maquette) : ça règle du même coup le fait que `to="/ranking"` **cassait `npm run build` de `master`** au merge, la route ayant été supprimée par FT-3 sur une branche partie avant.
+- **`SiteLogo` remplace `Logo`** : un seul wordmark, et **plus de `<h1>` dans la nav** (chaque page garde le sien).
+- **`UserSearch` devient `SearchBar`** : une seule implémentation du debounce, de l'abort et de la garde anti-réponse-hors-ordre, pilotée par props, réutilisée par le rail **et** `TeamInvitePlayer`. `GET /ladders` n'est émis qu'au **premier focus** du champ, la route étant anonyme donc comptée sur un quota d'**IP partagé par toute la plateforme**.
+- ⚠️ **`AuthNav` n'est PAS un composant du rail** : `LandingNav` le monte aussi, sur la **landing publique**. Piège vécu — le `<ConfirmDialog>` de déconnexion était rendu **sans garde**, donc son `<h2>` « Log out » était le **premier titre du DOM** d'un visiteur anonyme, avant le `<h1>`. Il est désormais sous `{isLogged && …}`, et `LandingNav` est passé de `<nav>` à **`<aside>`** (il *contient* une navigation, il n'en est pas une). **Toute modif d'`AuthNav` doit être vérifiée sur `/` autant que sur `/home`.**
+- ⚠️ **Lien d'évitement : jamais `sr-only` + `focus:not-sr-only`** — cette paire compile un `padding: 0` de spécificité (0,2,0) qui **bat** `px-4`/`py-2` en (0,1,0) : le lien se rendait en 149 × 22 px, **sous les 24 px** de WCAG 2.5.8. Motif retenu : **translation** (`-translate-y-24` / `focus:translate-y-0`).
+- Token de premier plan dédié pour le badge PLAYER/TEAM : **2,53:1 → 4,75:1**.
+
+🔑 **Le scénario `f-nav.mjs` (18 checks) MESURE les 13 dimensions de la maquette** (`N4d`) : l'échelle dynamique de Tailwind v4 accepte n'importe quel nombre, donc `w-66` mal tapé en `w-64` passe lint **et** build en silence. **Un critère visuel non mesuré n'est pas gardé.**
+
+⚠️ **`L7` de `ladder-detail` est scopé à `<main>` depuis ce ticket** : il compte les mots `queue|matchmaking|auto-match` pour garder la décision produit challenge/accept, mais il balayait le **document entier** — et le rail persistant porte un item `Matchmaking` (le nom interne du cycle) sur **toutes** les pages authentifiées. Non scopé, il rendait rouge une page dont la copie est irréprochable. **Même piège pour tout check qui balaie la page : le rail est là aussi maintenant.**
+
+### FT-4A — fiche de match en lecture (29/07/2026)
+
+Commit `5729540`, merge `436531e`. Aucune migration. `/matches/$matchId` n'est plus un placeholder : fiche **en lecture seule** couvrant les **7 états du cycle**, les deux camps face à face (score Bo3, vainqueur, **Elo par CAMP jamais par joueur**), les maps pilotées par la donnée, les lineups avec capitaine, la variante **1v1**, et les écrans 403/404. L'historique d'équipe rend **toutes** ses lignes cliquables pour un membre (le lien passe sur la **date** quand il n'y a pas de nom d'adversaire).
+
+**Livré** — `MatchStatusPill` + `match-status.ts` remontés dans `components/matches/` (2ᵉ consommateur), `GameBanner` extrait au 3ᵉ usage, `RosterChips` rendu générique, ton `danger` ajouté à `Callout`, `lib/match-detail.ts` (hook + dérivations pures).
+
+- 🔑 **LE PIÈGE À NE JAMAIS RÉINTRODUIRE : « ce camp n'a pas d'équipe » ne signifie PAS 1v1.** `match_sides.team_id` est en `set null`, et une équipe dont tous les matchs sont terminés **peut** être dissoute : son camp survit avec `team: null` sur un 5v5 `completed`, lisible par n'importe quel compte depuis B15. Lire ça comme « solo » renommait le camp d'après son 1ᵉʳ joueur et **supprimait la lineup des 5 joueurs**. C'est le **format du ladder** qui tranche (`isSoloMatch`, enum fermé du contrat).
+- ⚠️ **Un créneau ANNULÉ a la même forme qu'un créneau ouvert** (un seul camp) : la fiche doit lire le **statut**, jamais déduire « encore acceptable » de l'absence d'adversaire. Elle se titrait « open slot » et annonçait « any team can accept it » **sous une pastille CANCELLED**. Bloquant de review, corrigé, gardé par un check **vu ROUGE avant vert** — et c'est pour lui que le seed porte un **7ᵉ** match cs2.
+- 🔑 **Deux checks ne gardaient rien**, trouvés en 2ᵉ review : l'un comptait 2 nœuds (`text=Cancelled` matchait la pastille **et** le mot dans la phrase) et serait resté vert en supprimant ce qu'il surveille ; l'autre lisait un attribut avec `getAttribute()`, qui **lève** quand rien ne matche → `exit 2` (harnais en échec) au lieu d'un rouge imputable au ticket. **Compter avant de lire.**
+- ⚠️ **`backend/openapi.yaml` a été modifié par un ticket FRONT** : le payload de B16 ne déclarait aucun `required`, la codegen sortait donc tout en optionnel. Vérifié en review — les `required` décrivent exactement ce que le handler renvoie, aucun handler touché, codegen byte-identique.
+- ⚠️ **Le seed sème 8 matchs de démo** (7 cs2 + 1 chess 1v1) et le créneau « accepté, avant l'heure » est à **+2 JOURS**. Il était à +1 h : l'état cessait d'exister une heure après le seed et la campagne partait en `exit 2` l'après-midi. **Ne pas raccourcir** — rien ne plafonne l'avance côté API.
 
 ### FT-4B — saisie du score, confirmation, litige (29/07/2026)
 
