@@ -17,7 +17,9 @@
  *     elle-même restant une disclosure FERMÉE (aucun formulaire déployé tant qu'on ne l'a
  *     pas demandé) ;
  *   - depuis la page équipe, un membre ouvre la fiche de TOUTES ses lignes d'historique
- *     (avant FT-4A, seules les lignes terminées étaient cliquables) ;
+ *     (avant FT-4A, seules les lignes terminées étaient cliquables) — et depuis le 30/07 les
+ *     deux cibles de la ligne sont SÉPARÉES : le nom de l'adversaire mène à SON équipe, tout
+ *     le reste de la ligne mène au match, la date restant le chemin clavier vers la fiche ;
  *   - rien ne déborde horizontalement à 375 px, et le nom d'un camp y est réellement rendu.
  *
  * ⚠️ CE SCÉNARIO EXIGE LA BASE SEMÉE (`docker compose exec backend npm run seed:dev`) : les
@@ -369,9 +371,39 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, log
 
   setPhase('8. historique d’équipe : toutes les lignes cliquables pour un membre');
   const teamId = demo.teamCompleted.detail.sides.find((s) => s.team !== null).team.id;
-  await page.goto(`${ORIGIN}/teams/${teamId}`, { waitUntil: 'networkidle' });
-  await page.locator('[role="tab"]', { hasText: 'Matches' }).click();
-  await main.locator('table tbody tr').first().waitFor({ timeout: 10000 });
+
+  /**
+   * `waitForURL` qui rend `false` au lieu de lever : une navigation qui N'A PAS lieu est le
+   * défaut même que ces checks surveillent, elle doit sortir ROUGE et non en exit 2 (« le
+   * harnais a échoué », qui ferait lire une régression comme un problème d'environnement).
+   */
+  const wentTo = (pattern, timeout = 10000) =>
+    page
+      .waitForURL(pattern, { timeout })
+      .then(() => true)
+      .catch(() => false);
+
+  /**
+   * ⚠️ `waitForURL` REND LA MAIN IMMÉDIATEMENT si l'URL courante matche déjà le motif — c'est
+   * le premier `if` de son implémentation. Attendre `/teams/<uuid>` alors qu'on est justement
+   * sur la page d'une équipe n'attend donc RIEN, et l'assert qui suit lit une URL non stabilisée
+   * (profil « rouge en campagne, vert en isolation » de l'invariant #11). Ce prédicat, lui,
+   * n'est vrai que sur la cible : là l'attente est réelle.
+   */
+  const wentToPath = (pathname) => wentTo((url) => url.pathname === pathname);
+
+  /** Retour sur l'historique de NOTRE équipe. `goBack` reste dans la SPA : pas de rechargement
+   *  complet, donc pas de `/auth/refresh` + `/users/me` + toutes les queries de la page — trois
+   *  fois de suite, ça pèse sur le seau global de quota en campagne complète. */
+  const backToHistory = async ({ viaBack = true } = {}) => {
+    if (viaBack) await page.goBack();
+    else await page.goto(`${ORIGIN}/teams/${teamId}`, { waitUntil: 'networkidle' });
+    await page.waitForURL(`${ORIGIN}/teams/${teamId}`, { timeout: 10000 });
+    await page.locator('[role="tab"]', { hasText: 'Matches' }).click();
+    await main.locator('table tbody tr').first().waitFor({ timeout: 10000 });
+  };
+
+  await backToHistory({ viaBack: false });
   const rows = await main.locator('table tbody tr').count();
   const sheetLinks = await main.locator('table tbody a[href^="/matches/"]').count();
   step(
@@ -380,11 +412,158 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, log
     `lignes d’historique : ${rows}, liens vers une fiche : ${sheetLinks} (autant que de lignes — avant FT-4A, seules les lignes terminées l’étaient)`,
   );
 
-  // Et le lien MÈNE quelque part : on y va par le CLIC, jamais par une URL forgée.
-  await main.locator('table tbody a[href^="/matches/"]').first().click();
-  await page.waitForURL(/\/matches\/[0-9a-f-]{36}/, { timeout: 10000 });
-  const reached = await appears(main.locator('section[aria-label="Score"]'));
-  step('M14', reached, `clic sur une ligne d’historique -> fiche de match rendue = ${reached}`);
+  /**
+   * Le NOM de l'adversaire mène à SON équipe, la LIGNE mène au match. C'était l'inverse
+   * jusqu'au 30/07 (le nom ouvrait la fiche de match, donc cliquer « Bravo » n'amenait pas
+   * sur Bravo) : les deux cibles sont désormais distinctes et chacune est gardée.
+   * ⚠️ On COMPTE avant de lire l'attribut : `getAttribute` LÈVE quand rien ne matche, ce qui
+   * sortirait le harnais en exit 2 au lieu d'un rouge imputable au ticket.
+   */
+  const opponentLinks = await main.locator('table tbody a[href^="/teams/"]').count();
+  const opponentHref =
+    opponentLinks > 0
+      ? await main.locator('table tbody a[href^="/teams/"]').first().getAttribute('href')
+      : null;
+  step(
+    'M13b',
+    opponentLinks > 0 && opponentHref !== null && opponentHref !== `/teams/${teamId}`,
+    `noms d’adversaire liés vers une équipe : ${opponentLinks} (≥ 1), cible « ${opponentHref ?? '—'} » ` +
+      `≠ l’équipe consultée (${teamId})`,
+  );
+
+  if (opponentLinks > 0) {
+    await main.locator('table tbody a[href^="/teams/"]').first().click();
+    // Le rendu est vérifié, pas seulement l'URL : un `ErrorPanel` sur la page de l'adversaire
+    // laisserait le check vert alors que le lien ne mène nulle part d'utile.
+    const onOpponent =
+      (await wentToPath(opponentHref)) && (await appears(main.locator('h1')));
+    const opponentTitle = onOpponent ? await main.locator('h1').first().innerText() : '—';
+    step(
+      'M13c',
+      onOpponent,
+      `clic sur le nom d’adversaire -> ${page.url()} (attendu ${opponentHref}), h1 « ${opponentTitle} »`,
+    );
+  } else {
+    step('M13c', false, 'aucun nom d’adversaire lié : rien à cliquer (voir M13b)');
+  }
+  await backToHistory();
+
+  /**
+   * La LIGNE mène au match — mesuré sur une ligne QUI A un lien adversaire, et sur une cellule
+   * voisine de ce lien. La 1ʳᵉ ligne de l'historique ne prouverait pas le cas qui motive le
+   * ticket : c'est le créneau ouvert, sans adversaire, donc sans cible concurrente.
+   * ⚠️ Le compte porte sur le locator NON réduit : `.first().count()` vaut 1 par construction
+   * et le check serait resté vert même sans une seule cellule neutre dans la ligne.
+   */
+  const namedRow = main.locator('table tbody tr:has(a[href^="/teams/"])').first();
+  const neutralCells = namedRow.locator('td:not(:has(a)):not(:has(button))');
+  const plainCells = await neutralCells.count();
+  if (plainCells > 0) await neutralCells.first().click();
+  const reached =
+    plainCells > 0 &&
+    (await wentTo(/\/matches\/[0-9a-f-]{36}/)) &&
+    (await appears(main.locator('section[aria-label="Score"]')));
+  step(
+    'M14',
+    reached,
+    `clic sur une cellule neutre d’une ligne AVEC adversaire (cellules sans lien ni bouton : ${plainCells}) ` +
+      `-> fiche de match rendue = ${reached}`,
+  );
+
+  // Le lien de la DATE reste le chemin CLAVIER vers la fiche : le gestionnaire de ligne n'est
+  // pas focusable, il ne peut donc pas être le seul accès.
+  await backToHistory();
+  // Scopé à la PREMIÈRE cellule, et sur la même ligne AVEC adversaire que M14 : deux fois
+  // nécessaire. Non scopé à la cellule, le check reste vert avec le lien accroché au nom
+  // (l'état d'avant ce fix) ; pris sur la 1ʳᵉ ligne de l'historique il ne prouve rien non plus
+  // — c'est le créneau ouvert, sans adversaire, dont la date portait DÉJÀ le lien.
+  const dateLink = namedRow.locator('td:first-child a[href^="/matches/"]');
+  const dateLinks = (await namedRow.count()) > 0 ? await dateLink.count() : 0;
+  if (dateLinks > 0) {
+    await dateLink.first().focus();
+    await page.keyboard.press('Enter');
+  }
+  const byKeyboard =
+    dateLinks === 1 &&
+    (await wentTo(/\/matches\/[0-9a-f-]{36}/)) &&
+    (await appears(main.locator('section[aria-label="Score"]')));
+  step(
+    'M14b',
+    byKeyboard,
+    `lien de la date atteint au clavier (Entrée) -> fiche de match rendue = ${byKeyboard} ` +
+      `(liens /matches/ dans la 1ʳᵉ ligne : ${dateLinks}, 1 attendu)`,
+  );
+
+  /**
+   * Les trois choses que la ligne cliquable ne doit PAS faire. Aucune n'était gardée : un
+   * `onClick` qui avale tout ne casse rien de visible, il fait juste partir la page.
+   */
+  await backToHistory();
+  const historyUrl = page.url();
+
+  /**
+   * Chaque check de ce groupe repart de l'historique. Sans ça, un SEUL rouge (la ligne a
+   * navigué alors qu'elle ne devait pas) laisse les suivants sur la fiche de match, où leurs
+   * sélecteurs n'existent plus : ils sortiraient en exit 2 (« harnais en échec ») au lieu de
+   * rouge. Mesuré en retirant les gardes exprès.
+   */
+  const ensureHistory = async () => {
+    if (page.url() !== historyUrl) await backToHistory({ viaBack: false });
+  };
+
+  // 1) Un clic MODIFIÉ demande un onglet au navigateur : `navigate()` ne sait pas le donner,
+  //    il remplacerait la page courante. La ligne doit rester inerte.
+  await neutralCells.first().click({ modifiers: ['Control'] });
+  await page.waitForTimeout(500);
+  const ctrlStayed = page.url() === historyUrl;
+  step(
+    'M14c',
+    ctrlStayed,
+    `Ctrl+clic sur une cellule de la ligne : URL ${ctrlStayed ? 'inchangée' : `partie sur ${page.url()}`} (inchangée attendue)`,
+  );
+
+  // 2) Le bouton « Cancel » du capitaine ne doit pas être avalé par la ligne. `teams-matchmaking`
+  //    ne l'atteint qu'au CLAVIER : à la souris, rien ne gardait la garde `closest('a,button')`.
+  // ⚠️ Scopé au TABLEAU : `TeamOverview` porte le MÊME libellé sur le bloc « Next match », et
+  // l'onglet Overview reste monté, masqué, derrière l'onglet Matches — non scopé, le sélecteur
+  // attrape ce bouton invisible et le clic expire à 30 s (exit 2, harnais en échec).
+  const cancelButtons = main.locator('table tbody button[aria-label^="Cancel the slot of"]');
+  await ensureHistory();
+  const hasCancel = (await cancelButtons.count()) > 0;
+  if (hasCancel) await cancelButtons.first().click();
+  const dialogOpen = hasCancel && (await appears(page.locator('dialog[open]'), 3000));
+  const cancelStayed = hasCancel && page.url() === historyUrl;
+  step(
+    'M14d',
+    dialogOpen && cancelStayed,
+    `clic SOURIS sur « Cancel the slot » (boutons : ${await cancelButtons.count()}, ≥ 1 attendu) : ` +
+      `boîte de confirmation ouverte = ${dialogOpen}, URL inchangée = ${cancelStayed}`,
+  );
+  if (dialogOpen) {
+    await page.keyboard.press('Escape');
+    await page.locator('dialog[open]').waitFor({ state: 'hidden', timeout: 5000 });
+  }
+
+  // 3) Sélectionner du texte dans une cellule (glisser) n'est pas demander à naviguer.
+  await ensureHistory();
+  // `boundingBox` LÈVE quand rien ne matche : rendu nul, le check reste imputable au ticket.
+  const cellBox = await neutralCells
+    .first()
+    .boundingBox({ timeout: 5000 })
+    .catch(() => null);
+  if (cellBox) {
+    await page.mouse.move(cellBox.x + 3, cellBox.y + cellBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(cellBox.x + cellBox.width - 3, cellBox.y + cellBox.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+  }
+  const selectionStayed = Boolean(cellBox) && page.url() === historyUrl;
+  step(
+    'M14e',
+    selectionStayed,
+    `glisser pour sélectionner dans une cellule : URL ${selectionStayed ? 'inchangée' : `partie sur ${page.url()}`} (inchangée attendue)`,
+  );
 
   setPhase('9. largeur mobile 375 px');
   await page.goto(`${ORIGIN}/matches/${demo.teamCompleted.id}`, { waitUntil: 'networkidle' });
