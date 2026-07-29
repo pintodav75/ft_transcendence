@@ -117,6 +117,92 @@ export function settledByAdmin(match: MatchSheet, sides: MatchSide[]) {
   );
 }
 
+// ---------------------------------------------------------------- reporting (FT-4B)
+
+/**
+ * The two statuses `POST /matches/{id}/result` accepts. Anything else answers 409, so the
+ * screen must not offer a button — a red console line is a project-rejection criterion.
+ */
+const REPORTABLE_STATUSES = ['in_progress', 'awaiting_confirmation'];
+
+/** Why the viewer is NOT offered the result form. `null` = he may report right now. */
+export type ReportBlocker =
+  /** Neither captain of a side nor the player of a 1v1 camp: a bench player, a visitor. */
+  | 'not_reporter'
+  /** The cycle is not waiting for a result: open slot, cancelled, disputed, completed. */
+  | 'wrong_status'
+  /** §5.3 — kick-off has not passed. The API answers 400 « match not started yet ». */
+  | 'not_started';
+
+export type ReportEligibility = {
+  /** The viewer's own side, when he is the one who reports for it. `null` otherwise. */
+  mySide: MatchSide | null;
+  /** The other camp — needed to mirror its submission and to name it on screen. */
+  opponent: MatchSide | null;
+  blocker: ReportBlocker | null;
+};
+
+/**
+ * May this viewer report a result on this match, and if not, why not?
+ *
+ * Mirror of the three guards `POST /matches/{id}/result` applies, in the SAME order the
+ * backend applies them (who → status → time), so the reason we show can never contradict
+ * the reason the server would give.
+ *
+ * 🚨 THE POINT OF THIS FUNCTION IS THE NEGATIVE. Every combination it refuses must render
+ * NO button at all: a button whose request is guaranteed to fail writes a red line in the
+ * Chrome console, and a dirty console is a rejection criterion for the whole project — not
+ * a rough edge.
+ *
+ * 🔑 « This camp has no team » does NOT mean 1v1. `match_sides.team_id` is `set null` and a
+ * team whose matches are all completed CAN be dissolved, so a 5v5 camp survives with
+ * `team: null`. The LADDER'S FORMAT is the only authority (`isSoloMatch`) — reading the
+ * missing team as "solo" is what renamed a camp after its first player in FT-4A. The
+ * consequence here is a deliberate, conservative divergence from the backend: on a teamless
+ * side of a TEAM ladder the server would fall back on "any aligned player", we offer
+ * nothing. That state only exists on matches that are already `completed`, which are not
+ * reportable anyway.
+ *
+ * @param meId `useAuthStore(state => state.user?.id)` — `undefined` while the session boots.
+ * @param nowMs a FRESH clock, not one frozen at mount: this decides whether an action is
+ * offered, so a stale `now` would hide the form for as long as the tab stays open.
+ */
+export function canReportResult(
+  match: MatchSheet,
+  sides: MatchSide[],
+  meId: string | undefined,
+  nowMs: number,
+): ReportEligibility {
+  const solo = isSoloMatch(match);
+  const mySide =
+    (meId
+      ? sides.find((side) =>
+          // In 1v1 the PLAYER is the camp (the lineup holds exactly one name); from 2v2 up
+          // only the captain speaks for his team. Same split as the backend.
+          solo ? side.players.some((player) => player.id === meId) : side.team?.captainId === meId,
+        )
+      : undefined) ?? null;
+
+  if (!mySide) return { mySide: null, opponent: null, blocker: 'not_reporter' };
+
+  const opponent = sides.find((side) => side.id !== mySide.id) ?? null;
+  // A slot nobody has accepted: there is no result to report, and its status says so too.
+  if (!opponent) return { mySide, opponent: null, blocker: 'wrong_status' };
+
+  if (!REPORTABLE_STATUSES.includes(match.status)) {
+    return { mySide, opponent, blocker: 'wrong_status' };
+  }
+
+  // `msUntil` returns `null` on a missing/unparsable instant — treated as "not started",
+  // the only safe reading: the server refuses to score a match with no `scheduled_at`.
+  const kickoffIn = msUntil(match.scheduledAt, nowMs);
+  if (kickoffIn === null || kickoffIn > 0) {
+    return { mySide, opponent, blocker: 'not_started' };
+  }
+
+  return { mySide, opponent, blocker: null };
+}
+
 // ---------------------------------------------------------------- deadlines
 
 /**

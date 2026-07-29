@@ -12,6 +12,16 @@ export type ApiFetchOptions = Omit<RequestInit, 'body'> & {
   skipAuthRefresh?: boolean
 }
 
+/**
+ * The 429 sentence, shared by every mutation module.
+ *
+ * It lives HERE and not next to a domain's error mapping because it carries no domain
+ * knowledge whatsoever: it describes the rate limiter, which is a property of the API layer.
+ * It first sat in `team-mutations.ts`, which made `match-mutations.ts` import a "team" module
+ * for a string about quotas — a dependency pointing the wrong way.
+ */
+export const RATE_LIMITED_MESSAGE = 'Too many requests — retry in a moment.'
+
 export class ApiError extends Error {
   status: number
   payload: unknown

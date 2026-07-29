@@ -12,8 +12,10 @@
  *   - le même visiteur sur un match NON terminé prend un 403 et l'écran « réservé aux
  *     participants » (déclaré via `expectHttp`, cloisonné à sa phase) ;
  *   - un MEMBRE (alice, capitaine de Team Alpha) lit un match à venir et un match en attente
- *     de confirmation — avec le compte à rebours de 24 h et, surtout, ZÉRO bouton et ZÉRO
- *     formulaire : la saisie du score est [FT-4B], pas ce ticket ;
+ *     de confirmation — avec le compte à rebours de 24 h et, depuis [FT-4B], le choix
+ *     « Confirmer / Contester » offert au camp qui n'a pas encore répondu, la saisie
+ *     elle-même restant une disclosure FERMÉE (aucun formulaire déployé tant qu'on ne l'a
+ *     pas demandé) ;
  *   - depuis la page équipe, un membre ouvre la fiche de TOUTES ses lignes d'historique
  *     (avant FT-4A, seules les lignes terminées étaient cliquables) ;
  *   - rien ne déborde horizontalement à 375 px, et le nom d'un camp y est réellement rendu.
@@ -296,19 +298,30 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, log
     `coup d’envoi passé : avis « Kick-off was… » ${started} (1 attendu), avis « in X » résiduel ${stillCounting} (0 attendu)`,
   );
 
-  setPhase('7. un camp a soumis : attente 24 h, et AUCUNE action (FT-4B)');
+  setPhase('7. un camp a soumis : attente 24 h, et le CHOIX offert à l’autre camp');
   await page.goto(`${ORIGIN}/matches/${demo.awaiting.id}`, { waitUntil: 'networkidle' });
   await main.locator('h1').waitFor({ timeout: 10000 });
   const countdown = await main.locator('text=/left to confirm/').count();
-  // 🚨 Le cœur du découpage FT-4A / FT-4B : la fiche est en LECTURE. Un bouton ou un
-  // formulaire ici signifierait que la saisie du score a fuité dans ce ticket.
-  const buttons = await main.locator('button').count();
+  /**
+   * ⚠️ CE CHECK A CHANGÉ DE SUJET AVEC [FT-4B], il n'a pas été relâché. Il gardait le
+   * découpage FT-4A/FT-4B (« zéro bouton, zéro formulaire : la saisie du score n'est pas ce
+   * ticket ») ; la saisie est désormais livrée, et sur CE match semé alice est justement
+   * capitaine du camp qui n'a PAS répondu — le choix est donc l'affichage correct.
+   *
+   * Ce qu'il garde maintenant, et qui reste un vrai risque : la saisie est une DISCLOSURE
+   * FERMÉE. Le formulaire ne se rend pas de lui-même — aucun `<form>`, aucun champ tant que
+   * « Contest » n'a pas été cliqué. (Les deux boutons de la boîte de confirmation, montée
+   * fermée, ne sont donc pas comptés : on nomme les deux actions attendues au lieu de
+   * compter tous les `<button>` de la page.)
+   */
+  const confirmAction = await main.locator('button:has-text("Confirm the result")').count();
+  const contestAction = await main.locator('button:has-text("Contest")').count();
   const forms = await main.locator('form').count();
   const inputs = await main.locator('input, select, textarea').count();
   step(
     'M12',
-    countdown === 1 && buttons === 0 && forms === 0 && inputs === 0,
-    `compte à rebours de confirmation : ${countdown} (1 attendu), boutons : ${buttons} (0), formulaires : ${forms} (0), champs : ${inputs} (0)`,
+    countdown === 1 && confirmAction === 1 && contestAction === 1 && forms === 0 && inputs === 0,
+    `compte à rebours de confirmation : ${countdown} (1 attendu), « Confirm the result » ${confirmAction} (1), « Contest » ${contestAction} (1), formulaires déployés ${forms} (0), champs ${inputs} (0)`,
   );
 
   setPhase('7b. litige et créneau ouvert');

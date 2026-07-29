@@ -22,6 +22,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateSync, crc32 } from 'node:zlib';
 
+import { sql } from './sql.mjs';
+
 export const ORIGIN = process.env.AUDIT_ORIGIN ?? 'https://localhost:5173';
 
 // Le certificat de dev est auto-signé (I2) : node comme le navigateur doivent l'accepter,
@@ -423,13 +425,40 @@ async function awaitAnnouncement(page, text, timeout = 15000) {
  *
  * ⚠️ Attendre ici ne masque PAS un vrai défaut : si l'app ne restaure jamais le focus, on
  * atteint le timeout, `focusLanding()` lit `<body>` et le check rougit — comme il le doit.
+ *
+ * ⚠️ PLAFOND À 15 s, PAS 5 (relevé pendant [FT-4B]). Le 5 s tenait en isolation mais tombait
+ * en CAMPAGNE — `I6-bis` sortait rouge 2 fois sur 3 sur un fichier intact depuis FT-3, et vert
+ * à chaque exécution filtrée. C'est le symptôme décrit juste au-dessus, aggravé par tout ce qui
+ * ralentit un rendu de fin de campagne (base peuplée, 13 scénarios à la suite). Relever le
+ * plafond ne coûte RIEN quand le focus arrive vite : `waitForFunction` rend la main dès que le
+ * prédicat est vrai, jamais au bout du délai. Et ça ne masque toujours pas un vrai défaut, pour
+ * la raison écrite ci-dessus. ⚠️ Un critère « campagne verte » non déterministe est pire qu'un
+ * critère strict : personne ne peut plus distinguer « mon ticket a cassé quelque chose » de
+ * « c'est encore I6-bis ».
+ *
+ * ⚠️ MAIS un plafond relevé sans mesure est un cache-misère : à 15 s, « le focus arrive en
+ * 200 ms » et « le focus arrive en 9 s » sont le MÊME vert, alors que le second est un défaut.
+ * D'où la trace ci-dessous. Elle ne fait PAS rougir — un seuil de latence figé en dur rendrait
+ * la campagne dépendante de la charge de la machine, ce qui est exactement le non-déterminisme
+ * qu'on vient de chasser — elle rend seulement visible ce que le vert cachait. Si elle se met à
+ * sortir régulièrement, c'est l'application qu'il faut regarder, pas le plafond qu'il faut
+ * remonter une fois de plus.
  */
-async function awaitFocusRestored(page, timeout = 5000) {
+const SLOW_FOCUS_MS = 1000;
+
+async function awaitFocusRestored(page, timeout = 15000) {
+  const startedAt = Date.now();
   return page
     .waitForFunction(() => document.activeElement && document.activeElement.tagName !== 'BODY', null, {
       timeout,
     })
-    .then(() => true)
+    .then(() => {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > SLOW_FOCUS_MS) {
+        console.log(`  ⏱  focus restauré en ${elapsed} ms (> ${SLOW_FOCUS_MS} ms) — vert, mais lent`);
+      }
+      return true;
+    })
     .catch(() => false);
 }
 
@@ -664,6 +693,13 @@ export async function runScenario(scenario) {
       // À appeler AVANT toute soumission du formulaire d'inscription : le quota est
       // partagé avec les comptes créés par le runner, et un 429 fausserait le rapport.
       awaitRegisterSlot,
+      /**
+       * Requête SQL dans le conteneur postgres — la seule sortie du navigateur du harnais.
+       * ⚠️ Réservé à FORCER un état que l'API interdit d'atteindre (et au teardown qui en
+       * découle) ; jamais à constater un comportement applicatif. Voir le docblock de
+       * `sql.mjs`, qui porte la règle et les deux pièges de psql.
+       */
+      sql,
     });
   } catch (err) {
     crashed = err;
