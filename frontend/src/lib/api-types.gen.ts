@@ -3262,11 +3262,11 @@ export interface paths {
                         "application/json": {
                             match: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** Format: uuid */
-                                ladderId?: string;
+                                ladderId: string;
                                 /** @description Identité du ladder ET de son jeu, servie AVEC le match (B16) : la page match se titre (« Counter-Strike 2 5v5 ») et décide d'afficher ou non la section maps — seuls cs2 et Valorant ont un pool — sans un second appel à `GET /ladders/{id}`. Toujours présent : `matches.ladder_id` est une FK NOT NULL en `restrict`. ⚠️ `ladderId` reste exposé juste au-dessus, à l'identique : aucun appelant existant ne bouge. */
-                                ladder?: {
+                                ladder: {
                                     /** Format: uuid */
                                     id: string;
                                     /** @example Counter-Strike 2 5v5 */
@@ -3278,73 +3278,73 @@ export interface paths {
                                     /** @example Counter-Strike 2 */
                                     gameName: string;
                                 };
-                                status?: string;
+                                status: string;
                                 /** Format: date-time */
-                                scheduledAt?: string | null;
+                                scheduledAt: string | null;
                                 /** Format: date-time */
-                                startedAt?: string | null;
+                                startedAt: string | null;
                                 /** Format: date-time */
-                                completedAt?: string | null;
+                                completedAt: string | null;
                                 /**
                                  * Format: uuid
                                  * @description Side vainqueur une fois le match `completed` ; `null` sinon.
                                  */
-                                winnerSideId?: string | null;
-                                maps?: string[];
+                                winnerSideId: string | null;
+                                maps: string[];
                                 /** Format: date-time */
-                                createdAt?: string;
+                                createdAt: string;
                                 /**
                                  * Format: uuid
                                  * @description Id de la dispute quand le match est `disputed` — le front l'utilise pour naviguer vers `GET /disputes/:id`. `null` dans tous les autres états.
                                  */
-                                disputeId?: string | null;
+                                disputeId: string | null;
                             };
                             sides: {
                                 /**
                                  * Format: uuid
                                  * @description Id du side — à renvoyer comme `winnerSideId` dans POST /matches/:id/result.
                                  */
-                                id?: string;
+                                id: string;
                                 /** @example 0 */
-                                sideIndex?: number;
+                                sideIndex: number;
                                 /**
                                  * Format: date-time
                                  * @description Instant où ce camp a soumis un résultat (B6) ; `null` sans soumission.
                                  */
-                                submittedAt?: string | null;
+                                submittedAt: string | null;
                                 /**
                                  * Format: uuid
                                  * @description Vainqueur déclaré par CE camp ; `null` sans soumission.
                                  */
-                                submittedWinnerSideId?: string | null;
+                                submittedWinnerSideId: string | null;
                                 /** @description Score Bo3 (manches gagnées : 0, 1 ou 2) que CE camp s'attribue à LUI-MÊME dans sa soumission ; `null` tant qu'il n'a rien soumis (donc `null` des deux côtés sur un match `in_progress`). */
-                                submittedScoreSelf?: number | null;
+                                submittedScoreSelf: number | null;
                                 /** @description Score Bo3 que CE camp attribue à l'ADVERSAIRE ; `null` sans soumission. Exposé avec `submittedScoreSelf` depuis B16 parce que **confirmer** un résultat, c'est renvoyer le MIROIR exact de la soumission adverse (`scoreSelf`/`scoreOpponent` croisés) : sans ces deux champs le front ne peut pas pré-remplir le bouton « Confirmer ». ⚠️ Scores RELATIFS au soumetteur (« moi / lui »), jamais indexés sur `sideIndex`. Même vainqueur mais score différent (2-0 vs 2-1) = litige. */
-                                submittedScoreOpponent?: number | null;
+                                submittedScoreOpponent: number | null;
                                 /** @description Score final Bo3 (manches gagnées : 0, 1 ou 2) de ce camp, écrit uniquement à la clôture (`completed`). Reste `null` après un arbitrage admin (B7) : l'admin tranche un vainqueur, pas un score. */
-                                score?: number | null;
+                                score: number | null;
                                 /** @description Gain/perte d'Elo sur CE match précis (ex. `+18` / `-12`). Dépend de l'écart d'Elo au moment du match, donc non recalculable a posteriori — `null` tant que le match n'est pas `completed`. */
-                                eloDelta?: number | null;
+                                eloDelta: number | null;
                                 /** @description Elo de ce camp immédiatement après ce match ; `null` sinon. */
-                                eloAfter?: number | null;
+                                eloAfter: number | null;
                                 /** @description `null` en 1v1 (le côté est un joueur, pas une team). */
-                                team?: {
+                                team: {
                                     /** Format: uuid */
-                                    id?: string;
+                                    id: string;
                                     /** @example Los Ratones */
-                                    name?: string;
-                                    logoUrl?: string | null;
+                                    name: string;
+                                    logoUrl: string | null;
                                     /** Format: uuid */
-                                    captainId?: string;
+                                    captainId: string;
                                 } | null;
                                 /** @description La lineup engagée sur ce side (pas le roster entier). */
-                                players?: {
+                                players: {
                                     /** Format: uuid */
-                                    id?: string;
+                                    id: string;
                                     /** @example alice */
-                                    pseudo?: string;
-                                    displayName?: string | null;
-                                    avatarUrl?: string | null;
+                                    pseudo: string;
+                                    displayName: string | null;
+                                    avatarUrl: string | null;
                                 }[];
                             }[];
                         };

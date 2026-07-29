@@ -12,8 +12,9 @@
  *     un Elo inventé ;
  *   - l'onglet Matches d'une équipe sans match rend un état vide honnête ;
  *   - les onglets répondent aux flèches (pattern WAI-ARIA) ;
- *   - les trois placeholders (/players/$pseudo, /matches/$matchId, /ladders/$ladderId) ne
- *     parlent pas, et celui du ladder est atteint PAR LE LIEN « See the full ladder » ;
+ *   - le placeholder /players/$pseudo ne parle pas, la fiche de match rend son écran 404 sur
+ *     un uuid inconnu (FT-4A l'a remplacée : elle n'est plus muette), et la page ladder est
+ *     atteinte PAR LE LIEN « See the full ladder » ;
  *   - rien ne déborde horizontalement à 375 px.
  *
  * ⚠️ CE QUE CE SCÉNARIO NE PROUVE PAS. Il travaille sur une équipe créée à la volée par
@@ -159,23 +160,32 @@ export async function run({
   step('A9', overflow <= 0, `débordement horizontal du document : ${overflow}px (0 attendu)`);
   await page.setViewportSize({ width: 1280, height: 900 });
 
-  setPhase('6. placeholders /players, /matches et /ladders');
+  setPhase('6. placeholder /players, fiche de match et page ladder');
   await rosterChip.first().click();
   await page.waitForURL(`**/players/${user.pseudo}`, { timeout: 10000 });
   await page.goBack();
   await page.waitForURL(/\/teams\/[0-9a-f-]{36}/, { timeout: 10000 });
+  // ⚠️ RÉÉCRIT PAR FT-4A. Ce check attendait le PLACEHOLDER de `/matches/$matchId` et
+  // exigeait ZÉRO requête — ce qui n'avait de sens que tant que la page ne chargeait rien.
+  // La fiche existe désormais : sur un uuid inconnu elle TAPE l'API (une fois, sans réessai :
+  // un 404 est un verdict) et rend l'écran 404 partagé. On garde donc l'intention (le lien du
+  // roster ne mène pas dans le vide) en mesurant le comportement réel.
+  expectHttp(
+    new RegExp(UNKNOWN_MATCH),
+    'match inexistant demandé volontairement -> 404 attendu (fiche de match, FT-4A)',
+  );
   const matchApiCalls = await countRequests(
     async () => {
       await page.goto(`${ORIGIN}/matches/${UNKNOWN_MATCH}`, { waitUntil: 'networkidle' });
-      await appears(page.locator('text=Match sheet'));
+      await appears(page.locator('text=Match not found'));
     },
     (url) => url.includes('/api/matches/'),
   );
-  const matchPlaceholder = await page.locator('text=Match sheet').count();
+  const matchNotFound = await page.locator('text=Match not found').count();
   step(
     'A10',
-    matchPlaceholder === 1 && matchApiCalls === 0,
-    `placeholder de match rendu (${matchPlaceholder}), appels /api/matches/ : ${matchApiCalls} (0 attendu)`,
+    matchNotFound === 1 && matchApiCalls === 1,
+    `écran 404 de la fiche de match rendu (${matchNotFound}), appels /api/matches/ : ${matchApiCalls} (1 attendu — pas de réessai sur un 4xx)`,
   );
 
   // « See the full ladder » : l'extrait ne montre que 5 lignes, le lien doit mener quelque

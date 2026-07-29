@@ -233,6 +233,44 @@ qu'un scénario ne sait pas fabriquer. La base de dev en est donc dépourvue et 
 été vérifié par une sonde jetable sur une base semée en SQL, puis nettoyée — refaire ce
 détour si `LadderRow` change.
 
+## `match-detail` (FT-4A) — le seul scénario qui EXIGE la base semée
+
+`scenarios/match-detail.mjs` audite `/matches/$matchId` : id malformé (écran d'erreur, **zéro
+requête**), uuid inconnu (404 déclaré par `expectHttp`), un **visiteur** sur un match terminé
+(titre, vainqueur marqué une seule fois, score comparé au JSON de l'API, maps comparées map
+par map, lineups avec capitaine repéré, **Elo par CAMP** — 2 valeurs pour 10 joueurs alignés),
+le **match 1v1** (aucun bloc équipe, aucune section maps), un **non-participant** sur un match
+non terminé (403 déclaré par `expectHttp`), un **membre** sur un match à venir puis sur un
+match en attente de confirmation (**0 bouton, 0 formulaire, 0 champ** — la saisie du score est
+[FT-4B]), le litige, le créneau ouvert, le **créneau annulé**, l'historique d'équipe dont
+**toutes** les lignes sont cliquables pour un membre, et 375 px sans débordement. **21 checks.**
+
+🔑 **`M12d` garde un défaut réel**, trouvé en review et vu ROUGE avant d'être vert : un créneau
+annulé a exactement la MÊME FORME qu'un créneau ouvert (un seul side), et la fiche déduisait
+« encore acceptable » de l'absence d'adversaire au lieu de lire le **statut**. Elle se titrait
+donc « open slot » et annonçait « any team can accept it » sous une pastille `CANCELLED`, pour
+une action que l'API refuse. C'est pour ce check que le seed porte un **7ᵉ** match de démo :
+sans donnée dans cet état, rien ne le prouvait.
+
+⚠️ **Il exige `docker compose exec backend npm run seed:dev`.** Les états du cycle ne sont
+pas fabricables par un scénario (deux équipes, une acceptation, deux soumissions concordantes,
+un `scheduledAt` passé), et le match 1v1 encore moins — `/solo` est une page vierge. Sans seed,
+le scénario sort en **exit 2** (erreur de harnais) plutôt qu'en checks verts par accident. Il se
+connecte en `alice@dev.local` / `Test1234!` : c'est le seul moyen d'atteindre un match NON
+terminé, un tiers y prenant 403 — ce que la phase 5 vérifie justement.
+
+⚠️ **Le créneau « accepté, avant l'heure » est à +2 JOURS du seed, et doit le rester.** Il a été
+posé à +1 h : passé cette heure, l'état n'existait plus, le scénario ne trouvait pas sa donnée et
+sortait en **exit 2** — une base semée le matin faisait échouer la campagne l'après-midi. Rien ne
+plafonne l'avance côté API (seul un minimum de 15 min est imposé), donc un état de démo doit
+survivre à la journée qui l'utilise. **Ne pas « rétablir » une valeur courte.**
+
+⚠️ **`:has()` remonte.** `section:has(h2:text-is("Maps"))` matche AUSSI la `<section>` de la
+page entière, qui contient ce titre : le check des maps ramassait alors les 10 chips de lineup
+en plus des 3 maps (**mesuré : 13 au lieu de 3**). Il faut le chemin DIRECT
+(`section:has(> div > h2:…)`) — le `<h2>` d'un `SectionTitle` est enveloppé dans sa ligne de
+titre, il n'est donc jamais frère de la liste qui le suit.
+
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 
 `teams-matchmaking` (FT-2C) est le seul scénario qui **crée de vrais matchs**. Le runner ne

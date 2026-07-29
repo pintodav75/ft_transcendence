@@ -139,6 +139,10 @@ export function TeamMatches({
                 showLineup={showLineup}
                 showActions={showActions}
                 onCancelSlot={onCancelSlot}
+                // FT-4A — a member opens the sheet of EVERY row, a visitor only of a
+                // completed one. Same rule as the guard of `GET /matches/{id}`, so no link
+                // on this page can lead to a 403.
+                canOpenSheet={isMember || match.status === 'completed'}
               />
             ))}
           </tbody>
@@ -146,8 +150,9 @@ export function TeamMatches({
       </div>
 
       <p className="text-xs text-text-muted">
-        Only a completed match opens its match sheet — a slot, a running match or a disputed one has
-        no result to show yet.
+        {isMember
+          ? 'Every row opens its match sheet: line-ups, maps, Bo3 score and Elo change.'
+          : 'Only a completed match opens its match sheet — a running match is private to the two sides.'}
       </p>
     </div>
   );

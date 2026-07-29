@@ -25,7 +25,8 @@ import {
   useRemoveTeamMember,
 } from '@/lib/team-mutations';
 import { findTeamStanding, useLadderRankings } from '@/lib/ladders';
-import { formatMatchDate, isValidTeamId, useTeam, useTeamMatches } from '@/lib/team-detail';
+import { formatMatchDate } from '@/lib/match-detail';
+import { isValidTeamId, useTeam, useTeamMatches } from '@/lib/team-detail';
 
 import type { TabItem } from '@/components/ui/tabs';
 import type { TeamMatch } from '@/lib/team-detail';
