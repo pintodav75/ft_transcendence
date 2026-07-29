@@ -193,7 +193,10 @@ export async function run({
 
   // La grille est un AUTRE consommateur du cache : elle doit suivre sans rechargement, donc
   // par une navigation CLIENT (le lien « My teams »), jamais par un page.reload().
-  await page.getByRole('link', { name: 'My teams' }).click();
+  // ⚠️ Porté sur `main` : depuis F-Nav le rail de gauche porte un item « my teams » vers la
+  // même route, et à 1280 px les deux sont montés — un `getByRole` global part en violation
+  // du mode strict. C'est le fil d'Ariane de la page qu'on veut cliquer, pas le rail.
+  await page.locator('main').getByRole('link', { name: 'My teams' }).click();
   await page.waitForURL(/\/teams$/, { timeout: 10000 });
   const inGrid = await page
     .getByText(renamedTo, { exact: true })

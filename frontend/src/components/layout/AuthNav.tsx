@@ -1,60 +1,89 @@
-// This is the small box at the bottom left
-// Language selector + auth actions. Rendered inside the LeftNav rail as its
-// bottom section
+// Auth actions, rendered as the bottom section of the left rail.
 
-import { ChevronDown, LogIn, LogOut, UserPen, UserPlus } from 'lucide-react';
+import { useState } from 'react';
+import { LogIn, LogOut, UserPen, UserPlus } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { useAuthStore } from '@/stores/auth-store';
 
 import { cn } from '@/lib/utils';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { MenuItem } from '@/components/ui/menu-item';
+import { useAuthStore } from '@/stores/auth-store';
 
 export function AuthNav({ className }: { className?: string }) {
   const isLogged = useAuthStore((state) => state.user !== null);
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
+  // Logging out throws away an open session, and the item sits one pixel below "Profile"
+  // in a rail that is on EVERY authenticated page: a mis-click used to end the session
+  // with no way back other than typing the password again.
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
 
   async function handleLogout() {
-    await logout();
+    setPending(true);
+    try {
+      // `logout()` du store avale déjà l'échec réseau (try/catch/finally) et vide la
+      // session localement : il ne rejette pas, donc pas d'état d'erreur à afficher ici.
+      // Le `finally` reste la garantie que la boîte ne peut pas rester bloquée en
+      // « Working… » si cette promesse changeait un jour de comportement.
+      await logout();
+    } finally {
+      setPending(false);
+      setConfirming(false);
+    }
     navigate({ to: '/' });
   }
 
   return (
-    <div className={cn('flex flex-col gap-2 border-t border-border-subtle', className)}>
-      {/* Language selector. appearance-none strips the OS chevron so we draw our own. */}
-      <div className="relative">
-        <select
-          defaultValue="en"
-          aria-label="language"
-          className="w-full cursor-pointer appearance-none rounded-control border border-border-subtle bg-surface-input px-3 py-2 pr-9 text-sm label-caps text-text-primary transition focus:border-focus-ring focus:outline-none"
-        >
-          <option value="en">English</option>
-          <option value="fr">Français</option>
-          <option value="es">Español</option>
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-text-secondary" />
-      </div>
+    <div className={cn('flex flex-col border-t border-border-subtle', className)}>
+      {/* Nommé : c'est le SECOND landmark de navigation du rail, deux « navigation » sans
+          nom seraient impossibles à distinguer dans la liste des repères. */}
+      <nav aria-label="Account" className="flex flex-col gap-0.5">
+        {!isLogged && (
+          <>
+            <MenuItem to="/login">
+              <LogIn className="size-4" /> Login
+            </MenuItem>
+            <MenuItem to="/register">
+              <UserPlus className="size-4" /> Sign up
+            </MenuItem>
+          </>
+        )}
 
-      {!isLogged && (
-        <div>
-          <MenuItem to="/login">
-            <LogIn className="size-5" /> login
-          </MenuItem>
-          <MenuItem to="/register">
-            <UserPlus className="size-5" /> sign up
-          </MenuItem>{' '}
-        </div>
-      )}
+        {isLogged && (
+          <>
+            <MenuItem to="/profile">
+              <UserPen className="size-4" /> Profile
+            </MenuItem>
+            <MenuItem onClick={() => setConfirming(true)}>
+              <LogOut className="size-4" /> Logout
+            </MenuItem>
+          </>
+        )}
+      </nav>
 
+      {/* ⚠️ CONDITIONNÉ à la session, et pas seulement par économie : `AuthNav` est AUSSI le
+          bloc bas de la landing publique (`components/landing/LandingNav.tsx`). Rendu sans
+          garde, ce <dialog> fermé existait dans le DOM d'un VISITEUR ANONYME, et son <h2>
+          « Log out » devenait le PREMIER titre de la landing, avant son propre <h1> —
+          hiérarchie de titres cassée sur la page d'entrée du projet.
+          `tone="primary"` : se déconnecter n'efface rien, ce n'est pas une action
+          destructrice. Pas de `returnFocusRef` non plus — le bouton qui ouvre la boîte
+          survit à l'annulation, la plateforme lui rend donc le focus toute seule. */}
       {isLogged && (
-        <div>
-          <MenuItem to="/profile">
-            <UserPen className="size-5" /> profile
-          </MenuItem>
-          <MenuItem onClick={handleLogout}>
-            <LogOut className="size-5" /> logout
-          </MenuItem>{' '}
-        </div>
+        <ConfirmDialog
+          open={confirming}
+          tone="primary"
+          title="Log out"
+          description="You will be signed out and sent back to the public page. Your teams and matches are not affected."
+          confirmLabel="Log out"
+          // Pas « Cancel » : dans une boîte « Log out ? », annuler QUOI est ambigu (la
+          // déconnexion, ou l'action qu'on menait avant ?). Le libellé nomme le résultat.
+          cancelLabel="Stay signed in"
+          pending={pending}
+          onConfirm={() => void handleLogout()}
+          onCancel={() => setConfirming(false)}
+        />
       )}
     </div>
   );

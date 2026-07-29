@@ -32,6 +32,13 @@
   --color-arena-blue-soft-foreground: #4f8aff;
   --color-action-primary: #343579;
   --color-action-primary-border: #5053a4;
+  /* Indigo LISIBLE en TEXTE sur nos surfaces de carte. `--color-action-primary-border`
+     est une couleur de BORDURE : posée en texte sur `--color-surface-card-strong` elle
+     tombe à 2,53:1, loin sous le 4,5:1 exigé par WCAG AA (mesuré sur la pastille
+     PLAYER/TEAM des résultats de recherche, seul endroit du repo qui la détournait en
+     couleur de texte). Cette nuance garde exactement la même teinte (238°) et donne
+     4,75:1 sur `surface-card-strong` et 4,99:1 sur `surface-card`. */
+  --color-action-primary-card-foreground: #7c7fd4;
   --color-action-primary-hover: #424596;
   --color-action-primary-foreground: #ffffff;
   --color-focus-ring: #777ae0;

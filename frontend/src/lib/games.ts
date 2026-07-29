@@ -59,11 +59,14 @@ export type Ladder = {
   lockoutMinutes: number;
 };
 
-export function useLadders() {
+// `enabled: false` keeps the request from leaving at all — used by the search bar, whose
+// ladder→game map is dead weight when the search is restricted to players.
+export function useLadders({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['ladders'],
     queryFn: () => apiFetch<{ ladders: Ladder[] }>('/ladders'),
     staleTime: REFERENCE_STALE_TIME,
+    enabled,
   });
 }
 
@@ -93,8 +96,6 @@ export function providerLabel(provider: RequiredProvider) {
 
 // Distinct ranking formats a game supports, derived from its ladders.
 export function formatsForGame(ladders: Ladder[], gameId: string): string[] {
-  const formats = ladders
-    .filter((l) => l.gameId === gameId)
-    .map((l) => l.format);
+  const formats = ladders.filter((l) => l.gameId === gameId).map((l) => l.format);
   return [...new Set(formats)];
 }

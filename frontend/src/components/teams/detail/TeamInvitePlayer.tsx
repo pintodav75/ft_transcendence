@@ -3,11 +3,11 @@ import { useState } from 'react';
 import { Callout } from '@/components/ui/callout';
 import { FormMessage } from '@/components/ui/form-message';
 import { SectionTitle } from '@/components/ui/section-title';
-import { UserSearch } from '@/components/search/UserSearch';
+import { SearchBar } from '@/components/search/SearchBar';
 import { ROSTER_LIMIT, rosterUsage } from '@/lib/team-detail';
 import { inviteTeamMemberErrorMessage, useInviteTeamMember } from '@/lib/team-mutations';
 
-import type { UserSearchResult } from '@/components/search/UserSearch';
+import type { SearchResult } from '@/components/search/SearchBar';
 import type { TeamInvitation, TeamMember } from '@/lib/team-detail';
 
 type TeamInvitePlayerProps = {
@@ -24,7 +24,7 @@ type TeamInvitePlayerProps = {
 export function TeamInvitePlayer({ teamId, members, invitations }: TeamInvitePlayerProps) {
   const invite = useInviteTeamMember(teamId);
   const [invitedPseudo, setInvitedPseudo] = useState<string | null>(null);
-  // Bumped on every successful invitation and used as UserSearch's `key`: remounting is the
+  // Bumped on every successful invitation and used as SearchBar's `key`: remounting is the
   // idiomatic way to reset a child's internal state (the typed query and its results)
   // without reaching into it. Two things come for free — the field is empty and ready for
   // the next player, and the unmount cleanup drops a debounce still waiting to fire, so
@@ -42,11 +42,15 @@ export function TeamInvitePlayer({ teamId, members, invitations }: TeamInvitePla
     ...invitations.map((invitation) => invitation.user.id),
   ];
 
-  function handleSelect(found: UserSearchResult) {
+  function handleSelect(found: SearchResult) {
+    // `type="user"` en dessous garantit déjà que le back ne renvoie que des joueurs ; ce
+    // narrowing est ce qui le prouve au compilateur avant de lire `found.pseudo`.
+    if (found.type !== 'user') return;
+
     // Deux clics rapides sur la même ligne partiraient tous les deux : `excludeIds` ne se
     // met à jour qu'APRÈS le refetch, donc la ligne reste cliquable entre-temps. Le second
     // POST reviendrait en 409 « already_invited » — un message d'échec affiché alors que
-    // l'invitation a réussi, ET une ligne rouge dans la console. `UserSearch` reçoit aussi
+    // l'invitation a réussi, ET une ligne rouge dans la console. `SearchBar` reçoit aussi
     // `disabled` plus bas : cette garde couvre la course, le `disabled` la rend visible.
     if (invite.isPending) return;
 
@@ -69,8 +73,8 @@ export function TeamInvitePlayer({ teamId, members, invitations }: TeamInvitePla
           numbers; one shared label would have read as a bug. */}
       <p className="text-xs text-text-muted">
         Roster slots {used}/{ROSTER_LIMIT}
-        {pending > 0 ? ` · ${pending} pending` : ''} — a pending invitation holds a slot, and
-        a player can only belong to one team per ladder.
+        {pending > 0 ? ` · ${pending} pending` : ''} — a pending invitation holds a slot, and a
+        player can only belong to one team per ladder.
       </p>
 
       {full ? (
@@ -82,10 +86,18 @@ export function TeamInvitePlayer({ teamId, members, invitations }: TeamInvitePla
         </Callout>
       ) : (
         <>
-          <UserSearch
+          <SearchBar
             key={invitedCount}
+            type="user"
             onSelect={handleSelect}
             placeholder="Search a player by pseudo…"
+            // Nom accessible court et stable, découplé du placeholder (le scénario d'audit
+            // cible `getByLabel('Search players')`).
+            label="Search players"
+            // Le panneau pousse le contenu au lieu de le recouvrir : en overlay il masquerait
+            // le roster et le compteur de slots, c'est-à-dire ce que le capitaine vérifie
+            // AVANT de cliquer une ligne.
+            panel="inline"
             excludeIds={excludeIds}
             disabled={invite.isPending}
           />
