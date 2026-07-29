@@ -150,9 +150,11 @@ export function TeamMatches({
       </div>
 
       <p className="text-xs text-text-muted">
+        {/* Says BOTH targets: the row hover highlights the opponent's cell too, so nothing on
+            screen tells a reader that this one cell leads somewhere else. */}
         {isMember
-          ? 'Every row opens its match sheet: line-ups, maps, Bo3 score and Elo change.'
-          : 'Only a completed match opens its match sheet — a running match is private to the two sides.'}
+          ? 'Every row opens its match sheet: line-ups, maps, Bo3 score and Elo change. The opponent’s name opens their team page.'
+          : 'Only a completed match opens its match sheet — a running match is private to the two sides. The opponent’s name opens their team page.'}
       </p>
     </div>
   );
