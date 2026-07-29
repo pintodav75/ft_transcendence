@@ -14,7 +14,7 @@ Ce qui doit rester vrai :
 
 import uuid
 
-from helpers import Suite, future, join_team, ladder_id, link, register, req
+from helpers import Suite, future, join_team, ladder_id, link, register, req, sql
 
 PRIVATE_FIELDS = ("email", "passwordHash", "password_hash", "totpSecret", "totp_secret", "bio")
 
@@ -90,6 +90,57 @@ def run():
     tokX, _, _ = register("erin")  # un parfait étranger
     st, b = req("GET", f"/matches/{M}", tokX)
     s.check("un étranger → 403", st, 403, b.get("error", ""))
+
+    # ─────────────────────────────────────────────── B16 — ladder + scores soumis
+    # Ce que la page match (FT-4) ne peut PAS deviner autrement : le nom du ladder et de
+    # son jeu (pour se titrer et décider d'afficher la section maps) et les deux scores
+    # soumis par chaque camp (confirmer = renvoyer le miroir exact de la soumission adverse).
+    s.section("B16 — le ladder ET son jeu voyagent avec le match")
+    st, b = req("GET", f"/matches/{M}", tokA)
+    match, sides = b["match"], b["sides"]
+    ladder = match.get("ladder") or {}
+    s.check("`ladderId` est TOUJOURS là (aucun appelant existant cassé)", match["ladderId"], VAL2)
+    s.check("`ladder.id` désigne le même ladder", ladder.get("id"), VAL2)
+    s.check("`ladder.format`", ladder.get("format"), "2v2")
+    s.check("`ladder.gameId`", ladder.get("gameId"), "val")
+    # Noms lus EN BASE : les ladders sont des données de référence posées par les migrations,
+    # les recopier ici ferait passer le test au vert sur une valeur inventée.
+    ladder_name, game_name = sql(
+        f"select l.name || '§' || g.name from ladders l "
+        f"join games g on g.id = l.game_id where l.id = '{VAL2}';"
+    ).split("§")
+    s.check("`ladder.name` = le nom du ladder en base", ladder.get("name"), ladder_name)
+    s.check("`ladder.gameName` = le nom du JEU en base", ladder.get("gameName"), game_name)
+
+    s.section("B16 — les deux scores soumis, par side")
+    s.check(
+        "in_progress : side 0 n'a rien soumis",
+        [sides[0].get("submittedScoreSelf"), sides[0].get("submittedScoreOpponent")],
+        [None, None],
+    )
+    s.check(
+        "in_progress : side 1 n'a rien soumis",
+        [sides[1].get("submittedScoreSelf"), sides[1].get("submittedScoreOpponent")],
+        [None, None],
+    )
+    # §5.3 : on ne soumet pas avant le coup d'envoi → on recule `scheduled_at` en SQL,
+    # comme `test_matches_result.py` (l'API ne sait pas créer un match dans le passé).
+    sql(f"update matches set scheduled_at = now() - interval '1 hour' where id='{M}';")
+    st, b = req(
+        "POST", f"/matches/{M}/result", tokA,
+        {"winnerSideId": sides[0]["id"], "scoreSelf": 2, "scoreOpponent": 1},
+    )
+    s.check("alice (side 0) soumet 2-1 → 200", st, 200, b.get("error", ""))
+    st, b = req("GET", f"/matches/{M}", tokA)
+    sides = b["sides"]
+    s.check("le match attend la confirmation", b["match"]["status"], "awaiting_confirmation")
+    s.check("side 0 : `submittedScoreSelf` = 2", sides[0].get("submittedScoreSelf"), 2)
+    s.check("side 0 : `submittedScoreOpponent` = 1", sides[0].get("submittedScoreOpponent"), 1)
+    s.check(
+        "side 1 (silencieux) : les deux scores restent null",
+        [sides[1].get("submittedScoreSelf"), sides[1].get("submittedScoreOpponent")],
+        [None, None],
+    )
 
     # ─────────────────────────────────────────────── SOLO (chess 1v1)
     s.section("SOLO — team vaut null des deux côtés")

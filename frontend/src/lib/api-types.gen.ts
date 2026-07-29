@@ -3240,7 +3240,7 @@ export interface paths {
         };
         /**
          * Détail enrichi d'un match (participants only)
-         * @description Détail complet, prêt à afficher : pour chaque side, son **id**, son **état de soumission** (`submittedAt`, `submittedWinnerSideId` — B6), l'**objet team** (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar), plus les maps. Sides **triés** (0 = créateur, 1 = accepteur). Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**) **OU joueur du match** (1v1) — **SAUF si le match est `completed`** : un match terminé devient lisible par n'importe quel compte authentifié (page match publique, B15). Tout autre statut (`pending`, `in_progress`, `awaiting_confirmation`, `disputed`, `cancelled`) reste 403 pour un tiers — préserve l'anonymat des slots ouverts et des matchs en cours.
+         * @description Détail complet, prêt à afficher : l'**objet ladder** (nom, format, jeu — B16) ; pour chaque side, son **id**, son **état de soumission** (`submittedAt`, `submittedWinnerSideId` et les **deux scores soumis** — B6/B16), l'**objet team** (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar), plus les maps. Sides **triés** (0 = créateur, 1 = accepteur). Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**) **OU joueur du match** (1v1) — **SAUF si le match est `completed`** : un match terminé devient lisible par n'importe quel compte authentifié (page match publique, B15). Tout autre statut (`pending`, `in_progress`, `awaiting_confirmation`, `disputed`, `cancelled`) reste 403 pour un tiers — préserve l'anonymat des slots ouverts et des matchs en cours.
          */
         get: {
             parameters: {
@@ -3265,6 +3265,19 @@ export interface paths {
                                 id?: string;
                                 /** Format: uuid */
                                 ladderId?: string;
+                                /** @description Identité du ladder ET de son jeu, servie AVEC le match (B16) : la page match se titre (« Counter-Strike 2 5v5 ») et décide d'afficher ou non la section maps — seuls cs2 et Valorant ont un pool — sans un second appel à `GET /ladders/{id}`. Toujours présent : `matches.ladder_id` est une FK NOT NULL en `restrict`. ⚠️ `ladderId` reste exposé juste au-dessus, à l'identique : aucun appelant existant ne bouge. */
+                                ladder?: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** @example Counter-Strike 2 5v5 */
+                                    name: string;
+                                    /** @enum {string} */
+                                    format: "1v1" | "2v2" | "3v3" | "5v5";
+                                    /** @example cs2 */
+                                    gameId: string;
+                                    /** @example Counter-Strike 2 */
+                                    gameName: string;
+                                };
                                 status?: string;
                                 /** Format: date-time */
                                 scheduledAt?: string | null;
@@ -3304,6 +3317,10 @@ export interface paths {
                                  * @description Vainqueur déclaré par CE camp ; `null` sans soumission.
                                  */
                                 submittedWinnerSideId?: string | null;
+                                /** @description Score Bo3 (manches gagnées : 0, 1 ou 2) que CE camp s'attribue à LUI-MÊME dans sa soumission ; `null` tant qu'il n'a rien soumis (donc `null` des deux côtés sur un match `in_progress`). */
+                                submittedScoreSelf?: number | null;
+                                /** @description Score Bo3 que CE camp attribue à l'ADVERSAIRE ; `null` sans soumission. Exposé avec `submittedScoreSelf` depuis B16 parce que **confirmer** un résultat, c'est renvoyer le MIROIR exact de la soumission adverse (`scoreSelf`/`scoreOpponent` croisés) : sans ces deux champs le front ne peut pas pré-remplir le bouton « Confirmer ». ⚠️ Scores RELATIFS au soumetteur (« moi / lui »), jamais indexés sur `sideIndex`. Même vainqueur mais score différent (2-0 vs 2-1) = litige. */
+                                submittedScoreOpponent?: number | null;
                                 /** @description Score final Bo3 (manches gagnées : 0, 1 ou 2) de ce camp, écrit uniquement à la clôture (`completed`). Reste `null` après un arbitrage admin (B7) : l'admin tranche un vainqueur, pas un score. */
                                 score?: number | null;
                                 /** @description Gain/perte d'Elo sur CE match précis (ex. `+18` / `-12`). Dépend de l'écart d'Elo au moment du match, donc non recalculable a posteriori — `null` tant que le match n'est pas `completed`. */
