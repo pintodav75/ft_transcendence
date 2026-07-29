@@ -591,6 +591,24 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               .where(inArray(usersTable.id, userIds))
           : [];
 
+        // Identité du ladder ET de son jeu, en UNE requête jointe (jamais une par side) :
+        // le front titre la page avec, et n'affiche la section « maps » que pour un jeu qui
+        // en a un pool. `ladderId` reste exposé à côté — les appelants existants ne bougent pas.
+        const [ladder] = await db
+          .select({
+            id: laddersTable.id,
+            name: laddersTable.name,
+            format: laddersTable.format,
+            gameId: gamesTable.id,
+            gameName: gamesTable.name,
+          })
+          .from(laddersTable)
+          .innerJoin(gamesTable, eq(gamesTable.id, laddersTable.gameId))
+          .where(eq(laddersTable.id, match.ladderId));
+        // Impossible en pratique (`matches.ladder_id` est une FK `restrict`) : on préfère
+        // un 500 explicite à un `ladder: null` que le front devrait gérer pour rien.
+        if (!ladder) return reply.code(500).send({ error: 'Internal error' });
+
         // Index clé → valeur. `.get(id)` répond en temps constant → aucune requête
         // dans la boucle d'assemblage ci-dessous.
         const teamById = new Map(teams.map((t) => [t.id, t]));
@@ -606,6 +624,11 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             // et calcule le temps restant (submittedAt + 24 h) côté client.
             submittedAt: s.submittedAt,
             submittedWinnerSideId: s.submittedWinnerSideId,
+            // Scores déclarés par CE camp, relatifs à lui-même (« moi / lui »). Sans eux le
+            // front ne peut pas proposer « Confirmer » : confirmer, c'est renvoyer le MIROIR
+            // exact de la soumission adverse (§5.4 — un score différent part en dispute).
+            submittedScoreSelf: s.submittedScoreSelf,
+            submittedScoreOpponent: s.submittedScoreOpponent,
             // Score final (manches gagnées, Bo3) et Elo de CE match — écrits seulement à la
             // clôture (`completed`), `null` avant. `score` reste `null` après un arbitrage
             // admin (il tranche un vainqueur, pas un score) ; `eloDelta`/`eloAfter` sont
@@ -636,6 +659,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           match: {
             id: match.id,
             ladderId: match.ladderId,
+            ladder,
             status: match.status,
             scheduledAt: match.scheduledAt,
             startedAt: match.startedAt,
