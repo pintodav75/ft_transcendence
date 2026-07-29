@@ -6,7 +6,8 @@ import { Pill } from '@/components/ui/pill';
 import { RosterChips } from '@/components/teams/detail/RosterChips';
 import { SectionTitle } from '@/components/ui/section-title';
 import { providerLabel } from '@/lib/games';
-import { formatLineup, formatMatchDate, nextOpenSlot, recentForm } from '@/lib/team-detail';
+import { formatMatchDate } from '@/lib/match-detail';
+import { formatLineup, nextOpenSlot, recentForm } from '@/lib/team-detail';
 
 import type { PillTone } from '@/components/ui/pill';
 import type { RankingEntry } from '@/lib/ladders';

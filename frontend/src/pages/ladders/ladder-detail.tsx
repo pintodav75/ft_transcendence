@@ -1,7 +1,7 @@
 import { Trophy } from 'lucide-react';
 import { Link, useParams } from '@tanstack/react-router';
 
-import { GameImage } from '@/components/games/GameImage';
+import { GameBanner } from '@/components/games/GameBanner';
 import { LadderBoard } from '@/components/ladders/LadderBoard';
 import { LadderMapPool } from '@/components/ladders/LadderMapPool';
 import { LadderRules } from '@/components/ladders/LadderRules';
@@ -112,13 +112,13 @@ export function LadderDetail() {
       <div className="panel flex min-w-0 flex-col gap-8 p-6">
         <header className="space-y-1">
           {/* Artwork du jeu, même idiome que `TeamHero` : bandeau + dégradé de lisibilité
-              bas-haut. On réutilise `GameImage` (et son repli quand l'asset manque), on ne
-              recopie pas ses classes. `aria-hidden` sur le bloc : le nom du jeu est déjà
-              écrit en toutes lettres juste dessous, l'image est décorative. */}
-          <div aria-hidden="true" className="relative -mx-6 -mt-6 mb-4 h-32 overflow-hidden sm:h-36">
-            <GameImage gameId={game.id} name={game.name} className="size-full object-cover" />
-            <div className="absolute inset-0 bg-linear-to-t from-background-app via-background-app/55 to-transparent" />
-          </div>
+              bas-haut. ⚠️ Les 3 lignes sont passées dans `GameBanner` quand la page match en
+              a eu besoin (FT-4A, règle du second usage) — le dégradé n'est plus recopié. */}
+          <GameBanner
+            gameId={game.id}
+            name={game.name}
+            className="-mx-6 -mt-6 mb-4 h-32 sm:h-36"
+          />
           <p className="flex items-center gap-2 text-xs label-caps text-success">
             <Trophy aria-hidden="true" className="size-4" /> Ladder
           </p>

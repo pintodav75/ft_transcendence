@@ -8,19 +8,50 @@ import { providerLabel } from '@/lib/games';
 import { cn } from '@/lib/utils';
 
 import type { RequiredProvider } from '@/lib/games';
-import type { TeamInvitation, TeamMember } from '@/lib/team-detail';
+import type { TeamInvitation } from '@/lib/team-detail';
 
-type RosterChipsProps = {
-  members: TeamMember[];
-  provider: RequiredProvider;
-  /** Members only: a visitor never learns who has linked their game account. */
-  showAccountState: boolean;
+/**
+ * What a chip needs to render, described STRUCTURALLY rather than as `TeamMember`.
+ *
+ * FT-4A is the second consumer: the match sheet lists the players FIELDED on a side, and
+ * `GET /matches/{id}` serves them without `hasLinkedAccount` — that flag answers "may I put
+ * him in a line-up?", a question already settled once the match exists. Re-typing the chip
+ * on `TeamMember` would have forced the sheet to fabricate a `false` there, i.e. to state
+ * something the server never said. `TeamMember` still satisfies this shape, so the team
+ * page passes its members unchanged.
+ */
+export type RosterChipsMember = {
+  id: string;
+  pseudo: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  isCaptain: boolean;
+  /** Read ONLY when `showAccountState` is true. */
+  hasLinkedAccount?: boolean;
+};
+
+/**
+ * Generic over the member type so a caller gets ITS OWN type back in `onKick` — the team
+ * page hands `TeamMember[]` and its handler still receives a `TeamMember`, not the widened
+ * shape above (a callback parameter is contravariant, so widening it here would have broken
+ * every existing caller).
+ */
+type RosterChipsProps<M extends RosterChipsMember> = {
+  members: M[];
+  /**
+   * Members only: a visitor never learns who has linked their game account. The match sheet
+   * leaves it out too — `GET /matches/{id}` does not carry the flag, and a fielded player
+   * has by definition passed the check.
+   */
+  showAccountState?: boolean;
+  /** Labels the account state above; only read when `showAccountState` is true. */
+  provider?: RequiredProvider;
   /**
    * Captain only (Manage tab): adds a Kick button to every chip but the captain's.
    * Left out everywhere else, which is what keeps this component usable read-only in
    * the Overview tab instead of being duplicated for the manage view.
    */
-  onKick?: (member: TeamMember) => void;
+  onKick?: (member: M) => void;
   /**
    * Players who have been invited and have not answered yet, rendered AFTER the members in
    * the same list. Defaults to `[]`, which is also what a visitor gets for free: the key is
@@ -40,14 +71,14 @@ type RosterChipsProps = {
 const chipClasses =
   'flex min-w-0 items-center rounded-full border bg-surface-card transition focus-within:border-border-strong hover:border-border-strong hover:bg-surface-card-strong';
 
-export function RosterChips({
+export function RosterChips<M extends RosterChipsMember>({
   members,
   provider,
-  showAccountState,
+  showAccountState = false,
   onKick,
   invitations = [],
   onCancelInvitation,
-}: RosterChipsProps) {
+}: RosterChipsProps<M>) {
   return (
     // The explicit role is required: Safari drops list semantics on a flex <ul>.
     <ul role="list" className="flex flex-wrap gap-2.5">
@@ -90,7 +121,12 @@ export function RosterChips({
                 </span>
                 <span className="flex items-center gap-1.5 text-xs text-text-muted">
                   <span className="truncate">@{member.pseudo}</span>
+                  {/* `provider &&` rather than a non-null assertion: the two props are
+                      optional independently, and a caller that asks for the account state
+                      without saying WHICH provider must render nothing, not "no undefined
+                      account". Never reached today — the team page passes both. */}
                   {showAccountState &&
+                    provider &&
                     (member.hasLinkedAccount ? (
                       <span className="flex items-center gap-1 whitespace-nowrap text-success">
                         <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />

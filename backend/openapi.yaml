@@ -3337,6 +3337,20 @@ paths:
                         description: >
                           Id de la dispute quand le match est `disputed` — le front l'utilise
                           pour naviguer vers `GET /disputes/:id`. `null` dans tous les autres états.
+                    required:
+                      [
+                        id,
+                        ladderId,
+                        ladder,
+                        status,
+                        scheduledAt,
+                        startedAt,
+                        completedAt,
+                        winnerSideId,
+                        maps,
+                        createdAt,
+                        disputeId,
+                      ]
                   sides:
                     type: array
                     items:
@@ -3402,6 +3416,7 @@ paths:
                             name: { type: string, example: Los Ratones }
                             logoUrl: { type: string, nullable: true }
                             captainId: { type: string, format: uuid }
+                          required: [id, name, logoUrl, captainId]
                         players:
                           type: array
                           description: La lineup engagée sur ce side (pas le roster entier).
@@ -3412,6 +3427,21 @@ paths:
                               pseudo: { type: string, example: alice }
                               displayName: { type: string, nullable: true }
                               avatarUrl: { type: string, nullable: true }
+                            required: [id, pseudo, displayName, avatarUrl]
+                      required:
+                        [
+                          id,
+                          sideIndex,
+                          submittedAt,
+                          submittedWinnerSideId,
+                          submittedScoreSelf,
+                          submittedScoreOpponent,
+                          score,
+                          eloDelta,
+                          eloAfter,
+                          team,
+                          players,
+                        ]
                 required: [match, sides]
         '400':
           description: Param :id non-uuid (ValidationError)

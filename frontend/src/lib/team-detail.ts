@@ -307,46 +307,18 @@ export function ladderSubtitle(ladderName: string, gameName: string, format: str
 
 // ---------------------------------------------------------------- formatting
 
-// Built once at module scope: an Intl formatter is expensive to create and these
-// options never change.
-const shortDateFormat = new Intl.DateTimeFormat('fr-FR', {
-  day: '2-digit',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
-const longDateFormat = new Intl.DateTimeFormat('fr-FR', {
-  weekday: 'short',
-  day: '2-digit',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
 /**
- * `scheduledAt` / `completedAt` are ISO **strings** that can be `null` — and
- * `new Date(null)` silently yields 1970 instead of failing, so the null check is the
- * whole point of this helper.
+ * ⚠️ `formatMatchDate` and `formatEloDelta` MOVED to `lib/match-detail.ts` (FT-4A, rule of
+ * the second use): they format a MATCH, not a team, and the match sheet is their second
+ * reader. Import them from there — there is deliberately no re-export shim here, which
+ * would hide the move from the next reader.
+ *
+ * `formatScore` stayed: its input is the team history's own `{ self, opponent }` pair, a
+ * shape that only `GET /teams/{id}/matches` produces.
  */
-export function formatMatchDate(iso: string | null, style: 'short' | 'long' = 'short') {
-  if (!iso) return EM_DASH;
-
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return EM_DASH;
-
-  return (style === 'long' ? longDateFormat : shortDateFormat).format(date);
-}
 
 /** Bo3 score, or an em dash: `null` is possible even on a completed match. */
 export function formatScore(score: TeamMatch['score']) {
   if (score.self === null || score.opponent === null) return EM_DASH;
   return `${score.self}–${score.opponent}`;
-}
-
-/** Signed Elo delta with a real minus sign (U+2212), never a hyphen. */
-export function formatEloDelta(eloDelta: number | null) {
-  if (eloDelta === null) return EM_DASH;
-  if (eloDelta < 0) return `−${Math.abs(eloDelta)}`;
-  return `+${eloDelta}`;
 }

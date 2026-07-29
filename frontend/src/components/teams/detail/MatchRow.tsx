@@ -2,15 +2,10 @@ import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
 
 import { InlineButton } from '@/components/ui/inline-button';
-import { MatchStatusPill } from '@/components/teams/detail/MatchStatusPill';
-import { matchAccentClass, matchStatusView } from '@/components/teams/detail/match-status';
-import {
-  formatEloDelta,
-  formatLineup,
-  formatMatchDate,
-  formatScore,
-  isCancellableSlot,
-} from '@/lib/team-detail';
+import { MatchStatusPill } from '@/components/matches/MatchStatusPill';
+import { matchAccentClass, matchStatusView } from '@/components/matches/match-status';
+import { formatEloDelta, formatMatchDate } from '@/lib/match-detail';
+import { formatLineup, formatScore, isCancellableSlot } from '@/lib/team-detail';
 import { EM_DASH, cn } from '@/lib/utils';
 
 import type { TeamMatch } from '@/lib/team-detail';
@@ -26,12 +21,29 @@ type MatchRowProps = {
   showActions?: boolean;
   /** Captain only. A row that is not an open slot renders an empty cell, never a button. */
   onCancelSlot?: (match: TeamMatch) => void;
+  /**
+   * FT-4A — may this row open its match sheet?
+   *
+   * Decided ONCE by the table, from the server's own `isMember`: a member reaches the sheet
+   * of EVERY match of his team (a slot he opened, a match being played, a dispute he is part
+   * of), a visitor only of a completed one — which is exactly the guard of
+   * `GET /matches/{id}`. Offering the others to a visitor would guarantee a 403 and a red
+   * line in the console.
+   */
+  canOpenSheet?: boolean;
 };
 
-export function MatchRow({ match, showLineup, showActions = false, onCancelSlot }: MatchRowProps) {
+export function MatchRow({
+  match,
+  showLineup,
+  showActions = false,
+  onCancelSlot,
+  canOpenSheet = false,
+}: MatchRowProps) {
   const { tone } = matchStatusView(match);
-  // Only a finished match has a sheet to open; the others stay dimmed and inert.
-  const isOpenable = match.status === 'completed';
+  // A finished match is the only one carrying a RESULT — that is what drives the row's
+  // emphasis, and it is deliberately NOT the same question as "can it be opened".
+  const hasResult = match.status === 'completed';
   const date = formatMatchDate(match.scheduledAt);
   const opponentName = match.opponent?.name;
   const disputed = match.disputeStatus === 'open' || match.status === 'disputed';
@@ -39,14 +51,23 @@ export function MatchRow({ match, showLineup, showActions = false, onCancelSlot 
   // A row without a result is toned down — but only its NEUTRAL cells. Dimming the whole
   // row also dimmed the status pill, and dropped the "Disputed" pill to 3.07:1 contrast:
   // the one row the design wants to shout became the least readable of the page.
-  const muted = isOpenable ? undefined : 'opacity-70';
+  const muted = hasResult ? undefined : 'opacity-70';
+  // A row with no opponent NAME has nothing to hang the link on, so the DATE cell carries it
+  // instead — one link per row, never two competing targets.
+  // ⚠️ A visitor CAN reach this branch, contrary to what this comment used to claim. The
+  // backend hides matches with a single side from a visitor (`sides.length === 2`), not
+  // matches without an opponent name — and `opponent` also comes back null when the other
+  // team was dissolved after the match. A visitor therefore gets the date link on a finished
+  // match whose opponent is gone. That is the RIGHT behaviour (a finished match's sheet is
+  // readable by any account since B15), so nothing to fix here beyond the claim itself.
+  const linkOnDate = canOpenSheet && !opponentName;
 
   return (
     <tr
       className={cn(
         'border-t border-border-subtle',
         disputed && 'bg-arena-red/5',
-        isOpenable && 'hover:bg-surface-card',
+        canOpenSheet && 'hover:bg-surface-card',
       )}
     >
       <td
@@ -56,12 +77,26 @@ export function MatchRow({ match, showLineup, showActions = false, onCancelSlot 
           muted,
         )}
       >
-        {date}
+        {linkOnDate ? (
+          <Link
+            to="/matches/$matchId"
+            params={{ matchId: match.id }}
+            aria-label={`Match sheet of the slot of ${formatMatchDate(match.scheduledAt, 'long')}`}
+            // `-my-1.5 py-1.5` lifts the hit area from 14 px to 26 px WITHOUT changing the row's
+            // height: WCAG 2.5.8 wants 24 px, and this link is a standalone target, not a word
+            // inside a sentence — the "Inline" exception does not cover it.
+            className="focus-ring -my-1.5 inline-flex items-center py-1.5 underline-offset-4 hover:underline"
+          >
+            {date}
+          </Link>
+        ) : (
+          date
+        )}
       </td>
 
       <td className={cn('px-3 py-3 font-bold', muted)}>
         {opponentName ? (
-          isOpenable ? (
+          canOpenSheet ? (
             <Link
               to="/matches/$matchId"
               params={{ matchId: match.id }}

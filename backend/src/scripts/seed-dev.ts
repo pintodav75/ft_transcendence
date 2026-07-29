@@ -123,7 +123,11 @@ async function insertDemoMatch(
     scheduledAt: Date;
     startedAt?: Date;
     maps: string[];
-    lineups: { teamId: string; players: string[] }[];
+    // ⚠️ `teamId: null` est la forme SOLO (1v1) : sur un ladder `1v1` le JOUEUR *est* le
+    // camp — `match_sides.team_id` reste NULL et l'identité du camp vit dans
+    // `match_participants` (branche SOLO de `resolveSide`, routes/matches.ts). La colonne
+    // est nullable en base : le type est élargi ici, aucune logique n'est dupliquée.
+    lineups: { teamId: string | null; players: string[] }[];
   },
 ): Promise<{ id: string; sideIds: string[] }> {
   const [match] = await tx
@@ -245,6 +249,13 @@ async function main() {
 
   let demoMatchCount = 0;
 
+  // Instant de référence des créneaux de démo, aligné sur la grille du quart d'heure (même
+  // règle que `createMatchSchema`). Partagé par les matchs d'équipe (cs2) et le match solo
+  // (chess) pour que tous les états soient RELATIFS à l'exécution du seed : relancer le
+  // script rafraîchit les états « avant / après l'heure » au lieu de les figer.
+  const base = new Date(Math.ceil(Date.now() / SLOT_GRID_MS) * SLOT_GRID_MS);
+  const at = (hours: number) => new Date(base.getTime() + hours * HOUR_MS);
+
   if (cs2) {
     await db
       .insert(teamsTable)
@@ -359,10 +370,9 @@ async function main() {
         .where(and(eq(rankingsTable.ladderId, cs2.id), eq(rankingsTable.teamId, teamIdByName.get(name)!)));
     }
 
-    // 3) Les six matchs. Les créneaux sont RELATIFS à l'instant du seed (« dans 3 h », « il y
-    //    a 2 h ») : relancer le script rafraîchit donc les états « avant / après l'heure ».
-    const base = new Date(Math.ceil(Date.now() / SLOT_GRID_MS) * SLOT_GRID_MS);
-    const at = (hours: number) => new Date(base.getTime() + hours * HOUR_MS);
+    // 3) Les sept matchs, sur la base de temps commune (`at`, plus haut) : les créneaux sont
+    //    RELATIFS à l'instant du seed (« dans 3 h », « il y a 2 h »), donc relancer le
+    //    script rafraîchit les états « avant / après l'heure ».
     // Espacement : |Δ| ≥ 3 h alors que le lockout cs2 5v5 vaut 60 min → aucun de ces matchs
     // n'est en conflit §5.2 avec un autre. Le match terminé, lui, n'engage plus personne.
     const KICKOFFS = {
@@ -373,16 +383,23 @@ async function main() {
       // Rien ne plafonne l'avance côté API (`createMatchSchema` n'impose qu'un MINIMUM de
       // 15 min), l'état reste donc parfaitement légal.
       pending: at(24 * 3),
-      upcoming: at(1),
+      // ⚠️ 2 JOURS, pas 1 heure — même raisonnement que `pending` ci-dessus, appliqué au bon
+      // état cette fois. « Accepté AVANT l'heure » cessait d'exister 1 h après le seed, et le
+      // scénario d'audit qui le cherche partait alors en `exit 2` (harnais en échec, jamais un
+      // vert — invariant #10). Un état de démo doit survivre à la journée qui l'utilise.
+      upcoming: at(24 * 2),
       live: at(-2),
       awaiting: at(-5),
       disputed: at(-8),
       completed: at(-26),
+      // Créneau ouvert que PERSONNE n'a pris et que le ménage a annulé : 7ᵉ état, sans lequel
+      // `cancelled` n'était rendu par aucune donnée semée — donc gardé par aucun check.
+      cancelled: at(-30),
     };
 
-    // Un tirage INDÉPENDANT par match (comme `POST /matches`) : les 6 matchs de démo
+    // Un tirage INDÉPENDANT par match (comme `POST /matches`) : les 7 matchs de démo
     // n'affichent pas la même triplette de maps.
-    const maps = await Promise.all(Array.from({ length: 6 }, () => drawMaps(cs2.gameId)));
+    const maps = await Promise.all(Array.from({ length: 7 }, () => drawMaps(cs2.gameId)));
 
     const created = await db.transaction(async (tx) => {
       // (a) CRÉNEAU OUVERT — un seul side : personne n'a encore accepté. Posé à +3 h, donc
@@ -530,17 +547,30 @@ async function main() {
         .set({ lastMatchAt: confirmedAway })
         .where(and(eq(rankingsTable.ladderId, cs2.id), inArray(rankingsTable.teamId, [home, away])));
 
-      return { slot, upcoming, live, awaiting, disputed, completed };
+      // (g) ANNULÉ — un créneau ouvert que personne n'a pris et que `cancelExpiredSlots` a fini
+      //     par retirer. Un SEUL side, comme le créneau ouvert : c'est justement pour ça qu'il
+      //     compte. La fiche ne peut pas déduire « slot encore acceptable » de l'absence
+      //     d'adversaire, elle doit lire le STATUT — sans cet état semé, rien ne le prouvait.
+      const cancelled = await insertDemoMatch(tx, {
+        ladderId: cs2.id,
+        status: 'cancelled',
+        scheduledAt: KICKOFFS.cancelled,
+        maps: maps[6]!,
+        lineups: [homeLineup],
+      });
+
+      return { slot, upcoming, live, awaiting, disputed, completed, cancelled };
     });
 
     demoMatchCount = Object.keys(created).length;
-    console.log(`\n🎮 6 matchs de démo ${DEMO_HOME} vs ${DEMO_AWAY} (cs2 5v5) :`);
+    console.log(`\n🎮 ${demoMatchCount} matchs de démo ${DEMO_HOME} vs ${DEMO_AWAY} (cs2 5v5) :`);
     console.log(`   créneau ouvert          ${created.slot.id}   (${KICKOFFS.pending.toISOString()})`);
     console.log(`   accepté, avant l'heure  ${created.upcoming.id}   (${KICKOFFS.upcoming.toISOString()})`);
     console.log(`   accepté, après l'heure  ${created.live.id}   (${KICKOFFS.live.toISOString()})`);
     console.log(`   en attente de confirm.  ${created.awaiting.id}   (${KICKOFFS.awaiting.toISOString()})`);
     console.log(`   en litige               ${created.disputed.id}   (${KICKOFFS.disputed.toISOString()})`);
     console.log(`   terminé (maps + Elo)    ${created.completed.id}   (${KICKOFFS.completed.toISOString()})`);
+    console.log(`   créneau annulé          ${created.cancelled.id}   (${KICKOFFS.cancelled.toISOString()})`);
     console.log(`\n🔑 Les 3 SEULS comptes connectables (mot de passe : ${FIXTURE_PASSWORD}) :`);
     console.log(
       `   alice@dev.local   capitaine ${DEMO_HOME} — c'est ELLE qui a un résultat à confirmer`,
@@ -552,9 +582,152 @@ async function main() {
     console.log(`   (les 8 autres joueurs n'ont pas de mot de passe : remplissage de lineup)`);
   }
 
+  // ------------------------------------------------------------------------------------
+  // --- FT-4A : UN match 1v1 TERMINÉ sur chess ---
+  //
+  // Pourquoi : le back gère complètement le 1v1 — sur un ladder `1v1` le JOUEUR *est* le
+  // camp (`match_sides.team_id` NULL, identité dans `match_participants`, branche SOLO de
+  // `resolveSide`) — mais AUCUN match 1v1 n'existait en base, et aucun ne peut être créé
+  // depuis l'interface tant que `/solo` est une page vierge. La variante « camp sans
+  // équipe » de la page match aurait donc été développée à l'aveugle.
+  //
+  // Deux démonstrations pour le prix d'une : chess n'a AUCUN pool de maps, donc ce match
+  // prouve aussi que la section « maps » est pilotée par la DONNÉE (elle disparaît) et
+  // jamais par une liste de jeux écrite en dur.
+  //
+  // ⚠️ C'est le side 1 qui GAGNE ici, à l'inverse du match cs2 terminé : un vainqueur
+  // toujours en side 0 laisserait passer un affichage qui confond « premier camp » et
+  // « vainqueur ».
+  const SOLO_HOME = 'alice'; // side 0 — le créateur du créneau
+  const SOLO_AWAY = 'bob'; // side 1 — celui qui a accepté, et le vainqueur
+  const soloPseudos = [SOLO_HOME, SOLO_AWAY];
+  const soloIds = soloPseudos.map((p) => idByPseudo.get(p)!);
+
+  // §5.1 : chess impose le provider `chess_com` (`games.required_provider`). Sans ce lien,
+  // `POST /matches` refuserait d'aligner ces deux joueurs — le seed écrirait alors un état
+  // que l'API n'aurait jamais pu produire. Même raison et même forme que le `steam` des
+  // rosters cs2 plus haut ; `verified: false` (aucune possession n'a été prouvée).
+  await db
+    .insert(userExternalAccountsTable)
+    .values(
+      soloPseudos.map((pseudo) => ({
+        userId: idByPseudo.get(pseudo)!,
+        provider: 'chess_com' as const,
+        externalId: `seed-chesscom-${pseudo}`,
+      })),
+    )
+    .onConflictDoNothing();
+
+  // Purge de la production PRÉCÉDENTE, même raison que pour les matchs d'équipe : un match
+  // n'a aucune clé naturelle, `onConflictDoNothing` ne peut donc rien pour lui et chaque
+  // relance en empilerait un de plus. On cible les sides SANS équipe (`team_id IS NULL`)
+  // de ces deux joueurs.
+  // ⚠️ Ce filtre n'est PAS aussi étroit qu'il en a l'air : `match_sides.team_id` est en
+  // `onDelete: 'set null'`, donc un match d'ÉQUIPE dont l'équipe a été dissoute depuis
+  // retombe lui aussi dans le filet (son `team_id` est passé à NULL). C'est sans dommage
+  // ici — un tel match est forcément `completed` ou `cancelled`, sinon la dissolution
+  // aurait été refusée (`team_engaged_in_match`), et le nettoyer est même souhaitable —
+  // mais ne pas lire cette requête comme « exactement ce que ce bloc produit ».
+  const previousSolo = await db
+    .selectDistinct({ id: matchSidesTable.matchId })
+    .from(matchSidesTable)
+    .innerJoin(matchParticipantsTable, eq(matchParticipantsTable.matchSideId, matchSidesTable.id))
+    .where(and(isNull(matchSidesTable.teamId), inArray(matchParticipantsTable.userId, soloIds)));
+  if (previousSolo.length)
+    await db.delete(matchesTable).where(
+      inArray(
+        matchesTable.id,
+        previousSolo.map((p) => p.id),
+      ),
+    );
+
+  // Remise du classement chess des deux joueurs à leur valeur de fixture — jumeau exact de
+  // la passe faite pour les 2 équipes cs2, et pour la même raison : `completeMatchWithElo`
+  // applique un VRAI calcul d'Elo sur `rankings`, donc sans cette remise chaque relance
+  // ajouterait une victoire et déplacerait l'Elo d'un cran.
+  // ⚠️ L'insert de `rankings` plus haut est en `onConflictDoNothing` : il SAUTE la ligne
+  // entière sur une base déjà semée, il ne répare donc rien. C'est cette passe qui le fait.
+  for (const pseudo of soloPseudos) {
+    const fixture = fakeUsers.find((u) => u.pseudo === pseudo)!;
+    await db
+      .update(rankingsTable)
+      .set({ elo: fixture.elo, wins: fixture.wins, losses: fixture.losses, lastMatchAt: null })
+      .where(and(eq(rankingsTable.ladderId, chess.id), eq(rankingsTable.userId, idByPseudo.get(pseudo)!)));
+  }
+
+  const soloKickoff = at(-50);
+  const soloSubmitted = new Date(soloKickoff.getTime() + 65 * 60 * 1000);
+  const soloConfirmed = new Date(soloKickoff.getTime() + 71 * 60 * 1000);
+  // Tirage réel dans le pool du jeu, comme `POST /matches` : chess n'en a pas, donc `[]`.
+  // Écrit tel quel plutôt que codé en dur — le jour où chess reçoit un pool, le seed suit.
+  const soloMaps = await drawMaps(chess.gameId);
+
+  const solo = await db.transaction(async (tx) => {
+    const match = await insertDemoMatch(tx, {
+      ladderId: chess.id,
+      status: 'in_progress',
+      scheduledAt: soloKickoff,
+      startedAt: new Date(soloKickoff.getTime() - 2 * HOUR_MS),
+      maps: soloMaps,
+      lineups: [
+        { teamId: null, players: [idByPseudo.get(SOLO_HOME)!] },
+        { teamId: null, players: [idByPseudo.get(SOLO_AWAY)!] },
+      ],
+    });
+
+    // Les deux camps ont soumis LE MÊME verdict (même vainqueur, scores croisés cohérents)
+    // → clôture + Elo, exactement comme le match cs2 terminé.
+    await tx
+      .update(matchSidesTable)
+      .set({
+        submittedAt: soloSubmitted,
+        submittedWinnerSideId: match.sideIds[1]!,
+        submittedScoreSelf: WINS_REQUIRED,
+        submittedScoreOpponent: 0,
+      })
+      .where(eq(matchSidesTable.id, match.sideIds[1]!));
+    await tx
+      .update(matchSidesTable)
+      .set({
+        submittedAt: soloConfirmed,
+        submittedWinnerSideId: match.sideIds[1]!,
+        submittedScoreSelf: 0,
+        submittedScoreOpponent: WINS_REQUIRED,
+      })
+      .where(eq(matchSidesTable.id, match.sideIds[0]!));
+
+    // `completeMatchWithElo` sait résoudre un side SOLO en compétiteur (`toCompetitor`
+    // retombe sur le `user_id` du participant quand `team_id` est NULL) : rien à écrire de
+    // spécifique ici, on réutilise le helper que partagent déjà la route, le job 24 h et
+    // l'arbitrage admin.
+    // ⚠️ (2, 0) et non (2, 1) : le score final DOIT être celui que les deux camps ont
+    // soumis juste au-dessus. Un 2-1 clôturé sur des soumissions 2-0 décrirait un état que
+    // la route ne peut pas produire — et la page match afficherait deux scores qui se
+    // contredisent.
+    await completeMatchWithElo(tx, match.id, chess.id, match.sideIds[1]!, WINS_REQUIRED, 0);
+    // Même réalignement que pour le match d'équipe : le helper horodate à `now`, ce qui
+    // afficherait « terminé à l'instant » sur une partie jouée avant-hier.
+    await tx
+      .update(matchesTable)
+      .set({ completedAt: soloConfirmed })
+      .where(eq(matchesTable.id, match.id));
+    await tx
+      .update(rankingsTable)
+      .set({ lastMatchAt: soloConfirmed })
+      .where(and(eq(rankingsTable.ladderId, chess.id), inArray(rankingsTable.userId, soloIds)));
+
+    return match;
+  });
+
+  console.log(`\n♟️  1 match de démo 1v1 ${SOLO_HOME} vs ${SOLO_AWAY} (chess 1v1) :`);
+  console.log(
+    `   terminé, SANS équipe     ${solo.id}   (${soloKickoff.toISOString()}, ${SOLO_AWAY} vainqueur, aucune map — chess n'a pas de pool)`,
+  );
+
   console.log(
     `\n✅ seed-dev terminé : ${fakeUsers.length} joueurs sur chess 1v1` +
-      (cs2 ? `, ${fakeTeams.length} équipes sur cs2 5v5, ${demoMatchCount} matchs de démo` : ''),
+      (cs2 ? `, ${fakeTeams.length} équipes sur cs2 5v5, ${demoMatchCount} matchs de démo` : '') +
+      ', 1 match 1v1 terminé',
   );
   process.exit(0);
 }

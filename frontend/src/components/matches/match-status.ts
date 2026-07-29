@@ -1,15 +1,37 @@
 import type { PillTone } from '@/components/ui/pill';
-import type { TeamMatch } from '@/lib/team-detail';
 
-// Status label + colour tone of one match row. Lives in its own module (same reason as
-// button-variants.ts) so the components that need BOTH the pill and the row's left
-// accent read a single mapping.
+/**
+ * Status label + colour tone of a match. Lives in its own module (same reason as
+ * `button-variants.ts`) so the components that need BOTH the pill and the row's left accent
+ * read a single mapping.
+ *
+ * ⚠️ Moved out of `components/teams/detail/` by FT-4A (rule of the second use): written for
+ * a row of a team's history, it now also drives the `/matches/$matchId` sheet, and a match
+ * page importing from "teams/detail" would say the opposite of what the code does. No logic
+ * was rewritten — only the file it lives in, and the input became STRUCTURAL.
+ */
 export type MatchStatusView = {
   tone: PillTone;
   label: string;
 };
 
-export function matchStatusView(match: TeamMatch): MatchStatusView {
+/**
+ * The strict minimum needed to decide, described structurally rather than by one API type:
+ * the two routes that feed this mapping do not serve the same shape.
+ *
+ * ⚠️ `disputeStatus` is ABSENT from `GET /matches/{id}` (which only exposes `disputeId`, and
+ * only while the match is `disputed`) and present whatever the status on
+ * `GET /teams/{id}/matches`. It is therefore optional — a caller without it loses nothing:
+ * `status === 'disputed'` is enough to read "Disputed".
+ */
+export type MatchStatusSource = {
+  status: string;
+  disputeStatus?: 'open' | 'resolved' | null;
+  /** `null`/absent = open slot: nobody has accepted yet. */
+  opponent?: { id: string } | null;
+};
+
+export function matchStatusView(match: MatchStatusSource): MatchStatusView {
   // An open dispute outranks the raw status: the row must read "disputed" even while
   // the match itself is still `in_progress`.
   if (match.disputeStatus === 'open' || match.status === 'disputed') {
