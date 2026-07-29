@@ -25,9 +25,9 @@ type MatchStateNoticeProps = {
  * What is happening RIGHT NOW, in one sentence — the only part of the sheet that changes
  * between the seven states of the cycle.
  *
- * 🚨 Read-only by design: this ticket ([FT-4A]) is the sheet. Reporting a score, confirming
- * the opponent's report and opening a dispute are [FT-4B] — a side that has reported sees
- * the WAIT here, never a form.
+ * 🚨 It STATES, it never acts. The actions live one block below, in `MatchResultPanel`
+ * ([FT-4B]), and the two are complementary by design: a side that has already reported gets
+ * no form at all, only the wait — with its 24 h deadline — announced here.
  */
 export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps) {
   const kickoffIn = msUntil(match.scheduledAt, nowMs);

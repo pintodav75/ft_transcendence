@@ -86,6 +86,7 @@ Ce que le runner fournit :
 | `fixtures.ok / .big / .bad` | PNG valide · PNG > 2 Mo · GIF (type refusé), **générés à l'exécution** |
 | `user` | compte neuf du run (`pseudo`, `email`, `password`, `accessToken`, `stamp`) |
 | `expectHttp(motif, raison)` | déclare qu'un échec réseau est **l'objet du test** (id inexistant → écran 404) |
+| `sql(requête)` | une requête SQL dans le conteneur postgres — **forcer un état que l'API interdit**, jamais constater un comportement (voir plus bas) |
 
 ### Tester un état d'erreur : `expectHttp`
 
@@ -270,6 +271,69 @@ page entière, qui contient ce titre : le check des maps ramassait alors les 10 
 en plus des 3 maps (**mesuré : 13 au lieu de 3**). Il faut le chemin DIRECT
 (`section:has(> div > h2:…)`) — le `<h2>` d'un `SectionTitle` est enveloppé dans sa ligne de
 titre, il n'est donc jamais frère de la liste qui le suit.
+
+## `sql.mjs` — la seule sortie du navigateur, et sa règle d'usage
+
+`sql(requête)` exécute `docker compose exec -T postgres psql … -tAq -c <requête>` depuis la
+racine du repo. C'est le **seul** endroit du harnais front qui ne passe ni par HTTP ni par
+Playwright, d'où un module à part plutôt que quelques lignes noyées dans `runner.mjs`. Les
+identifiants sont lus dans le `.env` de la racine (`POSTGRES_USER`, `POSTGRES_DB`) — jamais en
+dur, ils diffèrent sur chaque machine.
+
+🚨 **La règle, et c'est elle le vrai garde-fou** : le SQL sert à **FORCER un état que l'API
+interdit d'atteindre**. Il ne sert **jamais** à constater un comportement applicatif — un check
+qui lit la base au lieu de lire l'écran ne garde pas l'écran, il garde la base, et il resterait
+vert le jour où la page cesserait d'afficher ce qu'elle affiche.
+
+Deux pièges, tous deux déjà payés côté Python (`backend/tests/helpers.py`, dont ce module est
+la transposition) :
+
+- ⚠️ **`-tAq` n'est pas cosmétique.** Sans `-q`, psql fait suivre le **tag de commande** sur les
+  requêtes mutantes : un `UPDATE` rend « UPDATE 3 », un `INSERT … RETURNING id` rend
+  « <uuid>\nINSERT 0 1 ». `-t -A` seuls ne suppriment ce tag que pour les SELECT.
+- ⚠️ **Une erreur SQL doit planter fort.** Un `ROLLBACK` sur violation de contrainte ne produit
+  aucune exception : psql sort en code non nul, que personne ne regarde. Côté Python, avaler ce
+  cas a laissé **270 users et 325 matchs** de test s'accumuler pendant trois jours. `sql()`
+  inspecte donc `status` et **lève** → le scénario s'interrompt et le rapport sort en **code 2**
+  (« le harnais a échoué »), pas en check rouge imputable au ticket.
+
+## `match-result` (FT-4B) — fabriquer un match prêt à être scoré
+
+`scenarios/match-result.mjs` construit, **par l'API**, le seul état que l'API ne sait pas
+produire : deux joueurs jetables, comptes `chess_com` liés, un créneau **chess 1v1** créé puis
+accepté (`in_progress`) — puis `scheduled_at` reculé **en SQL**. `POST /matches` et
+`/accept` exigent un coup d'envoi **dans le futur** (≥ 15 min) tandis que `POST
+/matches/:id/result` exige `now() >= scheduled_at` (§5.3) : aucune séquence HTTP ne satisfait
+les deux. C'est exactement la recette de `backend/tests/test_matches_result.py`.
+
+**Du 1v1, pas du 5v5** : deux comptes avec un compte externe chacun, contre dix plus dix pour
+aligner deux lineups. Le joueur *est* le camp, il n'y a pas de lineup.
+
+**Il ne dépend pas du seed** (contrairement à `match-detail`) : il fabrique sa donnée, donc il
+reste rejouable sur une base vierge et deux runs ne se marchent pas dessus. Seul le ladder
+chess 1v1 est attendu — il vient des migrations, pas du seed.
+
+⚠️ **Le teardown est la moitié du scénario.** `DELETE /users/me` refuse en 409
+`engaged_in_match` tout compte aligné dans un match `pending`/`in_progress`/
+`awaiting_confirmation`/`disputed`, et `purgeUserMatches()` du runner ne sait qu'annuler un
+slot **encore pending**. Le scénario force donc le match hors des statuts engageants
+(`status='cancelled'`) **en toute fin et même si un check a échoué**, puis efface la ligne
+(`DELETE /matches/:id` ne fait, lui, que passer le statut à `cancelled` : sans cette seconde
+requête, chaque run laisserait une coquille de match de plus). Mesuré teardown neutralisé :
+**2 comptes + 1 match** laissés en base et « compte(s) NON supprimé(s) » au rapport.
+
+**17 checks** (`R0` → `R15`, plus `R11b`), qui déroulent le cycle d'écriture en entier :
+liaisons des comptes externes, `in_progress` lu par l'API, **aucun contrôle offert avant le
+coup d'envoi**, coup d'envoi effectivement reculé, fiche ouverte avec sa pastille, avis
+« Kick-off was… » (la preuve **à l'écran** que le backdate a produit l'état visé), formulaire
+offert au camp habilité, première soumission + focus rendu, choix « Confirmer / Contester »
+côté adverse, confirmation → `completed` avec l'Elo appliqué **par camp** + focus rendu une
+seconde fois (`R11b`, chemin `ConfirmDialog`), désaccord → `disputed`, base rendue propre.
+
+⚠️ **`R9` et `R11b` gardent deux ordonnancements DIFFÉRENTS** du même invariant FX-FOCUS, et
+l'un ne se déduit pas de l'autre : `R9` couvre la soumission directe (le bouton disparaît sans
+qu'aucune boîte ne soit ouverte), `R11b` le chemin où la restitution de la plateforme à la
+fermeture du `<dialog>` court contre le démontage de l'ouvrant par le refetch.
 
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiFetch } from '@/lib/api';
+import { ApiError, RATE_LIMITED_MESSAGE, apiFetch } from '@/lib/api';
 import { MY_INVITATIONS_KEY } from '@/lib/teams';
 import { NAME_MAX_LENGTH } from '@/lib/create-team-schema';
 import { MAX_OPEN_SLOTS, ROSTER_LIMIT } from '@/lib/team-detail';
@@ -72,7 +72,6 @@ function refreshTeam(queryClient: QueryClient, teamId: string, { matches = false
 
 // ---------------------------------------------------------------- error mapping
 
-export const RATE_LIMITED_MESSAGE = 'Too many requests — retry in a moment.';
 export const NAME_TAKEN_MESSAGE = 'This name is already taken on this ladder.';
 const NOT_ALLOWED_MESSAGE = 'You are not allowed to do this.';
 const TEAM_GONE_MESSAGE = 'This team no longer exists.';

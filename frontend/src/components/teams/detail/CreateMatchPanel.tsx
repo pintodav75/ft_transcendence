@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Callout } from '@/components/ui/callout';
 import { FormMessage } from '@/components/ui/form-message';
 import { Label } from '@/components/ui/label';
+import { OptionTile } from '@/components/ui/option-tile';
 import { Select } from '@/components/ui/select';
 import { labelClasses } from '@/components/ui/label-variants';
 import { createMatchErrorMessage, isExpiredSlotError, useCreateMatch } from '@/lib/team-mutations';
@@ -20,7 +21,7 @@ import {
   slotDays,
   slotTimes,
 } from '@/lib/team-detail';
-import { EM_DASH, cn } from '@/lib/utils';
+import { EM_DASH } from '@/lib/utils';
 
 import type { CreateMatchFormValues } from '@/lib/create-match-schema';
 import type { TeamDetail, TeamMatch, TeamMember } from '@/lib/team-detail';
@@ -339,16 +340,10 @@ export function CreateMatchPanel({
 
                     return (
                       <li key={member.id} className="min-w-0">
-                        <label
-                          className={cn(
-                            'flex min-w-0 cursor-pointer items-center gap-3 rounded-control border px-3 py-2 transition',
-                            selected
-                              ? 'border-focus-ring bg-surface-card-strong'
-                              : 'border-border-subtle bg-surface-card',
-                            (unlinked || atLineupLimit) &&
-                              'cursor-not-allowed opacity-50 hover:border-border-subtle',
-                          )}
-                        >
+                        {/* The tile's look moved to `components/ui/option-tile.tsx` at its
+                            second use (the match result form): same markup, same classes,
+                            one owner. */}
+                        <OptionTile selected={selected} disabled={unlinked || atLineupLimit}>
                           <input
                             type="checkbox"
                             className="focus-ring size-4 shrink-0 accent-action-primary"
@@ -379,7 +374,7 @@ export function CreateMatchPanel({
                                 : `@${member.pseudo}`}
                             </span>
                           </span>
-                        </label>
+                        </OptionTile>
                       </li>
                     );
                   })}

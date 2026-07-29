@@ -6,6 +6,7 @@ import { Pill } from '@/components/ui/pill';
 import { formatMatchDate, isSoloMatch, settledByAdmin, sideName } from '@/lib/match-detail';
 import { ladderSubtitle } from '@/lib/team-detail';
 
+import type { Ref } from 'react';
 import type { MatchSheet, MatchSide } from '@/lib/match-detail';
 
 type MatchHeaderProps = {
@@ -13,6 +14,13 @@ type MatchHeaderProps = {
   sides: MatchSide[];
   /** Id of the `<h1>`, so the page can name its own landmark with it. */
   headingId: string;
+  /**
+   * Handle on the `<h1>`, so the page can move focus onto it — the landing point when
+   * reporting a result destroys the control that had focus ([FT-4B], FX-FOCUS rule). Same
+   * idiom as `SectionTitle`: a heading is stable and NAMES what the reader has landed on,
+   * where a bare container announces nothing.
+   */
+  headingRef?: Ref<HTMLHeadingElement>;
 };
 
 /** "Team Alpha vs Team Bravo", or the lone side's own name while the slot has no taker. */
@@ -36,7 +44,7 @@ function matchTitle(sides: MatchSide[], match: MatchSheet) {
  * The ladder, its format and the game's name come from the match payload itself (B16 serves
  * `match.ladder`), so the page needs no second round-trip to title itself.
  */
-export function MatchHeader({ match, sides, headingId }: MatchHeaderProps) {
+export function MatchHeader({ match, sides, headingId, headingRef }: MatchHeaderProps) {
   const { ladder } = match;
   // Same rule as the team page: "Chess 1v1" next to "Chess · 1v1" reads three times the same
   // thing, so the ladder's name is only kept when it says something the two do not.
@@ -54,7 +62,14 @@ export function MatchHeader({ match, sides, headingId }: MatchHeaderProps) {
         <Swords aria-hidden="true" className="size-4" /> Match
       </p>
 
-      <h1 id={headingId} className="text-3xl label-caps-black">
+      {/* `tabIndex={-1}` makes the heading focusable BY SCRIPT ONLY: it never joins the tab
+          order, so nothing changes for someone simply tabbing through the page. */}
+      <h1
+        id={headingId}
+        ref={headingRef}
+        tabIndex={-1}
+        className="focus-ring rounded-control text-3xl label-caps-black"
+      >
         {matchTitle(sides, match)}
       </h1>
 
