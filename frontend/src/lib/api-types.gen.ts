@@ -3177,12 +3177,26 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Mes matchs (tous ladders, tous statuts)
-         * @description Les matchs qui **me concernent**, réunis depuis **deux sources** : • je suis dans `match_participants` → mes solos + les matchs où j'étais **aligné** ; • une de **mes teams** est engagée sur un side → y compris quand j'étais **sur le banc** (un membre du roster hors lineup n'a aucune ligne dans `match_participants` : sans cette seconde source il ne verrait pas le match de son équipe). Résultats dédoublonnés (un match d'équipe où j'ai joué remonte des deux sources) et triés du plus récent au plus ancien. **Rien n'est masqué ici** (maps visibles) — contrairement à `GET /matches?ladderId=`, ces matchs sont les miens.
+         * Mes matchs, au gabarit de l'historique d'équipe (B-SOLO)
+         * @description Les matchs qui **me concernent**, réunis depuis **deux sources** : • je suis dans `match_participants` → mes solos + les matchs où j'étais **aligné** ; • une de **mes teams** est engagée sur un side → y compris quand j'étais **sur le banc** (un membre du roster hors lineup n'a aucune ligne dans `match_participants` : sans cette seconde source il ne verrait pas le match de son équipe). Résultats dédoublonnés (un match d'équipe où j'ai joué remonte des deux sources) et triés par `scheduledAt` **décroissant** (`NULLS LAST`) — même tri que `GET /teams/{id}/matches` : `scheduled_at` est LA référence temporelle du domaine. **Rien n'est masqué ici** (maps visibles) — contrairement à `GET /matches?ladderId=`, ces matchs sont les miens.
+         *
+         *     **B-SOLO** aligne le payload sur celui de `GET /teams/{id}/matches` : adversaire, score, résultat, delta d'Elo et litige — la page Solo consomme cette route et son onglet Matches se réduirait sinon à une liste de dates.
+         *
+         *     `opponent` est **polymorphe**, discriminé par `type`, sur le modèle **exact** du `competitor` de `GET /ladders/{id}/rankings` — et c'est le **`format` du ladder** qui tranche, **jamais** la nullité de `match_sides.team_id` : cette colonne est en `ON DELETE SET NULL`, donc le camp d'une équipe **dissoute** survit avec `team_id` nul sur un 5v5 `completed`. Le lire comme « joueur solo » renommerait le camp d'après un joueur et effacerait la composition.
+         *     • ladder `1v1` → `{ type: user }` (l'unique participant du side adverse) ;
+         *     • ladder `2v2`/`3v3`/`5v5` → `{ type: team }`, ou **`null` si l'équipe adverse a été dissoute** (même repli que `GET /teams/{id}/matches`) ;
+         *     • `null` aussi tant qu'**aucun adversaire n'a accepté** (le match n'a qu'un side).
+         *
+         *     `disputeId`/`disputeStatus` sont exposés **quel que soit le statut du match** — contrairement à `GET /matches/{id}`, qui ne les remonte que pour un match `disputed` : après arbitrage un match repasse `completed`/`cancelled` mais la dispute reste `resolved`, et le badge « litige » de l'historique doit rester visible. `GET /disputes/{id}` garde sa propre garde d'accès.
+         *
+         *     `score` peut être `null` sur un match **`completed`** : un arbitrage admin (`POST /disputes/{id}/resolve`) tranche un vainqueur, pas un score.
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Restreint la liste à **un seul ladder**. Absent → tous les ladders confondus. Présent mais non-uuid → **400** (`ValidationError`). Un ladder inconnu (uuid bien formé) rend simplement une liste vide, pas une 404. */
+                    ladderId?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -3198,15 +3212,30 @@ export interface paths {
                         "application/json": {
                             matches: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** Format: uuid */
-                                ladderId?: string;
-                                /** @example in_progress */
-                                status?: string;
+                                ladderId: string;
+                                /**
+                                 * @description Jeu du ladder, servi par jointure (aucune requête de plus).
+                                 * @example cs2
+                                 */
+                                gameId: string;
+                                /**
+                                 * @description Format du ladder. **C'est lui — et lui seul — qui dit si `opponent` est un joueur ou une équipe.**
+                                 * @enum {string}
+                                 */
+                                format: "1v1" | "2v2" | "3v3" | "5v5";
+                                /**
+                                 * @example in_progress
+                                 * @enum {string}
+                                 */
+                                status: "pending" | "in_progress" | "awaiting_confirmation" | "completed" | "disputed" | "cancelled";
                                 /** Format: date-time */
-                                scheduledAt?: string | null;
+                                scheduledAt: string | null;
                                 /** Format: date-time */
-                                startedAt?: string | null;
+                                startedAt: string | null;
+                                /** Format: date-time */
+                                completedAt: string | null;
                                 /**
                                  * @example [
                                  *       "Breeze",
@@ -3214,9 +3243,51 @@ export interface paths {
                                  *       "Summit"
                                  *     ]
                                  */
-                                maps?: string[];
+                                maps: string[];
+                                /** @description Adversaire, discriminé par `type`. C'est le **`format` du ladder** qui dit lequel des deux, jamais la nullité de `match_sides.team_id` (une équipe dissoute laisse un camp orphelin sur un 5v5 terminé). `null` dans **quatre** cas : personne n'a encore accepté (le match n'a qu'un camp) · le créneau a été annulé · l'équipe adverse a été dissoute depuis (2v2+) · l'adversaire d'un 1v1 a **supprimé son compte** (`match_participants.user_id` est en CASCADE depuis BX-DEL, et partir est autorisé une fois ses matchs terminés). ⚠️ Après un transfert d'équipe en cours de match, `opponent` peut être une équipe dont je suis désormais membre : le camp retenu est celui où j'ai **réellement joué**. */
+                                opponent: ({
+                                    /** @enum {string} */
+                                    type: "user";
+                                    /** Format: uuid */
+                                    id: string;
+                                    pseudo: string;
+                                    displayName: string | null;
+                                    avatarUrl: string | null;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "team";
+                                    /** Format: uuid */
+                                    id: string;
+                                    name: string;
+                                    logoUrl: string | null;
+                                }) | null;
+                                /** @description Score final Bo3 (manches gagnées) des deux camps. Chaque champ est `null` avant clôture ET après un arbitrage admin. */
+                                score: {
+                                    self: number | null;
+                                    opponent: number | null;
+                                };
+                                /** @description Delta d'Elo de **mon** camp sur ce match uniquement ; `null` tant que le match n'est pas `completed`. */
+                                eloDelta: number | null;
+                                /**
+                                 * @description Dérivé côté serveur de `winnerSideId` comparé à mon side — qui n'est jamais renvoyé brut. `null` sans vainqueur.
+                                 * @enum {string|null}
+                                 */
+                                result: "win" | "loss" | null;
+                                /** Format: uuid */
+                                disputeId: string | null;
+                                /** @enum {string|null} */
+                                disputeStatus: "open" | "resolved" | null;
                             }[];
                         };
+                    };
+                };
+                /** @description Query `ladderId` non-uuid (ValidationError) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationError"];
                     };
                 };
                 401: components["responses"]["Unauthorized"];

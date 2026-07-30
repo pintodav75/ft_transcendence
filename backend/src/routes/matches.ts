@@ -15,6 +15,15 @@ import {
 } from '../db/schema.js';
 import { eq, and, ne, or, gt, lt, gte, inArray, notInArray, sql, desc } from 'drizzle-orm';
 import z from 'zod';
+// Même type TS que le `competitor` de GET /ladders/:id/rankings : l'adversaire d'une ligne
+// d'historique est polymorphe (joueur en 1v1, équipe en 2v2+) et le front n'a donc qu'un
+// seul discriminant `type` à gérer des deux côtés.
+// ⚠️ Les deux SCHÉMAS OpenAPI, eux, ne sont pas encore identiques : les rankings ne
+// déclarent que `[type, id, pseudo]` / `[type, id, name]` en `required`, ici on déclare les
+// 4/3 champs (ce que le handler émet vraiment). Un type généré d'ici est donc assignable
+// vers celui des rankings, pas l'inverse. À unifier par un `$ref` partagé le jour où un
+// composant front consomme les deux — c'est le YAML des rankings qui est sous-spécifié.
+import type { Competitor } from '../utils/leaderboard.js';
 import { completeMatchWithElo } from '../utils/rankings.js';
 import { WINS_REQUIRED } from '../utils/elo.js';
 import {
@@ -347,6 +356,9 @@ const createMatchSchema = z.object({
 const acceptMatchSchema = createMatchSchema.pick({ lineup: true });
 
 const listQuerySchema = z.object({ ladderId: z.uuid() });
+// GET /matches/me : filtre facultatif par ladder. `optional()` et non `default()` — absent
+// signifie « tous les ladders », et une valeur présente mais malformée doit sortir en 400.
+const myMatchesQuerySchema = z.object({ ladderId: z.uuid().optional() });
 const idParamSchema = z.object({ id: z.uuid() });
 // Bo3 (décision produit, WINS_REQUIRED = 2) : les scores soumis sont RELATIFS AU
 // SOUMETTEUR (« moi / lui »), délibérément pas indexés sur sideIndex — la comparaison
@@ -967,51 +979,232 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
-  server.get('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
-    try {
-      const me = request.user.sub;
-      const asPlayer = await db
-        .select({ matchId: matchSidesTable.matchId })
-        .from(matchParticipantsTable)
-        .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
-        .where(eq(matchParticipantsTable.userId, me));
-      const myTeams = await db
-        .select({ teamId: teamMembersTable.teamId })
-        .from(teamMembersTable)
-        .where(eq(teamMembersTable.userId, me));
+  // GET /matches/me — MES matchs, au gabarit de l'historique d'équipe (B-SOLO). 100 % lecture,
+  // aucune transaction, aucun verrou. Nombre de requêtes CONSTANT (9 au pire) quel que soit le
+  // nombre de matchs : une requête par table puis des `Map` d'index en mémoire — JAMAIS d'await
+  // dans une boucle de `map`. Jumeau volontaire de `GET /teams/:id/matches` (`routes/teams.ts`).
+  //
+  // ⚠️ Rien n'est masqué ici (maps comprises) : ce sont MES matchs, contrairement à
+  // `GET /matches?ladderId=` qui anonymise les créneaux ouverts d'inconnus.
+  server.get<{ Querystring: { ladderId?: string } }>(
+    '/me',
+    { onRequest: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const me = request.user.sub;
+        // Zod APRÈS `authenticate` (invariant repo) : anonyme → 401, malformé → 400.
+        const { ladderId } = myMatchesQuerySchema.parse(request.query);
 
-      const teamIds = myTeams.map((t) => t.teamId);
+        // Deux sources, et on garde le SIDE de chacune (pas seulement le `matchId`) : sans
+        // « mon camp » on ne sait dériver ni le score, ni le delta d'Elo, ni win/loss, ni
+        // l'adversaire — c'est exactement l'information que l'ancienne version jetait.
+        //   A. le side où je suis PARTICIPANT → mes solos + les matchs où j'étais ALIGNÉ ;
+        //   B. le side d'une de MES ÉQUIPES   → y compris quand j'étais sur le BANC (un
+        //      remplaçant n'a aucune ligne dans `match_participants` : sans cette seconde
+        //      source il ne verrait pas les matchs de son équipe).
+        const asPlayer = await db
+          .select({ matchId: matchSidesTable.matchId, sideId: matchSidesTable.id })
+          .from(matchParticipantsTable)
+          .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
+          .where(eq(matchParticipantsTable.userId, me));
 
-      const asTeam = teamIds.length
-        ? await db
-            .select({ matchId: matchSidesTable.matchId })
-            .from(matchSidesTable)
-            .where(inArray(matchSidesTable.teamId, teamIds))
-        : [];
-      const allRows = [...asPlayer, ...asTeam]; // tableau d'objets, avec doublons
-      const allIds = allRows.map((r) => r.matchId); // tableau de chaînes, doublons encore là
-      const matchIds = [...new Set(allIds)]; // dédupliqué, prêt pour inArray
+        const myTeams = await db
+          .select({ teamId: teamMembersTable.teamId })
+          .from(teamMembersTable)
+          .where(eq(teamMembersTable.userId, me));
+        const teamIds = myTeams.map((t) => t.teamId);
 
-      if (!matchIds.length) return reply.code(200).send({ matches: [] });
-      const matches = await db
-        .select({
-          id: matchesTable.id,
-          ladderId: matchesTable.ladderId,
-          status: matchesTable.status,
-          scheduledAt: matchesTable.scheduledAt,
-          startedAt: matchesTable.startedAt,
-          maps: matchesTable.maps,
-        })
-        .from(matchesTable)
-        .where(inArray(matchesTable.id, matchIds))
-        .orderBy(desc(matchesTable.createdAt));
+        const asTeam = teamIds.length
+          ? await db
+              .select({ matchId: matchSidesTable.matchId, sideId: matchSidesTable.id })
+              .from(matchSidesTable)
+              .where(inArray(matchSidesTable.teamId, teamIds))
+          : [];
 
-      return reply.code(200).send({ matches });
-    } catch (error) {
-      if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
-      return reply.code(500).send({ error: 'Internal error' });
-    }
-  });
+        // Dédoublonnage ET choix du camp en une passe : B est posé d'abord, A écrase donc B.
+        // Le side « participant » l'emporte parce qu'il dit où j'ai RÉELLEMENT joué, pas de
+        // quelle équipe je porte le maillot aujourd'hui.
+        // ⚠️ Ce n'est PAS un cas théorique : rien n'interdit de quitter une équipe engagée
+        // (`DELETE /teams/:id/members/:userId` ne garde que le capitaine, contrairement à la
+        // dissolution) puis de rejoindre l'équipe d'en face. Après un tel transfert, les deux
+        // sources désignent des sides différents sur le même match, et `opponent` peut donc
+        // être une de MES équipes actuelles — c'est voulu : j'ai bien joué contre elle.
+        const mySideByMatch = new Map<string, string>();
+        for (const row of asTeam) mySideByMatch.set(row.matchId, row.sideId);
+        for (const row of asPlayer) mySideByMatch.set(row.matchId, row.sideId);
+        const matchIds = [...mySideByMatch.keys()];
+        if (!matchIds.length) return reply.code(200).send({ matches: [] });
+
+        // `format` et `gameId` viennent d'une JOINTURE sur `ladders`, pas d'une requête de
+        // plus. `winnerSideId` ne sert qu'à dériver `result` plus bas : jamais renvoyé brut.
+        const matches = await db
+          .select({
+            id: matchesTable.id,
+            ladderId: matchesTable.ladderId,
+            gameId: laddersTable.gameId,
+            format: laddersTable.format,
+            status: matchesTable.status,
+            scheduledAt: matchesTable.scheduledAt,
+            startedAt: matchesTable.startedAt,
+            completedAt: matchesTable.completedAt,
+            maps: matchesTable.maps,
+            winnerSideId: matchesTable.winnerSideId,
+          })
+          .from(matchesTable)
+          .innerJoin(laddersTable, eq(laddersTable.id, matchesTable.ladderId))
+          .where(
+            ladderId
+              ? and(inArray(matchesTable.id, matchIds), eq(matchesTable.ladderId, ladderId))
+              : inArray(matchesTable.id, matchIds),
+          )
+          // `scheduledAt` est LA référence temporelle (invariant repo) et est NULLABLE en
+          // base : Postgres remonte les NULL en tête d'un DESC sans `NULLS LAST` explicite.
+          // ⚠️ `createdAt` DÉPARTAGE, il n'est pas décoratif : `scheduledAt` est contraint à
+          // la grille des quarts d'heure, donc deux matchs à la même heure sur deux ladders
+          // différents sont FRÉQUENTS. Sans second critère l'ordre des ex æquo n'est garanti
+          // par rien — un simple UPDATE de statut déplace le tuple dans le heap et peut
+          // permuter deux lignes entre deux refetch.
+          .orderBy(sql`${matchesTable.scheduledAt} desc nulls last`, desc(matchesTable.createdAt));
+        // Le filtre `ladderId` peut tout écarter — on sort avant d'émettre 5 requêtes vides.
+        if (!matches.length) return reply.code(200).send({ matches: [] });
+        const visibleIds = matches.map((m) => m.id);
+
+        // Tous les sides des matchs retenus (les miens ET ceux d'en face) en UNE requête.
+        const allSides = await db
+          .select()
+          .from(matchSidesTable)
+          .where(inArray(matchSidesTable.matchId, visibleIds));
+        const sideById = new Map(allSides.map((s) => [s.id, s]));
+        const sidesByMatch = new Map<string, (typeof allSides)[number][]>();
+        for (const s of allSides) {
+          const list = sidesByMatch.get(s.matchId) ?? [];
+          list.push(s);
+          sidesByMatch.set(s.matchId, list);
+        }
+
+        // 🚨 « Le side adverse n'a pas de team_id » ne signifie PAS « joueur solo ».
+        // `match_sides.team_id` est en ON DELETE SET NULL : une équipe dont tous les matchs
+        // sont terminés peut être dissoute, et son camp survit avec `team_id = NULL` sur un
+        // 5v5 `completed`. C'est le FORMAT DU LADDER qui tranche, jamais la nullité — lire
+        // le NULL comme « solo » renommerait le camp d'après un joueur et effacerait la
+        // composition (bug introduit puis corrigé côté front pendant FT-4A).
+        const oppSideByMatch = new Map<string, (typeof allSides)[number] | undefined>();
+        const opponentTeamIds = new Set<string>();
+        const soloOppSideIds: string[] = [];
+        for (const m of matches) {
+          const mySideId = mySideByMatch.get(m.id);
+          const oppSide = (sidesByMatch.get(m.id) ?? []).find((s) => s.id !== mySideId);
+          oppSideByMatch.set(m.id, oppSide);
+          if (!oppSide) continue;
+          if (m.format === '1v1') soloOppSideIds.push(oppSide.id);
+          else if (oppSide.teamId) opponentTeamIds.add(oppSide.teamId);
+          // 2v2+ sans team_id = équipe dissoute → `opponent: null`, comme le fait déjà
+          // `GET /teams/:id/matches`. Pas de troisième variante : le front sait replier.
+        }
+
+        const opponentTeams = opponentTeamIds.size
+          ? await db
+              .select({ id: teamsTable.id, name: teamsTable.name, logoUrl: teamsTable.logoUrl })
+              .from(teamsTable)
+              .where(inArray(teamsTable.id, [...opponentTeamIds]))
+          : [];
+        const teamById = new Map(opponentTeams.map((t) => [t.id, t]));
+
+        // Adversaire d'un 1v1 : l'unique participant du side d'en face. Deux requêtes au
+        // total (participants puis users), jamais une par match.
+        const soloParticipants = soloOppSideIds.length
+          ? await db
+              .select({
+                matchSideId: matchParticipantsTable.matchSideId,
+                userId: matchParticipantsTable.userId,
+              })
+              .from(matchParticipantsTable)
+              .where(inArray(matchParticipantsTable.matchSideId, soloOppSideIds))
+          : [];
+        const oppUserIdBySide = new Map<string, string>();
+        for (const p of soloParticipants)
+          if (!oppUserIdBySide.has(p.matchSideId)) oppUserIdBySide.set(p.matchSideId, p.userId);
+        const oppUserIds = [...new Set(oppUserIdBySide.values())];
+        // Projection explicite : jamais de select() nu sur `users` (fuite email/passwordHash).
+        const oppUsers = oppUserIds.length
+          ? await db
+              .select({
+                id: usersTable.id,
+                pseudo: usersTable.pseudo,
+                displayName: usersTable.displayName,
+                avatarUrl: usersTable.avatarUrl,
+              })
+              .from(usersTable)
+              .where(inArray(usersTable.id, oppUserIds))
+          : [];
+        const userById = new Map(oppUsers.map((u) => [u.id, u]));
+
+        // Litige : id + statut exposés SANS condition de statut de match — copier le
+        // `if (status === 'disputed')` de GET /matches/:id ferait disparaître le badge
+        // « litige » dès qu'un admin arbitre (le match repasse completed/cancelled, la
+        // dispute reste `resolved`). `GET /disputes/:id` garde sa propre garde d'accès :
+        // exposer l'id ici ne fuite rien.
+        const disputes = await db
+          .select({
+            id: disputesTable.id,
+            matchId: disputesTable.matchId,
+            status: disputesTable.status,
+          })
+          .from(disputesTable)
+          .where(inArray(disputesTable.matchId, visibleIds));
+        const disputeByMatch = new Map(disputes.map((d) => [d.matchId, d]));
+
+        const shaped = matches.map((m) => {
+          const mySide = sideById.get(mySideByMatch.get(m.id) ?? '');
+          const oppSide = oppSideByMatch.get(m.id);
+          const dispute = disputeByMatch.get(m.id);
+
+          let opponent: Competitor | null = null;
+          if (oppSide) {
+            if (m.format === '1v1') {
+              const oppUser = userById.get(oppUserIdBySide.get(oppSide.id) ?? '');
+              if (oppUser) opponent = { type: 'user', ...oppUser };
+            } else if (oppSide.teamId) {
+              const oppTeam = teamById.get(oppSide.teamId);
+              if (oppTeam) opponent = { type: 'team', ...oppTeam };
+            }
+          }
+
+          let result: 'win' | 'loss' | null = null;
+          if (mySide && m.winnerSideId) result = m.winnerSideId === mySide.id ? 'win' : 'loss';
+
+          return {
+            id: m.id,
+            ladderId: m.ladderId,
+            gameId: m.gameId,
+            format: m.format,
+            status: m.status,
+            scheduledAt: m.scheduledAt,
+            startedAt: m.startedAt,
+            completedAt: m.completedAt,
+            maps: m.maps,
+            // `null` tant qu'aucun adversaire n'a accepté (le match n'a qu'un side) ET sur
+            // un 2v2+ dont l'équipe adverse a été dissoute depuis.
+            opponent,
+            // Colonnes `match_sides.score` des deux camps : `null` avant clôture ET après un
+            // arbitrage admin (`POST /disputes/:id/resolve` tranche un vainqueur, pas un
+            // score) — donc `null` possible sur un match pourtant `completed`.
+            score: { self: mySide?.score ?? null, opponent: oppSide?.score ?? null },
+            // Uniquement le mien : le delta de l'adversaire n'a aucun usage ici.
+            eloDelta: mySide?.eloDelta ?? null,
+            result,
+            disputeId: dispute?.id ?? null,
+            disputeStatus: dispute?.status ?? null,
+          };
+        });
+
+        return reply.code(200).send({ matches: shaped });
+      } catch (error) {
+        if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
+        return reply.code(500).send({ error: 'Internal error' });
+      }
+    },
+  );
   // ===== B6 — Soumission de résultat & confirmation =====
   server.post<{ Params: { id: string } }>(
     '/:id/result',

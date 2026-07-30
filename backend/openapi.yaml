@@ -3225,7 +3225,7 @@ paths:
   /matches/me:
     get:
       tags: [Matchmaking]
-      summary: Mes matchs (tous ladders, tous statuts)
+      summary: Mes matchs, au gabarit de l'historique d'équipe (B-SOLO)
       description: >
         Les matchs qui **me concernent**, réunis depuis **deux sources** :
         • je suis dans `match_participants` → mes solos + les matchs où j'étais **aligné** ;
@@ -3233,10 +3233,52 @@ paths:
         (un membre du roster hors lineup n'a aucune ligne dans `match_participants` : sans cette
         seconde source il ne verrait pas le match de son équipe).
         Résultats dédoublonnés (un match d'équipe où j'ai joué remonte des deux sources) et
-        triés du plus récent au plus ancien. **Rien n'est masqué ici** (maps visibles) —
-        contrairement à `GET /matches?ladderId=`, ces matchs sont les miens.
+        triés par `scheduledAt` **décroissant** (`NULLS LAST`) — même tri que
+        `GET /teams/{id}/matches` : `scheduled_at` est LA référence temporelle du domaine.
+        **Rien n'est masqué ici** (maps visibles) — contrairement à `GET /matches?ladderId=`,
+        ces matchs sont les miens.
+
+
+        **B-SOLO** aligne le payload sur celui de `GET /teams/{id}/matches` : adversaire,
+        score, résultat, delta d'Elo et litige — la page Solo consomme cette route et son
+        onglet Matches se réduirait sinon à une liste de dates.
+
+
+        `opponent` est **polymorphe**, discriminé par `type`, sur le modèle **exact** du
+        `competitor` de `GET /ladders/{id}/rankings` — et c'est le **`format` du ladder** qui
+        tranche, **jamais** la nullité de `match_sides.team_id` : cette colonne est en
+        `ON DELETE SET NULL`, donc le camp d'une équipe **dissoute** survit avec `team_id`
+        nul sur un 5v5 `completed`. Le lire comme « joueur solo » renommerait le camp d'après
+        un joueur et effacerait la composition.
+
+        • ladder `1v1` → `{ type: user }` (l'unique participant du side adverse) ;
+
+        • ladder `2v2`/`3v3`/`5v5` → `{ type: team }`, ou **`null` si l'équipe adverse a été
+        dissoute** (même repli que `GET /teams/{id}/matches`) ;
+
+        • `null` aussi tant qu'**aucun adversaire n'a accepté** (le match n'a qu'un side).
+
+
+        `disputeId`/`disputeStatus` sont exposés **quel que soit le statut du match** —
+        contrairement à `GET /matches/{id}`, qui ne les remonte que pour un match
+        `disputed` : après arbitrage un match repasse `completed`/`cancelled` mais la
+        dispute reste `resolved`, et le badge « litige » de l'historique doit rester
+        visible. `GET /disputes/{id}` garde sa propre garde d'accès.
+
+
+        `score` peut être `null` sur un match **`completed`** : un arbitrage admin
+        (`POST /disputes/{id}/resolve`) tranche un vainqueur, pas un score.
       security:
         - bearerAuth: []
+      parameters:
+        - name: ladderId
+          in: query
+          required: false
+          description: >
+            Restreint la liste à **un seul ladder**. Absent → tous les ladders confondus.
+            Présent mais non-uuid → **400** (`ValidationError`). Un ladder inconnu (uuid bien
+            formé) rend simplement une liste vide, pas une 404.
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: Mes matchs (tableau vide si aucun — pas une 404)
@@ -3252,14 +3294,136 @@ paths:
                       properties:
                         id: { type: string, format: uuid }
                         ladderId: { type: string, format: uuid }
-                        status: { type: string, example: in_progress }
+                        gameId:
+                          type: string
+                          example: cs2
+                          description: Jeu du ladder, servi par jointure (aucune requête de plus).
+                        format:
+                          type: string
+                          enum: ['1v1', '2v2', '3v3', '5v5']
+                          description: >
+                            Format du ladder. **C'est lui — et lui seul — qui dit si
+                            `opponent` est un joueur ou une équipe.**
+                        status:
+                          type: string
+                          enum:
+                            [
+                              pending,
+                              in_progress,
+                              awaiting_confirmation,
+                              completed,
+                              disputed,
+                              cancelled,
+                            ]
+                          example: in_progress
                         scheduledAt: { type: string, format: date-time, nullable: true }
                         startedAt: { type: string, format: date-time, nullable: true }
+                        completedAt: { type: string, format: date-time, nullable: true }
                         maps:
                           type: array
                           items: { type: string }
                           example: [Breeze, Split, Summit]
+                        opponent:
+                          nullable: true
+                          description: >
+                            Adversaire, discriminé par `type`. C'est le **`format` du ladder**
+                            qui dit lequel des deux, jamais la nullité de `match_sides.team_id`
+                            (une équipe dissoute laisse un camp orphelin sur un 5v5 terminé).
+                            `null` dans **quatre** cas : personne n'a encore accepté (le match
+                            n'a qu'un camp) · le créneau a été annulé · l'équipe adverse a été
+                            dissoute depuis (2v2+) · l'adversaire d'un 1v1 a **supprimé son
+                            compte** (`match_participants.user_id` est en CASCADE depuis
+                            BX-DEL, et partir est autorisé une fois ses matchs terminés).
+                            ⚠️ Après un transfert d'équipe en cours de match, `opponent` peut
+                            être une équipe dont je suis désormais membre : le camp retenu est
+                            celui où j'ai **réellement joué**.
+                          oneOf:
+                            - type: object
+                              properties:
+                                type:
+                                  type: string
+                                  enum: [user]
+                                id:
+                                  type: string
+                                  format: uuid
+                                pseudo:
+                                  type: string
+                                displayName:
+                                  type: string
+                                  nullable: true
+                                avatarUrl:
+                                  type: string
+                                  nullable: true
+                              required: [type, id, pseudo, displayName, avatarUrl]
+                            - type: object
+                              properties:
+                                type:
+                                  type: string
+                                  enum: [team]
+                                id:
+                                  type: string
+                                  format: uuid
+                                name:
+                                  type: string
+                                logoUrl:
+                                  type: string
+                                  nullable: true
+                              required: [type, id, name, logoUrl]
+                        score:
+                          type: object
+                          description: >
+                            Score final Bo3 (manches gagnées) des deux camps. Chaque champ est
+                            `null` avant clôture ET après un arbitrage admin.
+                          properties:
+                            self: { type: integer, nullable: true }
+                            opponent: { type: integer, nullable: true }
+                          required: [self, opponent]
+                        eloDelta:
+                          type: integer
+                          nullable: true
+                          description: >
+                            Delta d'Elo de **mon** camp sur ce match uniquement ; `null` tant
+                            que le match n'est pas `completed`.
+                        result:
+                          type: string
+                          nullable: true
+                          enum: [win, loss]
+                          description: >
+                            Dérivé côté serveur de `winnerSideId` comparé à mon side — qui
+                            n'est jamais renvoyé brut. `null` sans vainqueur.
+                        disputeId:
+                          type: string
+                          format: uuid
+                          nullable: true
+                        disputeStatus:
+                          type: string
+                          nullable: true
+                          enum: [open, resolved]
+                      required:
+                        [
+                          id,
+                          ladderId,
+                          gameId,
+                          format,
+                          status,
+                          scheduledAt,
+                          startedAt,
+                          completedAt,
+                          maps,
+                          opponent,
+                          score,
+                          eloDelta,
+                          result,
+                          disputeId,
+                          disputeStatus,
+                        ]
                 required: [matches]
+        '400':
+          description: Query `ladderId` non-uuid (ValidationError)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
