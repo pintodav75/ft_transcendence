@@ -116,8 +116,63 @@ export async function run({
    * rendre ROUGE.
    */
   const board = main.getByRole('list', { name: 'Open slots' });
-  /** La ligne d'un ladder donné, jamais « la première » : le tableau est global. */
-  const rowOf = (ladderName) => board.getByRole('listitem').filter({ hasText: ladderName });
+
+  /**
+   * 🚨 `/matchmaking` EST UN TABLEAU **GLOBAL**, ET LA BASE DE DEV EST **PARTAGÉE** — ce
+   * scénario n'est donc jamais seul sur ses ladders, et il n'a pas le droit de le supposer.
+   *
+   * Vécu le 30/07 : un coéquipier avait ouvert à la main quatre créneaux de démo, dont un sur
+   * le même 2v2 que la fixture. `filter({ hasText: ladderName })` a résolu **2 lignes**,
+   * Playwright a levé (« strict mode violation ») et la campagne complète est sortie en
+   * **`exit 2`** — un harnais en échec, qui se lit comme un problème d'environnement, et qui
+   * bloquait TOUT LE MONDE. Le défaut n'était pas la donnée du coéquipier : c'était ce
+   * sélecteur, qui disait « la ligne de ce ladder » là où il voulait dire « MA ligne ».
+   *
+   * 🔑 LE DISCRIMINANT EST LE COUP D'ENVOI, parce que c'est la seule chose que la ligne
+   * affiche et que le run **choisit** (l'anonymat B5b interdit tout nom sur cette ligne :
+   * ni équipe, ni maps, ni Elo — voir `OpenSlotRow`). Chaque créneau ouvert ici s'enregistre,
+   * et `rowOf()` ne regarde que les lignes dont l'heure est l'une des siennes.
+   *
+   * ⚠️ Si le libellé venait à ne plus correspondre (`formatMatchDate` change de style), les
+   * lignes résolvent à **0** : les checks sortent ROUGES, jamais en `exit 2`. C'est le mode
+   * d'échec qu'on veut — imputable et lisible.
+   */
+  const kickOffFormat = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  /** Miroir EXACT de `formatMatchDate(iso, 'long')` (`frontend/src/lib/match-detail.ts`). */
+  const kickOff = (iso) => kickOffFormat.format(new Date(iso));
+  const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  /** Les coups d'envoi ouverts PAR CE RUN, par ladder. */
+  const myKickOffs = new Map();
+  const registerSlot = (ladderName, iso) => {
+    const times = myKickOffs.get(ladderName) ?? new Set();
+    times.add(kickOff(iso));
+    myKickOffs.set(ladderName, times);
+    return iso;
+  };
+  const forgetSlot = (ladderName, iso) => myKickOffs.get(ladderName)?.delete(kickOff(iso));
+
+  /**
+   * MA ligne sur un ladder — jamais « la première », jamais « n'importe laquelle de ce
+   * ladder ». `at` restreint à UN créneau précis quand le run en a ouvert plusieurs ici.
+   */
+  const rowOf = (ladderName, at) => {
+    const times = at ? [kickOff(at)] : [...(myKickOffs.get(ladderName) ?? [])];
+    if (times.length === 0) {
+      // Erreur de HARNAIS : viser un ladder sans y avoir ouvert de créneau ne mesure rien.
+      throw new Error(`rowOf('${ladderName}') : aucun créneau enregistré pour ce ladder`);
+    }
+    return board
+      .getByRole('listitem')
+      .filter({ hasText: ladderName })
+      .filter({ hasText: new RegExp(times.map(escapeRe).join('|')) });
+  };
   /** Les créneaux tels que l'API les voit POUR LE COMPTE DU RUN, au même instant. */
   const boardFromApi = (query = '') => api(user, `/matches?limit=50${query}`).then(json);
 
@@ -199,7 +254,7 @@ export async function run({
   );
   const notMyTeam = await teamWith(myMate, otherLadder.id, `MM Benched ${user.stamp}`, user);
 
-  const teamSlotAt = futureQuarter(5);
+  const teamSlotAt = registerSlot(teamLadder.name, futureQuarter(5));
   const { match: teamSlot } = await api(opener, '/matches', {
     method: 'POST',
     body: JSON.stringify({
@@ -214,7 +269,7 @@ export async function run({
     method: 'POST',
     body: JSON.stringify({
       ladderId: otherLadder.id,
-      scheduledAt: futureQuarter(7),
+      scheduledAt: registerSlot(otherLadder.name, futureQuarter(7)),
       lineup: [await idOf(opener), await idOf(openerMate)],
     }),
   }).then(json);
@@ -222,7 +277,7 @@ export async function run({
 
   // ⚠️ L'INSTANT EST RETENU, pas recalculé : le créneau concurrent du §13b doit tomber sur
   // EXACTEMENT la même fenêtre, et deux appels à `futureQuarter(2)` peuvent franchir un quart.
-  const soloSlotAt = futureQuarter(2);
+  const soloSlotAt = registerSlot(soloLadder.name, futureQuarter(2));
   const { match: soloSlot } = await api(opener, '/matches', {
     method: 'POST',
     body: JSON.stringify({ ladderId: soloLadder.id, scheduledAt: soloSlotAt }),
@@ -443,8 +498,13 @@ export async function run({
     // réessaie 2 fois sur un 500, et pendant les réessais la requête est encore « pending » —
     // le bouton grisé est alors LÉGITIME (ça charge). Compter à `networkidle` mesurait cet
     // instant-là et rendait le check rouge sur un front correct. Vu rouge avant d'être corrigé.
-    await appears(main.getByText('Your teams could not be loaded'), 20000);
-    const panneNotice = await main.getByText('Your teams could not be loaded').count();
+    // ⚠️ COMPTÉ SUR MA LIGNE, PAS SUR LA PAGE. Le message est rendu par CHAQUE ligne d'un
+    // format d'équipe : sur une base partagée, un créneau ouvert par quelqu'un d'autre en
+    // ajoute un et le compte « 1 attendu » devient faux sans que rien ne soit cassé. Ce que le
+    // check veut dire est « MA ligne explique au lieu d'offrir un bouton mort » — même
+    // discipline que le comptage de boutons juste en dessous, qui était déjà scopé.
+    await appears(rowOnPanne.getByText('Your teams could not be loaded'), 20000);
+    const panneNotice = await rowOnPanne.getByText('Your teams could not be loaded').count();
     const deadButtons = await rowOnPanne.locator('button[aria-label^="Accept the slot on"]').count();
     step(
       'MM8b',
@@ -764,7 +824,7 @@ export async function run({
     setPhase('13c. le créneau est pris pendant la confirmation : bannière, annonce et focus');
     expectHttp(/\/api\/matches\/[0-9a-f-]+\/accept/, 'accept d’un créneau volontairement déjà pris');
     await link(opener, 'chess_com');
-    const stolenAt = futureQuarter(7);
+    const stolenAt = registerSlot(soloLadder.name, futureQuarter(7));
     const { match: stolen } = await api(opener, '/matches', {
       method: 'POST',
       body: JSON.stringify({ ladderId: soloLadder.id, scheduledAt: stolenAt }),
@@ -772,7 +832,9 @@ export async function run({
     matchIds.push(stolen.id);
 
     await page.reload({ waitUntil: 'networkidle' });
-    const stolenRow = rowOf(soloLadder.name).filter({ hasText: 'Chess' }).last();
+    // Visé par SON coup d'envoi : le run tient trois créneaux sur ce ladder (le sien, celui du
+    // rival du §13b, celui-ci). Un `.last()` pariait sur l'ordre de tri du tableau.
+    const stolenRow = rowOf(soloLadder.name, stolenAt);
     const stolenButton = stolenRow.locator('button[aria-label^="Accept the slot on"]');
     await appears(stolenButton);
     await stolenButton.click();
@@ -802,11 +864,12 @@ export async function run({
     // le serveur ne liste que les créneaux à plus de 15 min AU MOMENT OÙ IL RÉPOND. Un onglet
     // laissé au premier plan ne refetch pas ; deux minutes de lecture suffisent.
     setPhase('14. la barre des 15 min franchie pendant que l’onglet reste ouvert');
+    const expiringOpenedAt = registerSlot(teamLadder.name, futureQuarter(9));
     const { match: expiring } = await api(opener, '/matches', {
       method: 'POST',
       body: JSON.stringify({
         ladderId: teamLadder.id,
-        scheduledAt: futureQuarter(9),
+        scheduledAt: expiringOpenedAt,
         lineup: [await idOf(opener), await idOf(openerMate)],
       }),
     }).then(json);
@@ -814,7 +877,15 @@ export async function run({
     // ⚠️ USAGE SANCTIONNÉ DE `sql()` : forcer un état que l'API INTERDIT d'atteindre.
     // `POST /matches` exige un coup d'envoi sur la grille des quarts et à plus de 15 min ; il
     // n'existe aucune séquence HTTP qui pose un créneau à 16 minutes précises.
-    sql(`update matches set scheduled_at = now() + interval '16 minutes' where id = '${expiring.id}';`);
+    //
+    // ⚠️ UN INSTANT ABSOLU, CALCULÉ ICI, ET PAS `now() + interval` : reculer l'heure change ce
+    // que la LIGNE AFFICHE, or c'est ce libellé qui distingue mon créneau de celui d'un tiers
+    // (voir `rowOf`). Avec un intervalle SQL, ce run ne saurait plus reconnaître sa propre
+    // ligne. Les deux horloges sont celles de la même machine, l'écart est sans effet.
+    const expiringAt = new Date(Date.now() + 16 * 60 * 1000).toISOString();
+    forgetSlot(teamLadder.name, expiringOpenedAt);
+    registerSlot(teamLadder.name, expiringAt);
+    sql(`update matches set scheduled_at = '${expiringAt}' where id = '${expiring.id}';`);
 
     let expiryBefore = -1;
     let expiryAfter = -1;
