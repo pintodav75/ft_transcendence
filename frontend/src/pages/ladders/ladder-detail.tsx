@@ -164,7 +164,7 @@ export function LadderDetail() {
           {rankings && rankings.length > 0 && (
             <LadderBoard
               entries={rankings}
-              selfTeamId={myTeamOnThisLadder?.id}
+              self={myTeamOnThisLadder ? { type: 'team', id: myTeamOnThisLadder.id } : undefined}
               selfNote="(your team)"
             />
           )}

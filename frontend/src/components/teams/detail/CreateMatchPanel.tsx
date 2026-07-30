@@ -10,9 +10,10 @@ import { Label } from '@/components/ui/label';
 import { OptionTile } from '@/components/ui/option-tile';
 import { Select } from '@/components/ui/select';
 import { labelClasses } from '@/components/ui/label-variants';
-import { createMatchErrorMessage, isExpiredSlotError, useCreateMatch } from '@/lib/team-mutations';
+import { createMatchErrorMessage, isExpiredSlotError, useCreateMatch } from '@/lib/match-mutations';
 import { createMatchSchema } from '@/lib/create-match-schema';
 import { providerLabel, useLadders } from '@/lib/games';
+import { teamMatchesKey } from '@/lib/team-detail';
 import {
   MAX_OPEN_SLOTS,
   conflictsWithEngagement,
@@ -20,7 +21,7 @@ import {
   openSlotCount,
   slotDays,
   slotTimes,
-} from '@/lib/team-detail';
+} from '@/lib/match-slots';
 import { EM_DASH } from '@/lib/utils';
 
 import type { CreateMatchFormValues } from '@/lib/create-match-schema';
@@ -75,7 +76,7 @@ export function CreateMatchPanel({
    */
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const createMatch = useCreateMatch(team.id);
+  const createMatch = useCreateMatch(teamMatchesKey(team.id));
   const laddersQuery = useLadders();
   const ladder = laddersQuery.data?.ladders.find((entry) => entry.id === team.ladderId);
   const lockoutMinutes = ladder?.lockoutMinutes;
@@ -188,7 +189,7 @@ export function CreateMatchPanel({
   });
 
   const serverError = createMatch.isError
-    ? createMatchErrorMessage(createMatch.error, { openSlots, members })
+    ? createMatchErrorMessage(createMatch.error, { side: 'team', openSlots, members })
     : null;
   const lineupError = errors.lineup?.message;
   const timeError = errors.time?.message;

@@ -18,15 +18,11 @@ import { ApiError } from '@/lib/api';
 import { useAnnouncement } from '@/lib/use-announcement';
 import { useAuthStore } from '@/stores/auth-store';
 import { useSortedGames } from '@/lib/games';
-import {
-  cancelMatchErrorMessage,
-  removeTeamMemberErrorMessage,
-  useCancelMatch,
-  useRemoveTeamMember,
-} from '@/lib/team-mutations';
+import { cancelMatchErrorMessage, useCancelMatch } from '@/lib/match-mutations';
+import { removeTeamMemberErrorMessage, useRemoveTeamMember } from '@/lib/team-mutations';
 import { findTeamStanding, useLadderRankings } from '@/lib/ladders';
 import { formatMatchDate } from '@/lib/match-detail';
-import { isValidTeamId, useTeam, useTeamMatches } from '@/lib/team-detail';
+import { isValidTeamId, teamMatchesKey, useTeam, useTeamMatches } from '@/lib/team-detail';
 
 import type { TabItem } from '@/components/ui/tabs';
 import type { TeamMatch } from '@/lib/team-detail';
@@ -100,7 +96,7 @@ export function TeamDetail() {
   const currentUserId = useAuthStore((state) => state.user?.id);
   // Same route as the captain's kick — a voluntary departure is just removing yourself.
   const leaveTeam = useRemoveTeamMember(teamId);
-  const cancelSlot = useCancelMatch(teamId);
+  const cancelSlot = useCancelMatch(teamMatchesKey(teamId));
 
   // Mirrors the backend param schema: a malformed id can only ever come back as a 400,
   // so the error state is rendered without spending a request — and without the red

@@ -1,0 +1,163 @@
+import { useQuery } from '@tanstack/react-query';
+
+import { apiFetch } from '@/lib/api';
+import { retryServerErrorsOnly } from '@/lib/ladders';
+import { useLadders } from '@/lib/games';
+
+import type { MatchOpponentView } from '@/lib/match-history';
+import type { RequiredProvider } from '@/lib/games';
+import type { paths } from '@/lib/api-types.gen';
+
+/**
+ * Read side of the two solo screens — `/solo` and `/solo/$ladderId`.
+ *
+ * 🚨 THE ONE ASYMMETRY TO KEEP IN MIND, because every design decision below follows from it:
+ * **there is no such thing as joining a solo ladder.** A `rankings` row is created by the
+ * first match RESULT, never by an enrolment (that is also true of teams, but a team at least
+ * exists before its first match). So "the ladders I am on" is not a question the API can
+ * answer, and it is not the question `/solo` asks: the page lists the 1v1 ladders that
+ * EXIST and hangs my standing off them when there is one. Listing only ranked ladders would
+ * greet every new account with an empty page and no way in.
+ */
+
+type MyMatchesResponse =
+  paths['/matches/me']['get']['responses'][200]['content']['application/json'];
+type ExternalAccountsResponse =
+  paths['/users/me/external-accounts']['get']['responses'][200]['content']['application/json'];
+
+/** One row of `GET /matches/me` — aligned on the team history's payload by B-SOLO. */
+export type SoloMatch = MyMatchesResponse['matches'][number];
+/** Discriminated by `type`: a player in 1v1, a team from 2v2 up, or `null`. */
+export type SoloMatchOpponent = SoloMatch['opponent'];
+export type ExternalAccount = ExternalAccountsResponse['externalAccounts'][number];
+
+// ------------------------------------------------------------------- ladders
+
+/**
+ * The 1v1 ladders, from the same cached `GET /ladders` every other screen already uses.
+ *
+ * ⚠️ Filtered on `format`, never on a hard-coded list of games: today that is Chess 1v1 and
+ * Rocket League 1v1, but the ladders come from a migration and adding one must light it up
+ * here for free. Same rule FT-3 applied to map pools — the data decides, not a literal.
+ */
+export function useSoloLadders() {
+  const query = useLadders();
+  const ladders = (query.data?.ladders ?? []).filter((ladder) => ladder.format === '1v1');
+
+  return { ladders, isPending: query.isPending, isError: query.isError };
+}
+
+// ------------------------------------------------------------------- matches
+
+/**
+ * The one literal for a solo history cache entry — read here, invalidated by the slot
+ * mutations of `lib/match-mutations.ts` (which take the key as a parameter for exactly this
+ * reason). Same discipline as `teamMatchesKey`.
+ */
+export function myMatchesKey(ladderId: string) {
+  return ['matches', 'me', ladderId] as const;
+}
+
+/**
+ * My matches on ONE ladder.
+ *
+ * ⚠️ THE `ladderId` FILTER IS LOAD-BEARING, it is not a convenience. `GET /matches/me` with no
+ * query returns every ladder at once, and the solo page feeds this list to `openSlotCount`
+ * and `engagementTimes` — both of which mirror server-side counters that are scoped, in 1v1,
+ * to the couple **(player, ladder)** (`countOpenSlots` / `hasConflictingMatch` filter on
+ * `matches.ladder_id`). Handing them the unfiltered list would count a chess slot against a
+ * Rocket League cap and grey out a quarter the server would happily accept.
+ */
+export function useMyMatches(ladderId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: myMatchesKey(ladderId),
+    queryFn: () =>
+      apiFetch<MyMatchesResponse>(`/matches/me?ladderId=${encodeURIComponent(ladderId)}`),
+    enabled,
+    retry: retryServerErrorsOnly,
+  });
+}
+
+// --------------------------------------------------------- external accounts
+
+/**
+ * My linked in-game accounts (§5.1). Cached like the reference data it behaves as: it only
+ * changes when the user links or unlinks one, which no screen can do yet — [F4B] owns that.
+ */
+export function useExternalAccounts(enabled = true) {
+  return useQuery({
+    queryKey: ['external-accounts', 'me'],
+    queryFn: () => apiFetch<ExternalAccountsResponse>('/users/me/external-accounts'),
+    // ⚠️ Gated like every other query of the solo page: a malformed `ladderId` must render its
+    // error screen having spent NO request at all (DoD), and this one would otherwise fire
+    // regardless — it does not depend on the id.
+    enabled,
+    retry: retryServerErrorsOnly,
+  });
+}
+
+/**
+ * May I open a slot on a ladder of this game — i.e. do I have the account §5.1 demands?
+ *
+ * 🚨 THREE-VALUED ON PURPOSE, and the third value is the point. `undefined` means the answer
+ * is UNKNOWN (the request is in flight, or it failed), which is NOT the same as "no". The
+ * screen must not offer the button in either the `false` or the `undefined` case: a
+ * `POST /matches` with no linked account is answered 400 by `validateSide()`, and a 4xx
+ * writes a red line in the Chrome console — a project-rejection criterion, not a rough edge.
+ * Collapsing unknown into "linked" would gamble the console on a request in flight.
+ */
+export function hasLinkedProvider(
+  accounts: ExternalAccount[] | undefined,
+  provider: RequiredProvider,
+): boolean | undefined {
+  if (!accounts) return undefined;
+  return accounts.some((account) => account.provider === provider);
+}
+
+// ------------------------------------------------------------------ opponent
+
+/**
+ * Turns the discriminated `opponent` of `GET /matches/me` into something a row can render.
+ *
+ * 🚨 `opponent: null` HAS FOUR CAUSES and they do not read the same way:
+ *   1. nobody has accepted the slot yet   → `null` here, the "Open slot" pill says it;
+ *   2. the slot was cancelled             → `null` here, the "Cancelled" pill says it;
+ *   3. the opposing TEAM was dissolved    → « Disbanded team » (2v2+ only);
+ *   4. the 1v1 opponent DELETED HIS ACCOUNT → « Deleted player ».
+ *
+ * Cases 3 and 4 land on a match that was really played, so an em dash there would quietly
+ * erase an opponent who existed. The two are told apart by the **`format` of the ladder** and
+ * never by the null itself — that is the FT-4A trap, where reading "no team" as "solo"
+ * renamed a camp after its first player and dropped a five-man line-up. `format` is a closed
+ * enum in the contract, so the codegen hands us a literal union: it is a fact, not a guess.
+ *
+ * The dividing line between (1,2) and (3,4) is the STATUS: a match that reached
+ * `in_progress` or beyond necessarily had two sides, so a missing opponent means one of them
+ * disappeared afterwards. `pending` and `cancelled` are the only statuses a one-sided match
+ * can legitimately be in.
+ */
+const HAD_AN_OPPONENT = new Set([
+  'in_progress',
+  'awaiting_confirmation',
+  'completed',
+  'disputed',
+]);
+
+export function matchOpponentView(match: SoloMatch): MatchOpponentView {
+  const { opponent } = match;
+
+  if (opponent === null) {
+    if (!HAD_AN_OPPONENT.has(match.status)) return null;
+    return { kind: 'gone', name: match.format === '1v1' ? 'Deleted player' : 'Disbanded team' };
+  }
+
+  if (opponent.type === 'user') {
+    return {
+      kind: 'user',
+      pseudo: opponent.pseudo,
+      name: opponent.displayName ?? opponent.pseudo,
+    };
+  }
+
+  return { kind: 'team', id: opponent.id, name: opponent.name };
+}

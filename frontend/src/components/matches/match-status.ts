@@ -27,8 +27,16 @@ export type MatchStatusView = {
 export type MatchStatusSource = {
   status: string;
   disputeStatus?: 'open' | 'resolved' | null;
-  /** `null`/absent = open slot: nobody has accepted yet. */
-  opponent?: { id: string } | null;
+  /**
+   * `null`/absent = open slot: nobody has accepted yet.
+   *
+   * ⚠️ `object`, not `{ id: string }`, since [F-SOLO]: this mapping only ever reads whether
+   * there IS an opponent, never anything inside it, and the two history routes describe one
+   * differently (a bare team on `GET /teams/{id}/matches`, a union discriminated by `type` on
+   * `GET /matches/me`). Naming a field it does not read made the solo payload unassignable
+   * for no reason — the type must promise no more than the function uses.
+   */
+  opponent?: object | null;
 };
 
 export function matchStatusView(match: MatchStatusSource): MatchStatusView {

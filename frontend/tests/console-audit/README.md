@@ -335,6 +335,59 @@ l'un ne se déduit pas de l'autre : `R9` couvre la soumission directe (le bouton
 qu'aucune boîte ne soit ouverte), `R11b` le chemin où la restitution de la plateforme à la
 fermeture du `<dialog>` court contre le démontage de l'ouvrant par le refetch.
 
+## `solo` (F-SOLO) — le check central est un NÉGATIF, doublé de son positif
+
+`scenarios/solo.mjs` audite `/solo` et `/solo/$ladderId` : la liste des ladders 1v1 pour un
+compte **neuf** (2 tuiles, « Not ranked yet », page actionnable — l'asymétrie du ticket : on
+n'*adhère* pas à un ladder solo, une ligne de `rankings` naît du premier résultat), `ladderId`
+malformé (écran d'erreur, **zéro requête**), uuid inconnu (404 déclaré par `expectHttp`),
+**ladder d'un autre format** ouvert en `/solo` (écran dédié), le dossier chess 1v1 (en-tête au
+pseudo, **2 onglets et pas de Manage**, **une seule** région live), le cycle complet à la
+souris (ouvrir un créneau → l'annuler → focus rendu), et 375 px. **18 checks.**
+
+🔑 **`S8` est le check qui garde le motif de rejet** : sans compte externe lié, `validateSide()`
+refuse le camp en **400** (§5.1), donc « Open a slot » ne doit pas exister. Un négatif seul
+serait vert le jour où le bouton cesserait d'être rendu pour tout le monde (sélecteur périmé,
+en-tête cassé) — d'où **`S9`**, qui lie le compte Epic par API, recharge, et exige le bouton.
+On ne casse pas le code pour voir rouge : **on retourne la donnée**. Le run délie ensuite.
+
+🔑 **`S13` a été vu VERT PAR CONSTRUCTION avant d'être corrigé**, et c'est la troisième fois que
+ce piège tombe dans ce harnais. Il comptait `td span.text-text-muted` pour prouver qu'un créneau
+annulé rend un tiret — or **`Pill tone="muted"` porte AUSSI `text-text-muted`**, donc la pastille
+« Cancelled » de la même ligne suffisait à le satisfaire : il serait resté vert après suppression
+du tiret qu'il surveille. Il lit maintenant la **cellule adversaire** (`td:nth-child(2)`) et la
+compare exactement. Vérifié rouge en remplaçant le tiret par « Deleted player ».
+
+⚠️ **`S14` couvre enfin la 4ᵉ cause de `opponent: null`** — celle qu'aucun ticket n'avait pu
+garder (voir les passations FT-4A et FT-4B). `opponent` est `null` dans **quatre** situations et
+deux d'entre elles signifient qu'un adversaire a réellement joué **puis disparu** : un tiret y
+effacerait quelqu'un en silence. Le scénario force l'état par `sql()` — `DELETE /users/me` répond
+409 `engaged_in_match` tant qu'un match engage le compte, donc « l'adversaire part pendant un
+match » est inatteignable par HTTP, mais `match_participants.user_id` est en **CASCADE** depuis
+[BX-DEL] : supprimer la ligne de participant produit **exactement** l'état que laisse une
+suppression de compte. C'est l'usage sanctionné de `sql()` (forcer un état, jamais constater un
+comportement) — le comportement, lui, est lu à l'écran.
+
+⚠️ **`S3` porte son propre contrôle positif.** « 0 requête » est aussi ce que mesure un filtre qui
+ne matche **rien** (route renommée, `/api` oublié). Le même filtre est donc rejoué sur une page
+valide, où il doit compter > 0.
+
+⚠️ **Il ne dépend pas du seed** : deux comptes jetables, liés par appel API. Seuls les ladders
+**chess 1v1** et **rl 1v1** sont attendus en base — ils viennent des migrations. Les deux sont
+nécessaires : il faut un jeu dont on lie le compte **et** un dont on ne le lie pas, pour tenir
+les deux faces de `S8`/`S9` sur un seul run.
+
+⚠️ **Teardown obligatoire** : le match de `S14` est `in_progress`, donc il **engage** les deux
+comptes et `DELETE /users/me` les refuserait en 409 (`purgeUserMatches()` du runner ne sait
+annuler qu'un slot encore `pending`). Le scénario force les matchs en `cancelled` puis efface les
+lignes, **même si un check a échoué**.
+
+⚠️ **Ce que `solo` NE couvre PAS** : le rendu d'un classement **existant** (Elo · rang sur la
+tuile, bande de stats renseignée). Une ligne de `rankings` exige un match **terminé** — deux
+soumissions concordantes et un `scheduled_at` reculé — que ce scénario ne fabrique pas. L'état est
+en revanche présent dans le seed : `alice` est **#1 / 1560 / 30–9** sur Chess 1v1, à vérifier à
+l'œil.
+
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 
 `teams-matchmaking` (FT-2C) est le seul scénario qui **crée de vrais matchs**. Le runner ne

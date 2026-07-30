@@ -1,19 +1,19 @@
 import { TriangleAlert, X } from 'lucide-react';
 
+import { Callout } from '@/components/ui/callout';
 import { InlineButton } from '@/components/ui/inline-button';
 import { LadderExcerpt } from '@/components/ladders/LadderExcerpt';
+import { LinkedAccountStatus } from '@/components/solo/LinkedAccountStatus';
 import { Pill } from '@/components/ui/pill';
-import { RosterChips } from '@/components/teams/detail/RosterChips';
 import { SectionTitle } from '@/components/ui/section-title';
-import { providerLabel } from '@/lib/games';
 import { formatMatchDate } from '@/lib/match-detail';
 import { nextOpenSlot, recentForm } from '@/lib/match-history';
-import { formatLineup } from '@/lib/team-detail';
 
 import type { PillTone } from '@/components/ui/pill';
-import type { RankingEntry } from '@/lib/ladders';
 import type { FormResult } from '@/lib/match-history';
-import type { TeamDetail, TeamInvitation, TeamMatch, TeamMember } from '@/lib/team-detail';
+import type { RankingEntry } from '@/lib/ladders';
+import type { RequiredProvider } from '@/lib/games';
+import type { SoloMatch } from '@/lib/solo';
 
 const formTone: Record<FormResult, PillTone> = { win: 'win', loss: 'loss', dispute: 'dispute' };
 const formLetter: Record<Exclude<FormResult, 'dispute'>, string> = { win: 'W', loss: 'L' };
@@ -23,77 +23,83 @@ const formWord: Record<FormResult, string> = {
   dispute: 'Waiting for an admin decision',
 };
 
-type TeamOverviewProps = {
-  team: TeamDetail;
-  members: TeamMember[];
+type SoloOverviewProps = {
+  meId: string;
+  ladderId: string;
+  ladderName: string;
+  gameName: string;
+  provider: RequiredProvider;
+  linked: boolean | undefined;
+  accountsError: boolean;
+  matches: SoloMatch[] | undefined;
   /**
-   * Pending invitations, shown read-only here. Always `[]` for a visitor because the key is
-   * absent from `GET /teams/{id}` for a non-member — so no role check is needed: a member
-   * legitimately sees who the captain has approached, a visitor simply receives nothing.
+   * L'historique a-t-il ÉCHOUÉ ? Sans ce drapeau, « Next match » et « Last results »
+   * disparaissaient **sans un mot** quand `GET /matches/me` tombait : impossible de
+   * distinguer « je n'ai aucun match prévu » de « on n'a pas réussi à le charger », et
+   * l'information n'était donnée que dans l'AUTRE onglet.
    */
-  invitations: TeamInvitation[];
-  /** From the ROOT of GET /teams/{id}/matches — never recomputed from the roster. */
-  isMember: boolean;
-  matches: TeamMatch[] | undefined;
+  matchesError: boolean;
   rankings: RankingEntry[] | undefined;
   standing: RankingEntry | undefined;
   rankingsPending: boolean;
   rankingsError: boolean;
-  /**
-   * Captain only: opens the confirmation for withdrawing the open slot. Left out for every
-   * other role, which is what keeps this component role-blind — the PAGE knows who is
-   * looking, this block only renders what it is handed.
-   */
-  onCancelSlot?: (match: TeamMatch) => void;
+  /** Opens the confirmation for withdrawing my open slot. */
+  onCancelSlot?: (match: SoloMatch) => void;
 };
 
-export function TeamOverview({
-  team,
-  members,
-  invitations,
-  isMember,
+/**
+ * Overview tab of `/solo/$ladderId` — the same four blocks as a team's Overview, with the one
+ * substitution the card asked for: **the roster is replaced by my linked-account state**,
+ * because that is what actually gates playing here (§5.1) and there is no roster to show.
+ */
+export function SoloOverview({
+  meId,
+  ladderId,
+  ladderName,
+  gameName,
+  provider,
+  linked,
+  accountsError,
   matches,
+  matchesError,
   rankings,
   standing,
   rankingsPending,
   rankingsError,
   onCancelSlot,
-}: TeamOverviewProps) {
-  const openSlot = isMember && matches ? nextOpenSlot(matches) : undefined;
+}: SoloOverviewProps) {
+  const openSlot = matches ? nextOpenSlot(matches) : undefined;
   const form = matches ? recentForm(matches) : [];
 
   return (
     <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3.5">
-        <SectionTitle>Roster</SectionTitle>
-        {/* No `onCancelInvitation`: withdrawing an invitation is the captain's call, and
-            the captain has the Manage tab for it. */}
-        <RosterChips
-          members={members}
-          provider={team.requiredProvider}
-          showAccountState={isMember}
-          invitations={invitations}
-        />
-        {isMember && (
-          <p className="text-xs text-text-muted">
-            A player without a linked {providerLabel(team.requiredProvider)} account cannot be
-            fielded in a line-up.
-          </p>
-        )}
-      </section>
+      <LinkedAccountStatus
+        provider={provider}
+        gameName={gameName}
+        linked={linked}
+        isError={accountsError}
+      />
 
       <LadderExcerpt
         rankings={rankings}
         standing={standing}
-        self={{ type: 'team', id: team.id }}
-        ladderId={team.ladderId}
-        ladderName={team.ladderName}
+        self={{ type: 'user', id: meId }}
+        ladderId={ladderId}
+        ladderName={ladderName}
         isPending={rankingsPending}
         isError={rankingsError}
-        // ⚠️ Kept word for word: `ladder-detail.mjs` waits on this exact sentence to know the
-        // excerpt has finished loading before it measures the navigation that follows.
-        emptyMessage="No team is ranked on this ladder yet."
+        emptyMessage="Nobody is ranked on this ladder yet — the first finished match creates the first line."
       />
+
+      {/* L'échec se dit ICI aussi, pas seulement dans l'onglet Matches : les deux sections
+          ci-dessous sont pilotées par `matches`, et leur absence silencieuse se lit comme
+          « rien de prévu, aucun résultat » — une affirmation fausse sur son propre état. */}
+      {matchesError && (
+        <Callout tone="muted">
+          Your matches on this ladder could not be loaded, so your next match and your recent
+          results are missing from this tab. The Matches tab has the details.
+        </Callout>
+      )}
 
       {openSlot && (
         <section className="flex flex-col gap-3.5">
@@ -103,15 +109,10 @@ export function TeamOverview({
               {formatMatchDate(openSlot.scheduledAt, 'long')}
             </p>
             <p className="text-sm text-text-muted">Waiting for an opponent</p>
-            {openSlot.lineup && openSlot.lineup.self.length > 0 && (
-              <p className="font-mono text-xs text-text-muted">
-                {formatLineup(openSlot.lineup.self)}
-              </p>
-            )}
             <span className="ml-auto flex items-center gap-2">
               <Pill tone="open">Open slot</Pill>
-              {/* `nextOpenSlot` only ever returns a `pending` match with no opponent, so
-                  the button offered here is always one the server will accept. */}
+              {/* `nextOpenSlot` only ever returns a `pending` match with no opponent, so the
+                  button offered here is always one the server will accept. */}
               {onCancelSlot ? (
                 <InlineButton
                   tone="danger"

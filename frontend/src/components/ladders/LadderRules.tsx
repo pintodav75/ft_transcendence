@@ -5,7 +5,7 @@ import { providerLabel } from '@/lib/games';
 // qui ment est pire que pas d'écran de règles, et une constante dupliquée ment tôt ou tard.
 // ⚠️ Elles ne sont pas propres au domaine « équipe » malgré le nom du fichier — candidates à
 // un `lib/match-rules.ts` le jour où un troisième consommateur apparaît.
-import { MIN_LEAD_MINUTES, SLOT_GRID_MINUTES, MAX_OPEN_SLOTS } from '@/lib/team-detail';
+import { MIN_LEAD_MINUTES, SLOT_GRID_MINUTES, MAX_OPEN_SLOTS } from '@/lib/match-slots';
 
 import type { ReactNode } from 'react';
 import type { Ladder, LadderGame } from '@/lib/ladders';

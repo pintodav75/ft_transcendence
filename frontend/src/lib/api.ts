@@ -22,6 +22,12 @@ export type ApiFetchOptions = Omit<RequestInit, 'body'> & {
  */
 export const RATE_LIMITED_MESSAGE = 'Too many requests — retry in a moment.'
 
+/**
+ * The refusal the UI itself should never have allowed: the action was offered to someone who
+ * may not perform it (a page left open while the team changed hands, a demoted captain).
+ */
+export const NOT_ALLOWED_MESSAGE = 'You are not allowed to do this.'
+
 export class ApiError extends Error {
   status: number
   payload: unknown
@@ -32,6 +38,27 @@ export class ApiError extends Error {
     this.status = status
     this.payload = payload
   }
+}
+
+/**
+ * The two statuses that mean the same thing WHATEVER the route, so the domain modules do not
+ * each re-decide them. `undefined` = this error is action-specific, the caller must map it.
+ *
+ * ⚠️ It lives HERE, next to `RATE_LIMITED_MESSAGE`, for the same reason: it carries no domain
+ * knowledge at all — 429 is a property of the rate limiter and 403 of the auth layer. It was
+ * private to `team-mutations.ts`, and that is precisely what kept the slot mutations stuck in
+ * a "team" module (see the note in `match-mutations.ts`); moving it up is what unblocked them
+ * for their second consumer, the solo page.
+ */
+export function sharedApiErrorMessage(error: unknown) {
+  if (!(error instanceof ApiError)) return undefined
+  // 100 req/min per account (20/min on an upload). Reachable by a jumpy user, so it needs a
+  // message that says "wait", not "it failed".
+  if (error.status === 429) return RATE_LIMITED_MESSAGE
+  // Should never surface: the UI only offers these actions to whoever may perform them.
+  // Mapped anyway, because a stale page is exactly when it fires.
+  if (error.status === 403) return NOT_ALLOWED_MESSAGE
+  return undefined
 }
 
 function buildApiUrl(path: string) {

@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ApiError, RATE_LIMITED_MESSAGE, apiFetch } from '@/lib/api';
+import { ApiError, apiFetch, sharedApiErrorMessage } from '@/lib/api';
 import { MY_INVITATIONS_KEY } from '@/lib/teams';
 import { NAME_MAX_LENGTH } from '@/lib/create-team-schema';
-import { MAX_OPEN_SLOTS, ROSTER_LIMIT } from '@/lib/team-detail';
+import { ROSTER_LIMIT, teamMatchesKey } from '@/lib/team-detail';
 import { uploadFile } from '@/lib/upload';
 
 import type { QueryClient } from '@tanstack/react-query';
@@ -31,10 +31,6 @@ type AcceptInvitationResponse =
 type DeclineInvitationResponse =
   paths['/teams/invitations/{invitationId}/decline']['post']['responses'][200]['content']['application/json'];
 type InvitationErrorCode = components['schemas']['TeamInvitationError']['code'];
-type CreateMatchBody = paths['/matches']['post']['requestBody']['content']['application/json'];
-type CreateMatchResponse = paths['/matches']['post']['responses'][201]['content']['application/json'];
-type CancelMatchResponse =
-  paths['/matches/{id}']['delete']['responses'][200]['content']['application/json'];
 
 // ------------------------------------------------------------------ invalidation
 
@@ -64,7 +60,7 @@ function refreshTeam(queryClient: QueryClient, teamId: string, { matches = false
   ];
 
   if (matches) {
-    refreshes.push(queryClient.invalidateQueries({ queryKey: ['team', teamId, 'matches'] }));
+    refreshes.push(queryClient.invalidateQueries({ queryKey: teamMatchesKey(teamId) }));
   }
 
   return Promise.all(refreshes);
@@ -73,20 +69,17 @@ function refreshTeam(queryClient: QueryClient, teamId: string, { matches = false
 // ---------------------------------------------------------------- error mapping
 
 export const NAME_TAKEN_MESSAGE = 'This name is already taken on this ladder.';
-const NOT_ALLOWED_MESSAGE = 'You are not allowed to do this.';
 const TEAM_GONE_MESSAGE = 'This team no longer exists.';
 
-/** The statuses that say the same thing whatever the action. `undefined` = action-specific. */
-function sharedMessage(error: unknown) {
-  if (!(error instanceof ApiError)) return undefined;
-  // 100 req/min per account (20/min on the logo upload). Reachable by a jumpy user, so it
-  // needs a message that says "wait", not "it failed".
-  if (error.status === 429) return RATE_LIMITED_MESSAGE;
-  // Should never surface: the UI only offers these actions to the captain. Mapped anyway,
-  // because a stale page (demoted, or the team changed hands) is exactly when it fires.
-  if (error.status === 403) return NOT_ALLOWED_MESSAGE;
-  return undefined;
-}
+/**
+ * The statuses that say the same thing whatever the action (429 / 403).
+ *
+ * ⚠️ It used to be DEFINED here, private, and that is exactly what pinned the slot mutations
+ * to this file (their old comment said so). It now lives in `lib/api.ts`, where it belongs:
+ * it describes the rate limiter and the auth layer, not a team. This alias only keeps the
+ * eight call sites below reading the way they did.
+ */
+const sharedMessage = sharedApiErrorMessage;
 
 export type TeamUpdateError = {
   /** `'name'` when the message belongs under the name field, `null` for a form-level one. */
@@ -470,193 +463,5 @@ export function useDissolveTeam(teamId: string, leaveTeamPage: () => void | Prom
       queryClient.removeQueries({ queryKey: ['team', teamId] });
       await queryClient.invalidateQueries({ queryKey: ['teams'] });
     },
-  });
-}
-
-// ------------------------------------------------------------- matchs (FT-2C)
-//
-// Opening and cancelling a slot live here rather than in a module of their own for one
-// reason: `sharedMessage()` (429 / 403) is private to this file and must not be copied.
-// ⚠️ The `/matches/$matchId` ticket will add result submission and dispute evidence — at
-// that second consumer, these four exports should move to `lib/match-mutations.ts`.
-
-/**
- * ONE key, and only one. Neither creating nor cancelling a slot changes `GET /teams/{id}`
- * (identity, roster, invitations) or the rankings (no result is entered), so `refreshTeam()`
- * is deliberately NOT called here: it would also sweep `['team', id]` and `['teams']`, i.e.
- * two requests the screen has no use for.
- */
-function refreshTeamMatches(queryClient: QueryClient, teamId: string) {
-  return queryClient.invalidateQueries({ queryKey: ['team', teamId, 'matches'] });
-}
-
-/**
- * Zod's 400 has an `errors` ARRAY and no `error` field; the business 400s have `error` and
- * no `errors`. Narrowing by shape, never casting the payload into a contract it may not
- * honour.
- */
-function hasZodIssues(payload: unknown) {
-  if (typeof payload !== 'object' || payload === null) return false;
-  if (!('errors' in payload)) return false;
-
-  const { errors } = payload as Record<'errors', unknown>;
-  return Array.isArray(errors);
-}
-
-/**
- * `POST /matches` answers `{ error, unlinkedPlayers }` when a selected player has no linked
- * game account. The array holds **uuids**, never pseudos — the caller maps them onto its
- * roster, because showing a raw uuid to a captain explains nothing.
- */
-function unlinkedPlayerIds(payload: unknown): string[] {
-  if (typeof payload !== 'object' || payload === null) return [];
-  if (!('unlinkedPlayers' in payload)) return [];
-
-  const { unlinkedPlayers } = payload as Record<'unlinkedPlayers', unknown>;
-  if (!Array.isArray(unlinkedPlayers)) return [];
-
-  return unlinkedPlayers.filter((value): value is string => typeof value === 'string');
-}
-
-/**
- * The slot the captain picked slipped under the 15-minute bound between the moment the list
- * was drawn and the moment the request landed. The panel must not only show the message: it
- * has to REDRAW the list, or the next click repeats the same failure.
- */
-export function isExpiredSlotError(error: unknown) {
-  return error instanceof ApiError && error.status === 400 && hasZodIssues(error.payload);
-}
-
-export type CreateMatchErrorContext = {
-  /**
-   * Locally counted still-valid open slots (`openSlotCount`). This is what tells the two
-   * 409s of `POST /matches` apart — see below.
-   *
-   * `undefined` when the team's history could not be loaded: the count is then UNKNOWN, not
-   * zero. Passing 0 in that case would state "you are already engaged at that time" with
-   * full confidence while the server actually refused for the cap — a message that sends
-   * the captain looking for a conflict that does not exist.
-   */
-  openSlots: number | undefined;
-  /** The roster, used to turn `unlinkedPlayers` uuids into pseudos. */
-  members: { id: string; pseudo: string }[];
-};
-
-export function createMatchErrorMessage(
-  error: unknown,
-  { openSlots, members }: CreateMatchErrorContext,
-) {
-  // 403 (`only the captain can engage the team`, on a page that changed hands) and 429.
-  const shared = sharedMessage(error);
-  if (shared) return shared;
-
-  if (error instanceof ApiError) {
-    if (error.status === 409) {
-      // ⚠️ THE TWO 409s OF THIS ROUTE CARRY NO STABLE `code` — unlike the invitation
-      // routes of B-INV. Invariant #8 forbids routing a message on the server's prose, so
-      // they are told apart by the only reliable local signal: our own count of open slots.
-      // Both are pre-empted by the UI; this is the net for a stale page.
-      //
-      // With no count at all (history unavailable) the two cannot be told apart, so the
-      // message names BOTH possibilities instead of picking one at random. Saying nothing
-      // false is worth more than sounding sure.
-      if (openSlots === undefined) {
-        return `This slot was refused: either this team is already engaged around that time, or it already holds ${MAX_OPEN_SLOTS} open slots on this ladder. Reload the page to see its matches.`;
-      }
-
-      return openSlots >= MAX_OPEN_SLOTS
-        ? `This team already holds ${MAX_OPEN_SLOTS} open slots on this ladder — cancel one before opening another.`
-        : 'This team is already engaged around that time. The list of times has just been refreshed.';
-    }
-
-    if (error.status === 404) return 'This ladder no longer exists.';
-
-    if (error.status === 400) {
-      const unlinked = unlinkedPlayerIds(error.payload);
-      if (unlinked.length > 0) {
-        const named = unlinked
-          .map((id) => members.find((member) => member.id === id)?.pseudo)
-          .filter((pseudo): pseudo is string => Boolean(pseudo))
-          .map((pseudo) => `@${pseudo}`);
-
-        return named.length > 0
-          ? `${named.join(', ')} no longer has a linked game account — unselect them and pick someone else.`
-          : 'One of the selected players no longer has a linked game account.';
-      }
-
-      // Zod: off-grid time, or a slot that fell under the 15-minute bound while the panel
-      // was open. Only the second is reachable from this screen.
-      if (hasZodIssues(error.payload)) {
-        return 'That time slot has just passed — pick another one.';
-      }
-
-      return 'This line-up was refused: every player must still be on this team.';
-    }
-  }
-
-  return 'Could not open the slot.';
-}
-
-export function cancelMatchErrorMessage(error: unknown) {
-  const shared = sharedMessage(error);
-  if (shared) return shared;
-
-  if (error instanceof ApiError) {
-    // Somebody accepted the slot between the render and the click.
-    if (error.status === 409) return 'This slot has just been accepted — it cannot be cancelled.';
-    if (error.status === 404) return 'This match no longer exists.';
-  }
-
-  return 'Could not cancel this slot.';
-}
-
-/**
- * Captain only: opens a slot on the team's ladder. `lineup` holds EXACTLY `parseInt(format)`
- * member ids, all with a linked game account.
- *
- * The invalidation promise is returned from `onSuccess` (repo idiom): the mutation then
- * stays `isPending` until the history really shows the new slot, instead of the panel
- * closing on the previous state for one frame.
- *
- * A 409 means the screen is LYING (another captain accepted one of our slots, a window
- * moved): the message alone would leave the same stale options on screen, so the history is
- * refetched too — which also re-greys the selector.
- */
-export function useCreateMatch(teamId: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (body: CreateMatchBody) =>
-      apiFetch<CreateMatchResponse>('/matches', { method: 'POST', body }),
-    onSuccess: () => refreshTeamMatches(queryClient, teamId),
-    onError: (error) =>
-      error instanceof ApiError && error.status === 409
-        ? refreshTeamMatches(queryClient, teamId)
-        : undefined,
-  });
-}
-
-/**
- * Captain only: withdraws a slot nobody has accepted yet. The match is NOT deleted — it
- * turns `cancelled` and stays in the history, which is why the row must not be removed
- * optimistically.
- *
- * `apiFetch` sends no body and therefore no `content-type` on a DELETE (`prepareBody` in
- * `lib/api.ts`), which is what keeps Fastify from answering 400 `FST_ERR_CTP_EMPTY_JSON_BODY`.
- */
-export function useCancelMatch(teamId: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (matchId: string) =>
-      apiFetch<CancelMatchResponse>(`/matches/${encodeURIComponent(matchId)}`, {
-        method: 'DELETE',
-      }),
-    onSuccess: () => refreshTeamMatches(queryClient, teamId),
-    // 409 (accepted in the meantime) and 404 (gone) both mean the row on screen is stale.
-    onError: (error) =>
-      error instanceof ApiError && (error.status === 409 || error.status === 404)
-        ? refreshTeamMatches(queryClient, teamId)
-        : undefined,
   });
 }
