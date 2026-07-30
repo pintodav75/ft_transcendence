@@ -121,6 +121,44 @@ export async function run({
   const roster = await rosterChip.count();
   step('A6', roster === 1, `puce de roster liée à /players/${user.pseudo} = ${roster === 1}`);
 
+  // La page joueur n'a pas de parent : son retour lit l'historique, et le libellé NOMME
+  // l'origine. Depuis un effectif d'équipe, ce doit donc être « Team » — pas « Solo ladder »,
+  // qui est ce que le même bouton affiche quand on vient d'un classement 1v1 (scénario solo,
+  // S13d). Ce check garde la table de correspondance côté équipe.
+  // ⚠️ Prédicat sur l'URL EXACTE et `.catch()` partout : `waitForURL(/motif/)` rend la main
+  // immédiatement si l'URL courante matche déjà, et une attente qui LÈVE fait sortir le
+  // harnais en exit 2 au lieu d'un rouge imputable.
+  const teamPath = new URL(teamUrl).pathname;
+  await rosterChip.click();
+  const reachedPlayer = await page
+    .waitForURL((url) => url.pathname === `/players/${user.pseudo}`, { timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  // ⚠️ Motif ancré insensible à la casse : `label-caps` rend « TEAM », et `{ exact: true }`
+  // est sensible à la casse ; sans ancres, Playwright matche en SOUS-CHAÎNE.
+  const backToTeam = page.getByRole('main').getByRole('button', { name: /^team$/i });
+  // ⚠️ `waitForURL` rend la main dès que l'URL change, avant le rendu de la route : on attend
+  // un repère de la page RENDUE (son titre) plutôt que le bouton lui-même, sinon un libellé
+  // devenu faux ferait patienter 10 s pour rien avant de rougir.
+  const playerPageRendered = await page
+    .getByRole('heading', { level: 1, name: `@${user.pseudo}` })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  const backShown = playerPageRendered && (await backToTeam.count()) === 1;
+  const wentBack =
+    backShown &&
+    (await backToTeam
+      .click()
+      .then(() => page.waitForURL((url) => url.pathname === teamPath, { timeout: 10000 }))
+      .then(() => true)
+      .catch(() => false));
+  step(
+    'A6b',
+    reachedPlayer && playerPageRendered && backShown && wentBack,
+    `page joueur rendue=${playerPageRendered}, bouton de retour « Team » rendu=${backShown}, retour sur ${teamPath}=${wentBack}`,
+  );
+
   setPhase('4. onglet Matches au clavier -> état vide');
   const overviewTab = page.locator('[role="tab"]', { hasText: 'Overview' });
   await overviewTab.focus();

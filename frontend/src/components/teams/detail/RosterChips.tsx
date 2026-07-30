@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router';
 import { Avatar } from '@/components/ui/avatar';
 import { InlineButton } from '@/components/ui/inline-button';
 import { Pill } from '@/components/ui/pill';
+import { useBackFrom } from '@/lib/back-navigation';
 import { providerLabel } from '@/lib/games';
 import { cn } from '@/lib/utils';
 
@@ -79,6 +80,8 @@ export function RosterChips<M extends RosterChipsMember>({
   invitations = [],
   onCancelInvitation,
 }: RosterChipsProps<M>) {
+  const backFrom = useBackFrom();
+
   return (
     // The explicit role is required: Safari drops list semantics on a flex <ul>.
     <ul role="list" className="flex flex-wrap gap-2.5">
@@ -97,6 +100,8 @@ export function RosterChips<M extends RosterChipsMember>({
             <Link
               to="/players/$pseudo"
               params={{ pseudo: member.pseudo }}
+              // Names what the player page goes back to (this roster).
+              state={backFrom}
               className={cn(
                 'focus-ring flex min-w-0 items-center gap-3 rounded-full py-1.5 pl-1.5',
                 kickable ? 'pr-2' : 'pr-4',
@@ -176,6 +181,8 @@ export function RosterChips<M extends RosterChipsMember>({
             <Link
               to="/players/$pseudo"
               params={{ pseudo: user.pseudo }}
+              // Names what the player page goes back to (this roster).
+              state={backFrom}
               className={cn(
                 'focus-ring flex min-w-0 items-center gap-3 rounded-full py-1.5 pl-1.5',
                 cancellable ? 'pr-2' : 'pr-4',

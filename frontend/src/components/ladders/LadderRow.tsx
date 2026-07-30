@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 
 import { Avatar } from '@/components/ui/avatar';
+import { useBackFrom } from '@/lib/back-navigation';
 import {
   competitorAvatarUrl,
   competitorName,
@@ -70,6 +71,7 @@ type LadderRowProps = {
 };
 
 export function LadderRow({ entry, isSelf = false, selfNote }: LadderRowProps) {
+  const backFrom = useBackFrom();
   // The visual column header is aria-hidden (it is a grid, not a table), so each row
   // link carries its own readable summary.
   const label = `Rank ${entry.rank}, ${competitorName(entry.competitor)}, ${entry.elo} Elo, ${entry.wins} wins ${entry.losses} losses, ${formatWinRate(entry.wins, entry.losses)} win rate`;
@@ -130,6 +132,8 @@ export function LadderRow({ entry, isSelf = false, selfNote }: LadderRowProps) {
     <Link
       to="/players/$pseudo"
       params={{ pseudo: entry.competitor.pseudo }}
+      // Tells the player page what it goes back to: this board is one of its six entrances.
+      state={backFrom}
       aria-label={label}
       className={cn(rowClasses, 'focus-ring hover:bg-surface-card')}
     >

@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { InlineButton } from '@/components/ui/inline-button';
 import { MatchStatusPill } from '@/components/matches/MatchStatusPill';
 import { matchAccentClass, matchStatusView } from '@/components/matches/match-status';
+import { useBackFrom } from '@/lib/back-navigation';
 import { formatEloDelta, formatMatchDate } from '@/lib/match-detail';
 import { formatScore, isCancellableSlot } from '@/lib/match-history';
 import { EM_DASH, cn } from '@/lib/utils';
@@ -79,6 +80,7 @@ export function MatchRow<M extends MatchHistoryMatch>({
   canOpenSheet = false,
 }: MatchRowProps<M>) {
   const navigate = useNavigate();
+  const backFrom = useBackFrom();
   const { tone } = matchStatusView(match);
   // A finished match is the only one carrying a RESULT — that is what drives the row's
   // emphasis, and it is deliberately NOT the same question as "can it be opened".
@@ -198,6 +200,8 @@ export function MatchRow<M extends MatchHistoryMatch>({
           <Link
             to="/players/$pseudo"
             params={{ pseudo: opponent.pseudo }}
+            // Names what the player page goes back to (this history table).
+            state={backFrom}
             aria-label={`Player page of ${opponent.name}`}
             className="focus-ring py-1.5 underline-offset-4 hover:underline"
           >
