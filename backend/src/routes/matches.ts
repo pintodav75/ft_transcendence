@@ -12,8 +12,23 @@ import {
   userExternalAccountsTable,
   usersTable,
   disputesTable,
+  formatEnum,
 } from '../db/schema.js';
-import { eq, and, ne, or, gt, lt, gte, inArray, notInArray, sql, desc } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  ne,
+  or,
+  gt,
+  lt,
+  gte,
+  inArray,
+  notInArray,
+  sql,
+  asc,
+  desc,
+  type SQL,
+} from 'drizzle-orm';
 import z from 'zod';
 // Même type TS que le `competitor` de GET /ladders/:id/rankings : l'adversaire d'une ligne
 // d'historique est polymorphe (joueur en 1v1, équipe en 2v2+) et le front n'a donc qu'un
@@ -50,6 +65,45 @@ const MAX_OPEN_SLOTS = 5;
 
 type Ladder = typeof laddersTable.$inferSelect;
 type Game = typeof gamesTable.$inferSelect;
+
+// ===== Règles de temps et de format, en UN seul exemplaire =====
+//
+// 🔑 Ces trois helpers ne sont pas de la cosmétique. Depuis [B-MM], `GET /matches` rend un
+// verdict `canAccept` qui doit annoncer EXACTEMENT ce que `POST /matches/:id/accept` fera.
+// Deux vérités qui divergent, c'est un bouton offert par l'UI puis refusé par l'API : une
+// ligne rouge dans la console Chrome, donc un motif de rejet du projet. Les règles
+// partagées vivent donc ici, et les deux chemins les LISENT au lieu de les recopier.
+
+/**
+ * L'instant à partir duquel un créneau est encore acceptable.
+ *
+ * Un slot `pending` sous MIN_LEAD_MINUTES de son PROPRE coup d'envoi est périmé : plus
+ * personne ne peut l'accepter. `cancelExpiredSlots` finira par le passer à `cancelled`,
+ * mais il tourne périodiquement — entre deux passages c'est cette borne qui fait foi.
+ */
+function acceptableFrom(): Date {
+  return new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000);
+}
+
+/**
+ * La fenêtre qu'un match occupe : `]scheduledAt − lockout, scheduledAt + lockout[`.
+ *
+ * ⚠️ Les bornes s'emploient en inégalités STRICTES (invariant repo #3) : deux matchs qui
+ * se TOUCHENT (21h–22h puis 22h–23h) ne se chevauchent pas — l'enchaînement dos à dos est
+ * le cas d'usage n°1 (« je planifie ma soirée »). Écrire `>=`/`<=` casserait la feature.
+ */
+function overlapWindow(scheduledAt: Date, lockoutMinutes: number): { start: Date; end: Date } {
+  const lockoutMs = lockoutMinutes * 60 * 1000;
+  return {
+    start: new Date(scheduledAt.getTime() - lockoutMs),
+    end: new Date(scheduledAt.getTime() + lockoutMs),
+  };
+}
+
+/** Nombre de joueurs qu'un format impose d'aligner (`'5v5'` → 5). */
+function formatSize(format: Ladder['format']): number {
+  return parseInt(format, 10);
+}
 
 // `db` ou le `tx` d'une transaction : les deux exposent la même API de requête.
 // Indispensable — les checks de disponibilité DOIVENT pouvoir tourner à l'intérieur
@@ -104,13 +158,11 @@ async function hasConflictingMatch(
   statuses: readonly ('pending' | 'in_progress' | 'awaiting_confirmation' | 'disputed')[],
   excludeMatchId?: string,
 ): Promise<boolean> {
-  const lockoutMs = ladder.lockoutMinutes * 60 * 1000;
-  const windowStart = new Date(scheduledAt.getTime() - lockoutMs);
-  const windowEnd = new Date(scheduledAt.getTime() + lockoutMs);
+  const { start: windowStart, end: windowEnd } = overlapWindow(scheduledAt, ladder.lockoutMinutes);
 
   // Un slot `pending` dont l'heure approche à moins de MIN_LEAD_MINUTES est PÉRIMÉ :
   // plus personne ne peut l'accepter, il ne doit donc plus bloquer son propre créateur.
-  const stillAcceptable = new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000);
+  const stillAcceptable = acceptableFrom();
 
   const conditions = [
     inArray(matchesTable.status, [...statuses]),
@@ -161,7 +213,7 @@ async function countOpenSlots(
   teamId: string | null,
   userId: string,
 ): Promise<number> {
-  const stillAcceptable = new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000);
+  const stillAcceptable = acceptableFrom();
   const conditions = [
     eq(matchesTable.status, 'pending' as const),
     gte(matchesTable.scheduledAt, stillAcceptable),
@@ -293,9 +345,9 @@ async function validateSide(
     return { ok: false, code: 403, error: 'only the captain can engage the team' };
 
   // lineup = exactement format_size joueurs
-  const formatSize = parseInt(ladder.format, 10);
-  if (lineup.length !== formatSize)
-    return { ok: false, code: 400, error: `lineup must contain exactly ${formatSize} players` };
+  const size = formatSize(ladder.format);
+  if (lineup.length !== size)
+    return { ok: false, code: 400, error: `lineup must contain exactly ${size} players` };
 
   // lineup ⊆ roster
   const members = await db
@@ -355,7 +407,94 @@ const createMatchSchema = z.object({
 
 const acceptMatchSchema = createMatchSchema.pick({ lineup: true });
 
-const listQuerySchema = z.object({ ladderId: z.uuid() });
+/**
+ * [B-MM] Pourquoi je ne peux PAS accepter ce créneau. **Enum FERMÉ** : le front en fait des
+ * libellés, une 6ᵉ valeur inattendue afficherait un vide silencieux.
+ *
+ * 🔑 L'ordre d'évaluation reproduit celui de `POST /matches/:id/accept` — d'abord le CÔTÉ
+ * (`validateSide` : qui joue), puis le CRÉNEAU (`hasConflictingMatch` : quand) :
+ *   • 1v1  → `account_not_linked` puis `schedule_conflict`
+ *   • 2v2+ → `no_team`, `not_captain`, `roster_too_small`, `roster_not_linked` puis
+ *     `schedule_conflict`
+ * Un seul code est rendu : le PREMIER qui tombe, celui que l'API opposerait réellement.
+ *
+ * ⚠️ Pas de code pour « c'est mon propre créneau » : ces slots restent **exclus** de la
+ * liste (comportement d'origine), ils n'ont donc jamais de verdict à rendre.
+ *
+ * 🔑 **`roster_too_small` et `roster_not_linked` sont DEUX codes et pas un** (ajout après
+ * review). Les fusionner rendait `canAccept` juste mais la CAUSE fausse : une équipe d'un
+ * seul membre au Steam lié s'entendait dire « vos joueurs doivent lier leur compte » alors
+ * qu'il lui manquait 4 joueurs, et l'accept répondait, lui, `lineup must contain exactly 5
+ * players`. La page front fait porter à la raison le lien qui la résout : « inviter des
+ * joueurs » et « faire lier les comptes » sont deux remèdes différents, donc deux liens
+ * différents. Le libellé neutre aurait supprimé le symptôme, pas la cause.
+ */
+const SLOT_REFUSAL_REASONS = [
+  // 1v1 · §5.1 — je n'ai pas de compte lié pour le provider du jeu.
+  'account_not_linked',
+  // 2v2+ — je n'ai aucune équipe sur ce ladder.
+  'no_team',
+  // 2v2+ — j'ai une équipe mais je n'en suis pas capitaine : seul lui l'engage.
+  'not_captain',
+  // 2v2+ — mon roster compte moins de `format_size` joueurs : je ne peux même pas
+  // constituer une lineup de la bonne TAILLE. Le remède est de recruter.
+  'roster_too_small',
+  // 2v2+ · §5.1 — le roster est assez grand, mais moins de `format_size` de ses membres
+  // ont le compte lié qu'exige le jeu. Le remède est de faire lier les comptes.
+  'roster_not_linked',
+  // §5.2 — j'ai déjà un match ACTIF dont la fenêtre chevauche celle du créneau.
+  'schedule_conflict',
+] as const;
+type SlotRefusalReason = (typeof SLOT_REFUSAL_REASONS)[number];
+
+// Le `limit` borne la liste RENDUE (donc après le filtre `acceptable`), pas le balayage.
+const DEFAULT_SLOT_LIMIT = 50;
+const MAX_SLOT_LIMIT = 100;
+
+/**
+ * Un paramètre présent mais VIDE vaut « absent ».
+ *
+ * 🔑 Sans ça, un front qui construit son URL depuis l'état d'un filtre non renseigné
+ * (`?gameId=${filtre}`) envoie `?gameId=` et reçoit un **400** — donc une ligne rouge dans
+ * la console Chrome, qui est un **motif de rejet du projet**. C'est le cas d'usage NORMAL
+ * d'une page de filtres, pas un abus d'appelant : il ne doit pas coûter une erreur.
+ *
+ * ⚠️ Ne relâche RIEN d'autre : une valeur réellement invalide (`?acceptable=1`,
+ * `?limit=abc`, `?ladderId=nope`) continue de sortir en 400. Seule la chaîne vide,
+ * indistinguable d'un paramètre omis côté navigateur, est neutralisée.
+ */
+const blankAsAbsent = (v: unknown): unknown => (v === '' ? undefined : v);
+
+/**
+ * [B-MM] `GET /matches` — **tous** les filtres sont optionnels.
+ *
+ * ⚠️ `ladderId` n'est plus requis : sans lui la route balaie TOUS les ladders. C'est le
+ * mode d'emploi de la page « Matchmaking » — on choisit un créneau avant de choisir un
+ * ladder. Avec lui, le comportement d'origine est strictement inchangé, 404 compris.
+ */
+const openSlotsQuerySchema = z.object({
+  ladderId: z.preprocess(blankAsAbsent, z.uuid().optional()),
+  // Slug TEXTE (`cs2`, `val`…), pas un uuid : `games.id` est un `text` choisi à la main.
+  // Filtre PUR, comme `GET /ladders?gameId=` : un slug inconnu rend une liste vide et non
+  // un 404 — il désigne un critère de tri, pas la ressource adressée par la requête.
+  gameId: z.preprocess(blankAsAbsent, z.string().min(1).max(50).optional()),
+  // Dérivé du schéma : ajouter un format en base sans le proposer ici casserait la
+  // compilation, au lieu de laisser passer un filtre silencieusement mort.
+  format: z.preprocess(blankAsAbsent, z.enum(formatEnum.enumValues).optional()),
+  // ⚠️ JAMAIS `z.coerce.boolean()` ici : en JS toute chaîne non vide est vraie, donc
+  // `?acceptable=false` filtrerait comme `true`. L'enum rend un 400 sur tout le reste.
+  acceptable: z.preprocess(
+    blankAsAbsent,
+    z
+      .enum(['true', 'false'])
+      .transform((v) => v === 'true')
+      .optional(),
+  ),
+  limit: z.preprocess(
+    blankAsAbsent,
+    z.coerce.number().int().min(1).max(MAX_SLOT_LIMIT).default(DEFAULT_SLOT_LIMIT),
+  ),
+});
 // GET /matches/me : filtre facultatif par ladder. `optional()` et non `default()` — absent
 // signifie « tous les ladders », et une valeur présente mais malformée doit sortir en 400.
 const myMatchesQuerySchema = z.object({ ladderId: z.uuid().optional() });
@@ -474,57 +613,322 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
     }
   });
 
-  // GET /matches?ladderId= — slots ouverts d'un ladder (créateur + maps masqués, mes slots exclus).
+  // GET /matches — les créneaux ouverts, sur UN ladder (`?ladderId=`) ou sur TOUS (B-MM).
+  //
+  // Anonymat CONSERVÉ (décision B5b) : ni la team créatrice, ni les maps. On accepte un
+  // créneau sans savoir qui l'a ouvert — c'est ce qui empêche de choisir ses adversaires
+  // et protège l'intégrité de l'Elo.
+  //
+  // 🔑 NOMBRE DE REQUÊTES CONSTANT (7 au pire, 1 dans le cas vide), quel que soit le
+  // nombre de créneaux ET de ladders. Le verdict `canAccept` est par-ladder et par-camp :
+  // il est calculé EN LOT, en amont, jamais dans la boucle de mise en forme.
   server.get('/', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
-      const { ladderId } = listQuerySchema.parse(request.query);
+      // Zod APRÈS `authenticate` (invariant repo #5) : anonyme → 401, malformé → 400.
+      const query = openSlotsQuerySchema.parse(request.query);
       const me = request.user.sub;
 
-      const [ladder] = await db.select().from(laddersTable).where(eq(laddersTable.id, ladderId));
-      if (!ladder) return reply.code(404).send({ error: 'ladder not found' });
+      // ── 1. Les ladders du périmètre, avec l'identité de leur jeu ────────────────────
+      // UNE requête jointe : `ladderName` et `gameName` sortent d'ici. Jamais un
+      // aller-retour par créneau, jamais un par ladder.
+      // ⚠️ `ladderId` PREND LA MAIN sur les autres filtres, et ce n'est pas un détail :
+      // il DÉSIGNE une ressource, donc lui seul peut motiver un 404. Si on le mélangeait
+      // aux filtres secondaires dans le même `where`, alors
+      // `?ladderId=<chess>&format=5v5` ne rendrait aucune ligne et sortirait en
+      // « ladder not found » — un MENSONGE : ce ladder existe, il ne satisfait
+      // simplement pas les autres critères. La bonne réponse est 200 + liste vide.
+      // ⚠️ Volontairement REDONDANT quand `ladderId` est absent : le `where` ci-dessous a
+      // déjà appliqué ces deux filtres en SQL, ce prédicat est alors un no-op. On le garde
+      // parce qu'il est le SEUL à s'appliquer dans l'autre branche — le factoriser
+      // demanderait de faire dépendre le `where` du prédicat, pour zéro gain.
+      const secondary = (l: { gameId: string; format: Ladder['format'] }): boolean =>
+        (!query.gameId || l.gameId === query.gameId) && (!query.format || l.format === query.format);
 
-      const conditions = [
-        eq(matchesTable.ladderId, ladderId),
-        eq(matchesTable.status, 'pending'),
-        // Masquer les slots PÉRIMÉS : à moins de MIN_LEAD_MINUTES du coup d'envoi, plus
+      const ladderConditions: SQL[] = [];
+      if (query.gameId) ladderConditions.push(eq(laddersTable.gameId, query.gameId));
+      if (query.format) ladderConditions.push(eq(laddersTable.format, query.format));
+
+      const ladderRows = await db
+        .select({
+          id: laddersTable.id,
+          name: laddersTable.name,
+          format: laddersTable.format,
+          lockoutMinutes: laddersTable.lockoutMinutes,
+          gameId: gamesTable.id,
+          gameName: gamesTable.name,
+          requiredProvider: gamesTable.requiredProvider,
+        })
+        .from(laddersTable)
+        .innerJoin(gamesTable, eq(gamesTable.id, laddersTable.gameId))
+        .where(
+          query.ladderId
+            ? eq(laddersTable.id, query.ladderId)
+            : ladderConditions.length
+              ? and(...ladderConditions)
+              : undefined,
+        );
+
+      // Bien formé mais inconnu → 404 (contrat d'origine, gardé par `test_matches_create.py`).
+      // Les autres filtres ne désignent rien → au pire une liste vide, jamais un 404. Même
+      // arbitrage que `GET /ladders?gameId=`.
+      if (query.ladderId && !ladderRows.length)
+        return reply.code(404).send({ error: 'ladder not found' });
+
+      // Les filtres secondaires s'appliquent ici quand `ladderId` a pris la main : ils
+      // restreignent alors une liste d'AU PLUS une ligne — il n'y a rien à y optimiser.
+      // Sans `ladderId`, le `where` les a déjà appliqués et ce filtre est un no-op.
+      const scopedLadders = ladderRows.filter(secondary);
+      if (!scopedLadders.length) return reply.code(200).send({ slots: [] });
+
+      const ladderById = new Map(scopedLadders.map((l) => [l.id, l]));
+
+      // ── 2. Mes équipes (au plus UNE par ladder : `team_members_user_ladder_unique`) ──
+      const myTeams = await db
+        .select({
+          teamId: teamsTable.id,
+          ladderId: teamsTable.ladderId,
+          captainId: teamsTable.captainId,
+        })
+        .from(teamMembersTable)
+        .innerJoin(teamsTable, eq(teamsTable.id, teamMembersTable.teamId))
+        .where(eq(teamMembersTable.userId, me));
+      const myTeamByLadder = new Map(myTeams.map((t) => [t.ladderId, t]));
+      const myTeamIds = myTeams.map((t) => t.teamId);
+
+      // ── 3. Mes engagements, DEUX sources, lues une fois pour toutes ─────────────────
+      // Elles servent DEUX fois : à exclure mes propres créneaux, et à détecter le
+      // chevauchement de fenêtres (§5.2). D'où la lecture en lot : une requête par
+      // créneau serait le vrai piège de ce ticket.
+      //
+      // 🔑 Le découpage reproduit à la lettre celui de `hasConflictingMatch` ET la garde
+      // d'auto-acceptation de `POST /matches/:id/accept` : en 2v2+ l'identité du camp est
+      // l'ÉQUIPE (`match_sides.team_id`), en 1v1 c'est le couple (JOUEUR, LADDER)
+      // (`match_participants` + filtre ladder).
+      // ⚠️ D'où le `format = '1v1'` sur la source « participant », qui n'est PAS un
+      // raccourci : un joueur qui a quitté l'équipe X garde sa ligne dans la compo d'un
+      // slot encore ouvert de X, alors que l'accept l'autoriserait à le prendre au nom de
+      // son équipe Y (la garde compare la team du slot à MA team ACTUELLE). Sans ce
+      // filtre, ce créneau disparaîtrait de sa liste sans qu'aucune règle ne le demande.
+      const asPlayer = await db
+        .select({
+          matchId: matchesTable.id,
+          ladderId: matchesTable.ladderId,
+          status: matchesTable.status,
+          scheduledAt: matchesTable.scheduledAt,
+        })
+        .from(matchParticipantsTable)
+        .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
+        .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
+        .innerJoin(laddersTable, eq(laddersTable.id, matchesTable.ladderId))
+        .where(
+          and(
+            eq(matchParticipantsTable.userId, me),
+            eq(laddersTable.format, '1v1'),
+            inArray(matchesTable.status, [...ENGAGING_STATUSES]),
+          ),
+        );
+
+      const asTeam = myTeamIds.length
+        ? await db
+            .select({
+              matchId: matchesTable.id,
+              teamId: matchSidesTable.teamId,
+              status: matchesTable.status,
+              scheduledAt: matchesTable.scheduledAt,
+            })
+            .from(matchSidesTable)
+            .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
+            .where(
+              and(
+                inArray(matchSidesTable.teamId, myTeamIds),
+                inArray(matchesTable.status, [...ENGAGING_STATUSES]),
+              ),
+            )
+        : [];
+
+      // ── 4. Les créneaux ────────────────────────────────────────────────────────────
+      const excludedIds = [...new Set([...asPlayer, ...asTeam].map((r) => r.matchId))];
+      const slotConditions = [
+        inArray(
+          matchesTable.ladderId,
+          scopedLadders.map((l) => l.id),
+        ),
+        eq(matchesTable.status, 'pending' as const),
+        // Masquer les créneaux PÉRIMÉS : sous MIN_LEAD_MINUTES du coup d'envoi, plus
         // personne ne peut les accepter — ils n'ont plus rien à faire sur le tableau.
-        // (Le job les passera à `cancelled` à sa prochaine passe ; en attendant, on ne
-        //  les montre pas.)
-        gte(matchesTable.scheduledAt, new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000)),
+        gte(matchesTable.scheduledAt, acceptableFrom()),
       ];
-
-      if (ladder.format === '1v1') {
-        // solo : exclure les matchs où je suis participant
-        const mine = await db
-          .select({ matchId: matchSidesTable.matchId })
-          .from(matchParticipantsTable)
-          .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
-          .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
-          .where(and(eq(matchParticipantsTable.userId, me), eq(matchesTable.ladderId, ladderId)));
-        const mineIds = mine.map((m) => m.matchId);
-        if (mineIds.length) conditions.push(notInArray(matchesTable.id, mineIds));
-      } else {
-        // team : exclure les slots de ma team
-        const [membership] = await db
-          .select({ teamId: teamMembersTable.teamId })
-          .from(teamMembersTable)
-          .where(and(eq(teamMembersTable.userId, me), eq(teamMembersTable.ladderId, ladderId)));
-        if (membership) conditions.push(ne(matchSidesTable.teamId, membership.teamId));
-      }
+      // ⚠️ La garde n'est pas cosmétique : `notInArray(x, [])` produit du SQL invalide.
+      if (excludedIds.length) slotConditions.push(notInArray(matchesTable.id, excludedIds));
 
       const rows = await db
-        .select({ id: matchesTable.id, scheduledAt: matchesTable.scheduledAt })
+        .select({
+          id: matchesTable.id,
+          ladderId: matchesTable.ladderId,
+          scheduledAt: matchesTable.scheduledAt,
+        })
         .from(matchesTable)
-        .innerJoin(matchSidesTable, eq(matchSidesTable.matchId, matchesTable.id))
-        .where(and(...conditions));
+        .where(and(...slotConditions))
+        // ⚠️ `createdAt` DÉPARTAGE, il n'est pas décoratif : `scheduledAt` est contraint à
+        // la grille des quarts d'heure, donc les ex æquo sont FRÉQUENTS. Sans second
+        // critère l'ordre des égalités n'est garanti par rien — un simple UPDATE de statut
+        // déplace le tuple dans le heap et peut permuter deux lignes entre deux appels
+        // (leçon B-SOLO). L'ancienne version ne triait pas du tout.
+        .orderBy(asc(matchesTable.scheduledAt), asc(matchesTable.createdAt));
 
-      const slots = rows.map((r) => ({
-        id: r.id,
-        format: ladder.format,
-        gameId: ladder.gameId,
-        scheduledAt: r.scheduledAt,
-      }));
-      return reply.code(200).send({ slots });
+      // Rien à montrer : on sort AVANT les 2 requêtes de verdict, qui n'auraient rien à
+      // qualifier. Le cas « aucun créneau » coûte alors **5** requêtes (4 si l'appelant
+      // n'a aucune équipe : `asTeam` n'est pas émise), contre 7 au plafond.
+      if (!rows.length) return reply.code(200).send({ slots: [] });
+
+      // ── 5. Le verdict, calculé PAR LADDER (jamais par créneau) ─────────────────────
+      // Seuls les ladders réellement représentés dans la page sont interrogés.
+      const presentLadders = [...new Set(rows.map((r) => r.ladderId))]
+        .map((id) => ladderById.get(id))
+        .filter((l): l is NonNullable<typeof l> => !!l);
+
+      // §5.1 côté SOLO : mes providers liés. Une requête, quel que soit le nombre de jeux.
+      const soloProviders = presentLadders.some((l) => l.format === '1v1')
+        ? await db
+            .select({ provider: userExternalAccountsTable.provider })
+            .from(userExternalAccountsTable)
+            .where(eq(userExternalAccountsTable.userId, me))
+        : [];
+      const myProviders = new Set(soloProviders.map((r) => r.provider));
+
+      // §5.1 côté ÉQUIPE : pour chacune de mes équipes, la TAILLE du roster et combien de
+      // ses membres ont le compte lié qu'exige le jeu de SON ladder. UNE requête agrégée
+      // pour toutes mes équipes — pas une par équipe, encore moins une par créneau.
+      //
+      // 🔑 **LEFT JOIN, et deux compteurs distincts** (correction de review) : un INNER
+      // JOIN ne remontait que les membres LIÉS, il était donc incapable de distinguer
+      // « 1 membre, lié » de « 5 membres, 1 lié » — les deux rendaient `linked = 1` et la
+      // même raison. `count(*)` compte les lignes du roster ; `count(<colonne jointe>)`
+      // ignore les NULL, donc compte les seuls membres liés. Deux causes, deux remèdes,
+      // aucune requête de plus.
+      // 🔑 Pas de `distinct` : `user_external_accounts_user_provider_unique` interdit qu'un
+      // joueur porte deux lignes pour le même provider, la jointure ne peut pas dupliquer.
+      // On ne compte que les équipes que je CAPITAINE : ailleurs le verdict s'arrête avant
+      // (`no_team` / `not_captain`) et le roster n'a aucune influence.
+      const captainTeamIds = presentLadders
+        .filter((l) => l.format !== '1v1')
+        .map((l) => myTeamByLadder.get(l.id))
+        .filter((t): t is NonNullable<typeof t> => !!t && t.captainId === me)
+        .map((t) => t.teamId);
+
+      const rosterRows = captainTeamIds.length
+        ? await db
+            .select({
+              teamId: teamMembersTable.teamId,
+              members: sql<number>`count(*)::int`,
+              linked: sql<number>`count(${userExternalAccountsTable.userId})::int`,
+            })
+            .from(teamMembersTable)
+            .innerJoin(teamsTable, eq(teamsTable.id, teamMembersTable.teamId))
+            .innerJoin(laddersTable, eq(laddersTable.id, teamsTable.ladderId))
+            .innerJoin(gamesTable, eq(gamesTable.id, laddersTable.gameId))
+            .leftJoin(
+              userExternalAccountsTable,
+              and(
+                eq(userExternalAccountsTable.userId, teamMembersTable.userId),
+                eq(userExternalAccountsTable.provider, gamesTable.requiredProvider),
+              ),
+            )
+            .where(inArray(teamMembersTable.teamId, captainTeamIds))
+            .groupBy(teamMembersTable.teamId)
+        : [];
+      const rosterByTeam = new Map(rosterRows.map((r) => [r.teamId, r]));
+
+      // Verdict du CÔTÉ (« qui joue »), figé une fois par ladder : il ne dépend pas de
+      // l'heure. Seul le CRÉNEAU (« quand ») reste à trancher créneau par créneau.
+      const sideVerdictByLadder = new Map<
+        string,
+        { reason: SlotRefusalReason | null; teamId: string | null }
+      >();
+      for (const ladder of presentLadders) {
+        if (ladder.format === '1v1') {
+          sideVerdictByLadder.set(ladder.id, {
+            reason: myProviders.has(ladder.requiredProvider) ? null : 'account_not_linked',
+            teamId: null,
+          });
+          continue;
+        }
+        const team = myTeamByLadder.get(ladder.id);
+        if (!team) {
+          sideVerdictByLadder.set(ladder.id, { reason: 'no_team', teamId: null });
+          continue;
+        }
+        if (team.captainId !== me) {
+          sideVerdictByLadder.set(ladder.id, { reason: 'not_captain', teamId: team.teamId });
+          continue;
+        }
+        // Ordre calqué sur `validateSide` : elle refuse d'abord la TAILLE de la lineup
+        // (`lineup must contain exactly N players`), et seulement ensuite les comptes non
+        // liés. Un roster trop petit doit donc rendre `roster_too_small`, pas la raison
+        // §5.1 — c'est ce que l'API opposerait vraiment.
+        const roster = rosterByTeam.get(team.teamId);
+        const size = formatSize(ladder.format);
+        let reason: SlotRefusalReason | null = null;
+        if ((roster?.members ?? 0) < size) reason = 'roster_too_small';
+        else if ((roster?.linked ?? 0) < size) reason = 'roster_not_linked';
+        sideVerdictByLadder.set(ladder.id, { reason, teamId: team.teamId });
+      }
+
+      // §5.2 — seuls les matchs ACTIFS verrouillent (LOCKING_STATUSES, comme à l'accept).
+      // ⚠️ Mes propres slots `pending` qui chevauchent ne me bloquent PAS : l'accept les
+      // annule (option A). Prendre ENGAGING_STATUSES ici annoncerait « conflit » sur un
+      // créneau que l'API accepterait — exactement l'inverse du but de ce champ.
+      const locking = new Set<string>(LOCKING_STATUSES);
+      const myLockingSolo = asPlayer.filter((m) => locking.has(m.status));
+      const myLockingTeam = asTeam.filter((m) => locking.has(m.status));
+
+      const slots = [];
+      for (const row of rows) {
+        const ladder = ladderById.get(row.ladderId);
+        const side = sideVerdictByLadder.get(row.ladderId);
+        // Inatteignable (les créneaux sont filtrés sur ces mêmes ladders), mais une Map
+        // rend `undefined` : on saute plutôt que d'affirmer par un `!`.
+        if (!ladder || !side) continue;
+
+        let reason: SlotRefusalReason | null = side.reason;
+        if (!reason && row.scheduledAt) {
+          const { start, end } = overlapWindow(row.scheduledAt, ladder.lockoutMinutes);
+          // Inégalités STRICTES : cf. `overlapWindow`, le dos à dos reste autorisé.
+          const overlaps = (at: Date | null): boolean =>
+            !!at && at.getTime() > start.getTime() && at.getTime() < end.getTime();
+          const busy =
+            ladder.format === '1v1'
+              ? myLockingSolo.some((m) => m.ladderId === ladder.id && overlaps(m.scheduledAt))
+              : myLockingTeam.some((m) => m.teamId === side.teamId && overlaps(m.scheduledAt));
+          if (busy) reason = 'schedule_conflict';
+        }
+
+        slots.push({
+          id: row.id,
+          // `ladderId` est AJOUTÉ (il n'était pas nécessaire tant que le client le
+          // fournissait lui-même) : en balayage global c'est la seule façon de router vers
+          // `/ladders/:id` et de savoir sur quel ladder on s'engage.
+          ladderId: ladder.id,
+          ladderName: ladder.name,
+          gameId: ladder.gameId,
+          gameName: ladder.gameName,
+          format: ladder.format,
+          scheduledAt: row.scheduledAt,
+          canAccept: reason === null,
+          reason,
+        });
+      }
+
+      // Le filtre s'applique APRÈS le verdict, donc `limit` aussi : borner en SQL rendrait
+      // moins de `limit` créneaux acceptables alors qu'il en reste d'autres, ce qui est un
+      // faux « plus rien à jouer ». Le balayage reste borné par construction — seuls les
+      // slots `pending` ET encore acceptables sont lus, et un camp ne peut en ouvrir que
+      // MAX_OPEN_SLOTS. `acceptable=false` est le symétrique (« pourquoi ne puis-je pas ? »).
+      const filtered =
+        query.acceptable === undefined
+          ? slots
+          : slots.filter((s) => s.canAccept === query.acceptable);
+      return reply.code(200).send({ slots: filtered.slice(0, query.limit) });
     } catch (error) {
       if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
       return reply.code(500).send({ error: 'Internal error' });
@@ -841,9 +1245,10 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
 
         // La fenêtre occupée par le match qu'on accepte. Sert à l'option A ci-dessous :
         // seuls les slots qui CHEVAUCHENT cette fenêtre doivent tomber.
-        const lockoutMs = ladder.lockoutMinutes * 60 * 1000;
-        const windowStart = new Date(kickoff.getTime() - lockoutMs);
-        const windowEnd = new Date(kickoff.getTime() + lockoutMs);
+        const { start: windowStart, end: windowEnd } = overlapWindow(
+          kickoff,
+          ladder.lockoutMinutes,
+        );
 
         const accepted = await db.transaction(async (tx) => {
           // 0. VERROUS des deux camps, pris dans un ORDRE DÉTERMINISTE (tri des clés).

@@ -3003,14 +3003,27 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Lister les slots ouverts d'un ladder (anonyme)
-         * @description Slots pending d'un ladder. Team créatrice ET maps masquées (anonymat) ; mes propres slots exclus. Ne renvoie que id / format / jeu / heure.
-         *     ⚠️ Les slots **périmés** (à moins de 15 min de leur heure) sont **masqués** : plus personne ne peut les accepter. Le job les passera à `cancelled` à sa prochaine passe (à la minute) ; en attendant, ils ne sont pas listés.
+         * Lister les créneaux ouverts, sur un ladder ou sur tous (anonyme)
+         * @description Les slots `pending` encore acceptables. **`ladderId` est OPTIONNEL depuis [B-MM]** : sans lui la route balaie **tous** les ladders, ce qui est le mode d'emploi de la page « Matchmaking » (on parcourt des créneaux **avant** d'avoir choisi un ladder). Avec lui, le comportement d'origine est inchangé.
+         *     ⚠️ **ANONYMAT CONSERVÉ** (décision B5b) : ni la **team créatrice**, ni les **maps**. On accepte un créneau **sans savoir qui l'a ouvert** — c'est ce qui empêche de choisir ses adversaires et protège l'intégrité de l'Elo.
+         *     **Mes propres créneaux sont exclus** (par **équipe** en 2v2+, par **joueur** en 1v1) : ils n'ont donc jamais de verdict à rendre, et aucun code de refus ne correspond au cas « c'est le mien ».
+         *     ⚠️ Les créneaux **périmés** (à moins de 15 min de leur heure) sont **masqués** : plus personne ne peut les accepter. `cancelExpiredSlots` les passera à `cancelled` à sa prochaine passe ; entre deux passages, ils ne sont pas listés.
+         *     **Tri** : `scheduledAt` **croissant**, départagé par `createdAt` — les heures étant contraintes à la grille des quarts, les ex æquo sont fréquents et sans second critère l'ordre n'est garanti par rien.
+         *     🔑 **`canAccept` / `reason`** — le verdict dit si **le compte appelant** peut accepter ce créneau, en reproduisant à la lettre les gardes de `POST /matches/{id}/accept` (§5.1 compte lié, équipe, capitanat, roster, §5.2 fenêtres). Il évite au front d'afficher un bouton que l'API refuserait, ce qui laisserait une erreur en console. Un seul code est rendu : **le premier qui tombe**, dans l'ordre d'évaluation de l'accept (le côté, puis le créneau).
          */
         get: {
             parameters: {
-                query: {
-                    ladderId: string;
+                query?: {
+                    /** @description Restreint à **un** ladder. **Seul paramètre qui désigne une ressource** : bien formé mais inconnu → **404**. Absent → balayage de tous les ladders. */
+                    ladderId?: string;
+                    /** @description Slug **texte** du jeu (`cs2`, `val`, `lol`, `rl`, `chess`), pas un uuid. **Filtre pur**, comme `GET /ladders?gameId=` : un slug inconnu rend une **liste vide**, jamais un 404 — il désigne un critère, pas la ressource. */
+                    gameId?: string;
+                    /** @description Ne garder que les créneaux de ce format. Hors énumération → 400. */
+                    format?: "1v1" | "2v2" | "3v3" | "5v5";
+                    /** @description `true` ne rend que les créneaux **acceptables** par l'appelant, `false` que ceux qui ne le sont **pas** (« pourquoi ne puis-je pas jouer ? »). Absent, tout est rendu. ⚠️ Strictement `true`/`false` — toute autre valeur → 400. */
+                    acceptable?: "true" | "false";
+                    /** @description Nombre maximum de créneaux **rendus**. Appliqué **après** le filtre `acceptable` : borner avant rendrait moins de `limit` créneaux acceptables alors qu'il en reste d'autres. Hors bornes ou non numérique → 400. */
+                    limit?: number;
                 };
                 header?: never;
                 path?: never;
@@ -3018,7 +3031,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Slots ouverts (anonymes) */
+                /** @description Créneaux ouverts (anonymes), triés et assortis du verdict d'acceptabilité. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -3027,18 +3040,46 @@ export interface paths {
                         "application/json": {
                             slots: {
                                 /** Format: uuid */
-                                id?: string;
-                                /** @example 2v2 */
-                                format?: string;
-                                /** @example val */
-                                gameId?: string;
-                                /** Format: date-time */
-                                scheduledAt?: string;
+                                id: string;
+                                /**
+                                 * Format: uuid
+                                 * @description Ajouté par [B-MM] : en balayage global c'est la seule façon de router vers `/ladders/{id}` et de savoir sur quel ladder on s'engage.
+                                 */
+                                ladderId: string;
+                                /** @example Counter-Strike 2 5v5 */
+                                ladderName: string;
+                                /** @example cs2 */
+                                gameId: string;
+                                /** @example Counter-Strike 2 */
+                                gameName: string;
+                                /** @enum {string} */
+                                format: "1v1" | "2v2" | "3v3" | "5v5";
+                                /**
+                                 * Format: date-time
+                                 * @description **Jamais nul ici** : la route ne retient que les créneaux dont l'heure est au-delà de la barre des 15 min, ce qui écarte de fait les lignes sans `scheduled_at`.
+                                 */
+                                scheduledAt: string;
+                                /** @description `true` si `POST /matches/{id}/accept` aboutirait pour ce compte, en l'état. */
+                                canAccept: boolean;
+                                /**
+                                 * @description **Enum fermé**, `null` exactement quand `canAccept` vaut `true` :
+                                 *     • `account_not_linked` — **1v1**, §5.1 : je n'ai pas de compte lié pour le provider du jeu.
+                                 *     • `no_team` — **2v2+** : aucune équipe sur ce ladder.
+                                 *     • `not_captain` — **2v2+** : j'ai une équipe mais je n'en suis pas capitaine (seul lui l'engage).
+                                 *     • `roster_too_small` — **2v2+** : mon roster compte **moins de `format_size` joueurs**, je ne peux pas constituer une lineup de la bonne taille. Remède : **recruter**.
+                                 *     • `roster_not_linked` — **2v2+**, §5.1 : le roster est assez grand, mais moins de `format_size` de ses membres ont le compte lié qu'exige le jeu. Remède : **faire lier les comptes**. ⚠️ Distinct de `roster_too_small` **à dessein** : les deux remèdes diffèrent, donc les deux libellés et les deux liens que le front y accroche aussi.
+                                 *     • `schedule_conflict` — §5.2 : j'ai déjà un match **actif** dont la fenêtre chevauche celle du créneau. Mes propres slots `pending` ne comptent pas — l'accept les annule.
+                                 * @enum {string|null}
+                                 */
+                                reason: "account_not_linked" | "no_team" | "not_captain" | "roster_too_small" | "roster_not_linked" | "schedule_conflict" | null;
                             }[];
                         };
                     };
                 };
-                /** @description Query invalide (ladderId manquant ou non-uuid) */
+                /**
+                 * @description Query invalide : `ladderId` non-uuid, `gameId` vide ou de plus de 50 caractères, `format` hors énumération, `acceptable` autre que `true`/`false` (`?acceptable=1` → 400), `limit` non entier ou hors [1, 100].
+                 *     ⚠️ **Un paramètre présent mais VIDE vaut « absent »**, sur les cinq : `?gameId=`, `?ladderId=`, `?format=`, `?acceptable=` et `?limit=` sont traités comme s'ils n'étaient pas là, et ne produisent donc **pas** de 400. Un front qui construit `?gameId=${filtre}` depuis un filtre non renseigné est le cas d'usage normal d'une page de filtres : il ne doit pas coûter une erreur en console. Seule une valeur réellement invalide sort en 400.
+                 */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -3048,7 +3089,7 @@ export interface paths {
                     };
                 };
                 401: components["responses"]["Unauthorized"];
-                /** @description Ladder inconnu */
+                /** @description `ladderId` fourni, bien formé, mais aucun ladder ne porte cet id. Les autres filtres ne produisent **jamais** de 404 (au pire une liste vide). */
                 404: {
                     headers: {
                         [name: string]: unknown;
