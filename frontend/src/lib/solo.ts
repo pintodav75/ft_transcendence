@@ -50,9 +50,21 @@ export function useSoloLadders() {
 // ------------------------------------------------------------------- matches
 
 /**
- * The one literal for a solo history cache entry — read here, invalidated by the slot
- * mutations of `lib/match-mutations.ts` (which take the key as a parameter for exactly this
- * reason). Same discipline as `teamMatchesKey`.
+ * The one literal for the cache entry of `GET /matches/me?ladderId=` — read here, invalidated
+ * by the slot mutations of `lib/match-mutations.ts` (which take the key as a parameter for
+ * exactly this reason). Same discipline as `teamMatchesKey`.
+ *
+ * 🚨 THE ARGUMENT IS REQUIRED, AND IT MUST STAY REQUIRED. [F-HIST] first made it optional
+ * (defaulting to `'all'`) so that `/history` could reuse it for the UNFILTERED list — which
+ * worked, but silently removed a compile-time guard: a future caller who simply forgot the id
+ * would have invalidated `/history`'s entry instead of its own, and nothing would have said
+ * so. The unfiltered list has its own named helper, `historyMatchesKey()` in `lib/history.ts`.
+ *
+ * 🔑 The two keys share the `['matches', 'me']` PREFIX on purpose: `useAcceptMatch` sweeps
+ * every one of my histories with that prefix, so both entries are covered for free. The two
+ * slot mutations, by contrast, are handed ONE key by their caller and therefore only refresh
+ * the screen that opened or cancelled the slot — `/history` catches up on its next mount
+ * (the client's default `staleTime` is 0), which is the only moment it can be looked at.
  */
 export function myMatchesKey(ladderId: string) {
   return ['matches', 'me', ladderId] as const;

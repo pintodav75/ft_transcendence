@@ -165,32 +165,43 @@ export async function run({ page, setPhase, step, countRequests, ORIGIN }) {
   );
 
   // ------------------------------------------------------------------ §2 GET /ladders
-  setPhase('2. navigation sans toucher la recherche');
-  // La table des ladders ne sert qu'au sous-titre d'un résultat d'ÉQUIPE : elle ne doit
-  // rien coûter tant que personne n'a cherché. Deux navigations CLIENT (pas de goto :
-  // un rechargement recompterait le bandeau du serveur de dev).
+  setPhase('2. arrivée sur une page du rail sans toucher la recherche');
+  // La table des ladders ne sert qu'au sous-titre d'un résultat d'ÉQUIPE : elle ne doit rien
+  // coûter tant que personne n'a cherché.
   //
-  // ⚠️ LES CIBLES ONT CHANGÉ DEUX FOIS, ET IL LE FALLAIT LES DEUX FOIS. Ce check visait Solo
-  // (2) puis History (5) quand `/solo` était une page VIERGE ; [F-SOLO] l'a fait basculer sur
+  // ⚠️ LES CIBLES ONT CHANGÉ TROIS FOIS, ET IL LE FALLAIT LES TROIS FOIS. Ce check visait Solo
+  // (2), puis History (5) quand `/solo` était une page VIERGE ; [F-SOLO] l'a fait basculer sur
   // Matchmaking (4) + History (5), « les deux seules pages du rail qui n'émettent aucune
-  // requête ». [F-MM] a fait de `/matchmaking` une vraie page, qui charge légitimement
-  // `GET /ladders` (elle nomme le ladder de `?ladderId=` sans dépenser de 404) et `GET /games`
-  // + `GET /teams` : la naviguer ne prouve donc plus rien sur la recherche. Elle rendait N5
-  // rouge (1 requête au lieu de 0) ET N6 rouge par ricochet (les ladders arrivaient en cache,
-  // donc le premier focus ne les redemandait plus). Les cibles sont désormais History (5) et
-  // Home (0), les deux dernières pages du rail sans aucune requête.
-  // 🔑 L'INTENTION EST INTACTE — « la table des ladders ne coûte rien tant que personne n'a
-  // cherché » — et c'est bien la SearchBar qu'on mesure. ⚠️ Le jour où `/home` cessera d'être
-  // un stub, ce check n'aura plus de page libre : il faudra alors le mesurer en repartant
-  // d'un `page.goto` (cache vidé) plutôt qu'en cherchant une page qui ne demande rien.
+  // requête » ; [F-MM] a fait de `/matchmaking` une vraie page (elle charge légitimement
+  // `GET /ladders` pour nommer le ladder de `?ladderId=` sans dépenser de 404), ne laissant que
+  // History (5) + Home (0). **[F-HIST] fait de `/history` une vraie page elle aussi** : elle
+  // résout le nom du ladder de chaque ligne depuis le cache `GET /ladders`. Il ne reste donc
+  // AUCUNE paire de pages libres, et le mécanisme « deux navigations client » est mort.
+  //
+  // ⚠️ MAIS LE CHECK N'EST PAS DEVENU INDÉPENDANT D'UNE PAGE POUR AUTANT : `N5` exige toujours
+  // que **`/home` ne demande pas les ladders**. Tant que c'est un stub, c'est gratuit ; le jour
+  // où `/home` cessera d'en être un, il faudra lui trouver une cible — la dernière page du rail
+  // qui ne dépende pas des données de référence, ou une route neutre créée pour la mesure.
+  //
+  // 🔑 LE REPLI ÉTAIT DÉJÀ ÉCRIT ICI ET C'EST CELUI QU'ON APPLIQUE : repartir d'un `page.goto`
+  // (cache React Query vidé par le rechargement) plutôt que de chercher une page qui ne
+  // demande rien. L'INTENTION EST INTACTE — « la table des ladders ne coûte rien tant que
+  // personne n'a cherché » — et c'est toujours la SearchBar qu'on mesure : le rail est monté
+  // sur cette page comme sur toutes les autres, et il n'a rien demandé.
+  //
+  // ⚠️ Ce `goto` est AUSSI la précondition de N6 : sans un cache vide, le premier focus ne
+  // redemanderait rien et N6 serait rouge pour une raison qui n'a rien à voir avec la
+  // recherche. Poser la précondition et l'ASSERTER dans le même geste est ce qui distingue
+  // « le cache est vide » de « on l'espère ».
   const navLadders = await countRequests(async () => {
-    await links.nth(5).click(); // History
-    await page.waitForURL('**/history');
-    await links.nth(0).click(); // Home
-    await page.waitForURL('**/home');
+    await page.goto(`${ORIGIN}/home`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(400);
   }, isLadders);
-  step('N5', navLadders === 0, `${navLadders} GET /ladders après 2 navigations (0 attendu)`);
+  step(
+    'N5',
+    navLadders === 0,
+    `${navLadders} GET /ladders à l’arrivée sur /home, recherche jamais touchée (0 attendu — et le cache est donc vide pour N6)`,
+  );
 
   setPhase('3. premier focus sur la recherche');
   const focusLadders = await countRequests(async () => {

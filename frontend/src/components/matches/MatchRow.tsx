@@ -52,6 +52,15 @@ type MatchRowProps<M extends MatchHistoryMatch> = {
   /** The whole column is dropped when no row carries a line-up. */
   showLineup: boolean;
   /**
+   * [F-HIST] — which ladder this row was played on. `undefined` on a screen that is ALREADY
+   * scoped to one ladder (a team page, `/solo/$ladderId`), where repeating it on every line
+   * would be noise. Only `/history` mixes ladders, and there the table is unreadable without
+   * it.
+   */
+  ladder?: { game: string; format: string };
+  /** Decided ONCE by the table, like `showLineup`, so every `<td>` matches a `<th>`. */
+  showLadder: boolean;
+  /**
    * Whether the table has an actions column at all. Decided ONCE by the table (so every
    * `<td>` count matches its `<th>` count), not row by row.
    */
@@ -75,6 +84,8 @@ export function MatchRow<M extends MatchHistoryMatch>({
   opponent,
   lineup,
   showLineup,
+  ladder,
+  showLadder,
   showActions = false,
   onCancelSlot,
   canOpenSheet = false,
@@ -163,6 +174,24 @@ export function MatchRow<M extends MatchHistoryMatch>({
           date
         )}
       </td>
+
+      {showLadder && (
+        // Two lines rather than one: the ladder's own name ("Counter-Strike 2 5v5") repeats
+        // the format, and laying the game over it keeps the column narrow enough that the
+        // Status column stays in view at the table's minimum width. `whitespace-nowrap`
+        // because a wrapped game name would make the row twice as tall for nothing — the
+        // table scrolls sideways in its own box when it has to.
+        <td className={cn('px-3 py-3 whitespace-nowrap', muted)}>
+          {/* ⚠️ NEITHER LINE IS `text-text-muted`. That token measures 4.23:1 on a card — below
+              AA — and is already a ticketed design-system debt with 45 usages; a new column
+              has no business adding a 46ᵗʰ. `text-text-primary` over `text-text-secondary`
+              (7.81:1) gives the same hierarchy and passes. */}
+          <span className="block text-xs font-semibold text-text-primary">
+            {ladder?.game ?? EM_DASH}
+          </span>
+          <span className="block text-xs text-text-secondary">{ladder?.format ?? EM_DASH}</span>
+        </td>
+      )}
 
       {/*
         The opponent's NAME goes to the opponent's page, the rest of the row to the match

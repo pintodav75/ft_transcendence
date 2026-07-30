@@ -22,6 +22,12 @@ export type MatchHistoryRow<M extends MatchHistoryMatch> = {
   opponent: MatchOpponentView;
   /** My side's line-up, already formatted. `undefined` = this payload carries none. */
   lineup?: string;
+  /**
+   * [F-HIST] — the ladder this row was played on. `undefined` = the caller's screen is
+   * already scoped to a single ladder, and the column disappears on its own. See `showLadder`
+   * below for why it is derived and not a prop.
+   */
+  ladder?: { game: string; format: string };
   canOpenSheet: boolean;
 };
 
@@ -70,6 +76,10 @@ export function MatchHistoryTable<M extends MatchHistoryMatch>({
   // Derived from the DATA, not from a role: `lineup` is ABSENT (not null) for a non-member
   // and for every solo row, and an empty column header would be a lie.
   const showLineup = rows.some((row) => row.lineup !== undefined);
+  // Same rule, same reason ([F-HIST]): the two screens that were already using this table are
+  // each scoped to ONE ladder and never set `ladder`, so their DOM is byte-for-byte what it
+  // was. Only `/history` mixes ladders, and only there does the column appear.
+  const showLadder = rows.some((row) => row.ladder !== undefined);
   const showActions = Boolean(onCancelSlot);
 
   return (
@@ -114,6 +124,11 @@ export function MatchHistoryTable<M extends MatchHistoryMatch>({
               <th scope="col" className="px-3 pb-2.5 font-semibold">
                 Date
               </th>
+              {showLadder && (
+                <th scope="col" className="px-3 pb-2.5 font-semibold">
+                  Ladder
+                </th>
+              )}
               <th scope="col" className="px-3 pb-2.5 font-semibold">
                 Opponent
               </th>
@@ -148,6 +163,8 @@ export function MatchHistoryTable<M extends MatchHistoryMatch>({
                 opponent={row.opponent}
                 lineup={row.lineup}
                 showLineup={showLineup}
+                ladder={row.ladder}
+                showLadder={showLadder}
                 showActions={showActions}
                 onCancelSlot={onCancelSlot}
                 canOpenSheet={row.canOpenSheet}
