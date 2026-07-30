@@ -29,6 +29,12 @@ function conflictOf(payload: unknown): TeamCreateConflict | undefined {
 }
 
 type TeamCreationProps = {
+  /**
+   * Ladder pre-picked by the caller — `/teams?create=<id>`, set by a game page so the user
+   * does not have to choose the ladder he has just chosen. Validated by the caller (it must
+   * exist and not be a solo ladder); `undefined` restores the picker's own default.
+   */
+  defaultLadderId?: string;
   // Called after a successful create with the team's name, so the parent can
   // refresh its list and name the team in its success banner. `warning`
   // carries a non-blocking message (logo upload failure) the parent must show
@@ -39,7 +45,7 @@ type TeamCreationProps = {
   onCancel: () => void;
 };
 
-export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
+export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreationProps) {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoUploadProgress, setLogoUploadProgress] = useState<number | null>(null);
 
@@ -54,7 +60,7 @@ export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
     resolver: zodResolver(createTeamSchema),
     mode: 'onTouched',
     reValidateMode: 'onChange',
-    defaultValues: { ladderId: '', name: '' },
+    defaultValues: { ladderId: defaultLadderId ?? '', name: '' },
   });
 
   // `useWatch` rather than the form's `watch()` method: the latter breaks the
@@ -146,6 +152,9 @@ export function TeamCreation({ onCreated, onCancel }: TeamCreationProps) {
               value={field.value || undefined}
               onChange={(nextLadderId) => field.onChange(nextLadderId ?? '')}
               excludeSolo
+              // ⚠️ Needed IN ADDITION to `defaultValues` above: the picker announces its own
+              // default as soon as its lists land, which would otherwise overwrite ours.
+              initialLadderId={defaultLadderId}
             />
           )}
         />

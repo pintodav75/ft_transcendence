@@ -1766,7 +1766,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Détails d'un jeu
+         * Détails d'un jeu (avec son pool de maps)
          * @description Lookup par slug (`lol`, `cs2`, `val`, `rl`, `chess`).
          */
         get: {
@@ -1780,7 +1780,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Le jeu demandé */
+                /** @description Le jeu demandé et son pool de maps */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1788,6 +1788,8 @@ export interface paths {
                     content: {
                         "application/json": {
                             game: components["schemas"]["Game"];
+                            /** @description Pool de maps du jeu (table `game_maps`), trié par nom — la même source que celle où `POST /matches` pioche les maps d'un match, et la même charge que `GET /ladders/{id}` sert déjà (le pool appartient au JEU, pas au ladder). Toujours présent ; **vide** pour un jeu sans maps (lol, rl, chess), ce qui n'est pas une erreur. */
+                            maps: string[];
                         };
                     };
                 };

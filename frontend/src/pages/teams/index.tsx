@@ -1,4 +1,5 @@
 import { Users } from 'lucide-react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 
 import { useAnnouncement } from '@/lib/use-announcement';
@@ -11,9 +12,15 @@ import { TeamsCards } from '@/components/teams/TeamsCards';
 import { Button } from '@/components/ui/button';
 import { Callout } from '@/components/ui/callout';
 import { MY_INVITATIONS_KEY, useMyTeams } from '@/lib/teams';
+import { useLadders } from '@/lib/games';
 
 export function Teams() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  // [F-GAMES] — `?create=<ladderId>`, set by the "Create a team" button of a game page.
+  const { create: requestedLadderId } = useSearch({ from: '/_authenticated/teams/' });
+  // Same cached `GET /ladders` the picker below reads: validating the param costs no request.
+  const laddersQuery = useLadders();
   // Same ['teams'] query as the grid below, so this is the cache, not a second
   // request — it only serves to keep the filter bar honest (see myGameIds).
   const { data } = useMyTeams();
@@ -34,6 +41,31 @@ export function Teams() {
   // and for a user with no team: only "All" shows, which is the point.
   const myGameIds = [...new Set(data?.teams.map((team) => team.gameId) ?? [])];
 
+  /**
+   * The ladder named by `?create=`, or `undefined` — which is what an unknown id, a solo
+   * ladder or a still-loading list all mean here.
+   *
+   * ⚠️ AN UNKNOWN PARAM IS IGNORED IN SILENCE: it opens nothing and raises nothing. The
+   * ladder must EXIST (nine of them, cached) and be a team one — `POST /teams` answers 400 on
+   * a 1v1 ladder, so pre-selecting one would open a form that could only fail.
+   */
+  const requestedLadder = requestedLadderId
+    ? laddersQuery.data?.ladders.find(
+        (ladder) => ladder.id === requestedLadderId && ladder.format !== '1v1',
+      )
+    : undefined;
+
+  // Derived, not stored: the param arrives before the ladder list resolves, and copying it
+  // into state through an effect would render one frame of the wrong screen first.
+  const showForm = formOpen || Boolean(requestedLadder);
+
+  // The param has to go when the form does, otherwise the next render would reopen it.
+  // `replace` so the closed form does not become a history entry of its own.
+  function dropCreateParam() {
+    if (!requestedLadderId) return;
+    void navigate({ to: '/teams', search: {}, replace: true });
+  }
+
   function openForm() {
     setCreatedTeamName(undefined);
     setCreatedTeamWarning(undefined);
@@ -43,8 +75,14 @@ export function Teams() {
     setFormOpen(true);
   }
 
+  function closeForm() {
+    setFormOpen(false);
+    dropCreateParam();
+  }
+
   async function handleCreated(teamName: string, warning?: string) {
     setFormOpen(false);
+    dropCreateParam();
     // L'annonce passe par LA région de la page (les Callout ne sont plus que visuels) :
     // un seul événement, une seule voix.
     pageAnnouncement.announce(
@@ -91,8 +129,14 @@ export function Teams() {
         </div>
       )}
 
-      {formOpen ? (
-        <TeamCreation onCreated={handleCreated} onCancel={() => setFormOpen(false)} />
+      {showForm ? (
+        <TeamCreation
+          // Pre-picked when we got here from a game page; `undefined` keeps the picker's own
+          // default (first game, first format), i.e. the behaviour without the param.
+          defaultLadderId={requestedLadder?.id}
+          onCreated={handleCreated}
+          onCancel={closeForm}
+        />
       ) : (
         <>
           {/* Above the grid, and self-contained: it renders nothing at all when there is
@@ -116,8 +160,8 @@ export function Teams() {
         </>
       )}
 
-      {!formOpen && (
-        <Button variant="primary" aria-expanded={formOpen} onClick={openForm}>
+      {!showForm && (
+        <Button variant="primary" aria-expanded={showForm} onClick={openForm}>
           Create new team
         </Button>
       )}

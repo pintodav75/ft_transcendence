@@ -1926,7 +1926,7 @@ paths:
   /games/{id}:
     get:
       tags: [Games]
-      summary: Détails d'un jeu
+      summary: Détails d'un jeu (avec son pool de maps)
       description: Lookup par slug (`lol`, `cs2`, `val`, `rl`, `chess`).
       parameters:
         - name: id
@@ -1939,7 +1939,7 @@ paths:
             example: cs2
       responses:
         '200':
-          description: Le jeu demandé
+          description: Le jeu demandé et son pool de maps
           content:
             application/json:
               schema:
@@ -1947,7 +1947,18 @@ paths:
                 properties:
                   game:
                     $ref: '#/components/schemas/Game'
-                required: [game]
+                  maps:
+                    type: array
+                    description: >
+                      Pool de maps du jeu (table `game_maps`), trié par nom — la même source
+                      que celle où `POST /matches` pioche les maps d'un match, et la même
+                      charge que `GET /ladders/{id}` sert déjà (le pool appartient au JEU,
+                      pas au ladder). Toujours présent ; **vide** pour un jeu sans maps
+                      (lol, rl, chess), ce qui n'est pas une erreur.
+                    items:
+                      type: string
+                      example: Dust2
+                required: [game, maps]
         '400':
           description: >
             Param :id hors bornes — 1 à 50 caractères (ValidationError). `games.id` est un

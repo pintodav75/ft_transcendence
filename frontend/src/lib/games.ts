@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { gameOrder } from '@/data/games';
+import { retryServerErrorsOnly } from '@/lib/ladders';
 
-import type { components } from '@/lib/api-types.gen';
+import type { components, paths } from '@/lib/api-types.gen';
 
 // Games and ladders are seeded reference data that doesn't change during a
 // session, so we cache them for an hour: no refetch on remount or window focus.
@@ -11,7 +12,12 @@ const REFERENCE_STALE_TIME = 1000 * 60 * 60;
 export type Game = {
   id: string;
   name: string;
-  requiredProvider: string;
+  /**
+   * ⚠️ Typed from the CODEGEN union (see `RequiredProvider` below), not `string`: a screen
+   * that renders one label per provider must break at COMPILE TIME the day a provider is
+   * added, instead of rendering `undefined` at runtime.
+   */
+  requiredProvider: RequiredProvider;
   isActive: boolean;
 };
 
@@ -40,6 +46,32 @@ export function useSortedGames() {
   const query = useGames();
   const games = query.data ? sortGames(query.data.games) : [];
   return { games, isLoading: query.isLoading, isError: query.isError };
+}
+
+type GameDetailResponse =
+  paths['/games/{id}']['get']['responses'][200]['content']['application/json'];
+
+/**
+ * `GET /games/{id}` — the game AND its map pool.
+ *
+ * 🔑 A MAP POOL BELONGS TO THE GAME, not to a ladder (`game_maps` is keyed on `games.id`):
+ * `GET /ladders/{id}` only serves one because a ladder page needed it first. It is the very
+ * table `POST /matches` draws from, so a screen fed by this cannot advertise a map the server
+ * would never pick. ⚠️ An EMPTY pool is legitimate — only cs2 and val have maps.
+ *
+ * ⚠️ `enabled` is the caller's answer to "does this slug exist?", read from the CACHED game
+ * list — never from this request. An unknown slug must render its error state without
+ * spending a round-trip, because the 404 it would take writes a red line in the Chrome
+ * console, and that is a project-rejection criterion. Same discipline as `isValidLadderId`.
+ */
+export function useGameDetail(gameId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['game', gameId],
+    queryFn: () => apiFetch<GameDetailResponse>(`/games/${gameId}`),
+    enabled,
+    retry: retryServerErrorsOnly,
+    staleTime: REFERENCE_STALE_TIME,
+  });
 }
 
 export type Ladder = {

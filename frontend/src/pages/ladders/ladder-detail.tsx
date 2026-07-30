@@ -1,5 +1,5 @@
-import { Trophy } from 'lucide-react';
-import { Link, useParams } from '@tanstack/react-router';
+import { ArrowLeft, Trophy } from 'lucide-react';
+import { Link, useParams, useRouterState } from '@tanstack/react-router';
 
 import { GameBanner } from '@/components/games/GameBanner';
 import { LadderBoard } from '@/components/ladders/LadderBoard';
@@ -8,14 +8,86 @@ import { LadderRules } from '@/components/ladders/LadderRules';
 import { ErrorPanel } from '@/components/ui/error-panel';
 import { Pill } from '@/components/ui/pill';
 import { SectionTitle } from '@/components/ui/section-title';
+import { backLinkClasses } from '@/lib/back-navigation';
 import { buttonClasses } from '@/components/ui/button-variants';
 import { ApiError } from '@/lib/api';
 import { isValidLadderId, useLadder, useLadderRankings } from '@/lib/ladders';
 import { useMyTeams } from '@/lib/teams';
 
-function BackToTeams() {
+/**
+ * The single segment following `prefix` in `path`, when there is exactly one.
+ *
+ * ⚠️ The guard on `includes('/')` is what keeps a deeper path (`/games/cs2/whatever`) from
+ * being fed to a route that takes ONE param.
+ */
+function segmentAfter(path: string | undefined, prefix: string) {
+  if (!path?.startsWith(prefix)) return undefined;
+
+  const segment = path.slice(prefix.length);
+  return segment.length > 0 && !segment.includes('/') ? segment : undefined;
+}
+
+/**
+ * Where "back" actually leads, read from the history entry.
+ *
+ * 🔑 A browser never tells a page what is behind it, so the origin is written into the history
+ * entry by the link that was clicked (`state={useBackFrom()}`, see `lib/back-navigation.ts`).
+ * Reading it here is what stops this page from claiming "Back to my teams" to someone who
+ * arrived from `/games/cs2` or from a match sheet — and who may well have no team at all.
+ *
+ * 🚨 THIS PAGE HAS FOUR INBOUND LINKS, and the label must hold for each. `GameLadderCard` and
+ * the match sheet record their origin, so they get a truthful label; `LadderExcerpt` (a team
+ * page) records none, and its fallback "Back to my teams" is already true. The fourth,
+ * `solo-ladder.tsx`, DELIBERATELY records none: that link only exists on its "Not a solo
+ * ladder" panel, so sending the visitor "back" would return them to an error screen —
+ * "Back to my teams" is the better answer on a ladder played with a squad.
+ *
+ * ⚠️ The recorded origin is a PATH, never a name: naming the game would mean fetching it just
+ * to label a button (same decision as `BackButton`'s `backLabel`).
+ */
+function useBackDestination() {
+  const backFrom = useRouterState({ select: (state) => state.location.state.backFrom });
+
+  const gameId = segmentAfter(backFrom, '/games/');
+  if (gameId) return { kind: 'game', gameId } as const;
+
+  const matchId = segmentAfter(backFrom, '/matches/');
+  if (matchId) return { kind: 'match', matchId } as const;
+
+  return { kind: 'teams' } as const;
+}
+
+/**
+ * The way back up. Falls back — UNCHANGED — on "Back to my teams" whenever the history entry
+ * carries no origin: a pasted link, a fresh tab, or an arrival from a team page.
+ */
+function BackUp({ variant = 'button' }: { variant?: 'inline' | 'button' }) {
+  const destination = useBackDestination();
+  const inline = variant === 'inline';
+  const className = inline ? backLinkClasses : buttonClasses('secondary');
+  const icon = <ArrowLeft aria-hidden="true" className={inline ? 'size-4' : 'mr-2 size-4'} />;
+
+  if (destination.kind === 'game') {
+    return (
+      <Link to="/games/$gameId" params={{ gameId: destination.gameId }} className={className}>
+        {icon}
+        Back to the game
+      </Link>
+    );
+  }
+
+  if (destination.kind === 'match') {
+    return (
+      <Link to="/matches/$matchId" params={{ matchId: destination.matchId }} className={className}>
+        {icon}
+        Back to the match
+      </Link>
+    );
+  }
+
   return (
-    <Link to="/teams" className={buttonClasses('secondary')}>
+    <Link to="/teams" className={className}>
+      {icon}
       Back to my teams
     </Link>
   );
@@ -51,7 +123,7 @@ export function LadderDetail() {
           title="Invalid ladder link"
           message="This ladder identifier is not a valid id. Check the link you followed, or open the ladder from one of your teams."
         >
-          <BackToTeams />
+          <BackUp />
         </ErrorPanel>
       </div>
     );
@@ -67,14 +139,14 @@ export function LadderDetail() {
             title="Ladder not found"
             message="No ladder answers to this link. Ladders are seeded with the games, so this one has most likely never existed."
           >
-            <BackToTeams />
+            <BackUp />
           </ErrorPanel>
         ) : (
           <ErrorPanel
             title="Ladder unavailable"
             message="This ladder could not be loaded. Check your connection and reload the page."
           >
-            <BackToTeams />
+            <BackUp />
           </ErrorPanel>
         )}
       </div>
@@ -109,6 +181,11 @@ export function LadderDetail() {
 
   return (
     <div className="flex min-w-0 flex-col gap-6 py-6">
+      {/* The 4th place the way back up is rendered — the three others are the dead-end panels
+          above. All four read the same origin, so none of them can drift into a lie on its
+          own. */}
+      <BackUp variant="inline" />
+
       <div className="panel flex min-w-0 flex-col gap-8 p-6">
         <header className="space-y-1">
           {/* Artwork du jeu, même idiome que `TeamHero` : bandeau + dégradé de lisibilité
