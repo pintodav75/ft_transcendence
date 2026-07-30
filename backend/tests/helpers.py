@@ -35,6 +35,14 @@ CTX.verify_mode = ssl.CERT_NONE
 # les users de test portent ce motif : on ne nettoiera QUE ceux-là
 TEST_USER_RE = r"^(alice|bob|carol|dave|erin)[0-9a-f]{8}$"
 
+# ⚠️ Les SEULS tags que `cleanup()` sait supprimer. `register("zoe")` créait un compte que
+# le motif ci-dessus ne matche pas : la suite passait au vert et laissait sa ferraille en
+# base de dev, à purger à la main. Vécu pendant la review de B-SOLO. On échoue donc à la
+# CRÉATION, là où la cause est lisible, plutôt qu'au nettoyage, où personne ne regarde.
+# Élargir le motif serait le mauvais remède : il rendrait `cleanup()` plus destructeur pour
+# TOUTES les suites, alors que le problème est un tag mal choisi dans UNE.
+CLEANABLE_TAGS = ("alice", "bob", "carol", "dave", "erin")
+
 
 # ---------------------------------------------------------------- HTTP
 def req(method, path, token=None, body=None, cookies=None):
@@ -176,6 +184,11 @@ def register(tag):
 
     Renvoie le même triplet qu'avant — `(token, id, pseudo)` : aucune suite ne change.
     """
+    if tag not in CLEANABLE_TAGS:
+        raise SystemExit(
+            f"register({tag!r}) : tag inconnu de cleanup() — le compte survivrait au "
+            f"nettoyage et resterait en base de dev. Tags acceptés : {', '.join(CLEANABLE_TAGS)}."
+        )
     u = uuid.uuid4().hex[:8]
     pseudo = f"{tag}{u}"
     uid = sql(

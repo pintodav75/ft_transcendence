@@ -309,3 +309,32 @@ Commit `c2f9019`, merge `8a39a92`. Aucune migration. `/matches/$matchId` était 
 - Le libellé de repli **« Disbanded team »** reste **non couvert** par une donnée ni par un check (hérité de FT-4A) : il faut une équipe dissoute **après** un match terminé pour l'obtenir. À porter au futur ticket « seed propre » plutôt qu'à re-ticketer seul.
 - Le **403** et le **429** du mapping d'erreurs sont écrits mais **jamais déclenchés** par le scénario : ils ne sont atteignables que depuis une page périmée (l'équipe a changé de capitaine pendant que l'onglet dormait) ou sous un martèlement. Même situation que les 409 de FT-2C.
 - `useCreateMatch` / `useCancelMatch` (FT-2C) vivent toujours dans `lib/team-mutations.ts`, dont le commentaire demande leur déplacement vers `lib/match-mutations.ts` au second consommateur. **Non fait ici** : ce ticket ajoute une route que ce fichier n'avait pas, déplacer quatre exports toucherait la page équipe et ses trois scénarios d'audit sans gain fonctionnel. Un travail d'une ligne pour qui en aura besoin depuis un écran de match.
+
+### F-SOLO — pages Solo : ladders 1v1 et dossier de compétiteur (30/07/2026)
+
+Commit `58ad523`, merge `8d7dd34`, **aucune migration**. Livré **dos à dos avec B-SOLO**, dont il consomme le payload enrichi. `/solo` et `/solo/$ladderId` remplacent la page vierge posée par F-Nav, en miroir de `/teams` et `/teams/$teamId`.
+
+🔑 **L'asymétrie qui pilote toute la page : on n'ADHÈRE PAS à un ladder solo.** Une ligne `rankings` naît du **premier résultat de match**, pas d'une inscription. `/solo` liste donc **les ladders qui existent** (`format === '1v1'`), jamais « ceux où je suis classé » — l'autre lecture donne à un compte neuf une page vide **sans porte d'entrée**. Gardé par un check sur un compte réellement neuf.
+
+Conséquences directes, toutes voulues :
+
+- **pas de bouton de création** — un ladder solo ne se crée pas ; **pas de filtre par jeu** — il n'y a que 2 tuiles ;
+- **pas d'onglet Manage** : rien à renommer, pas de logo, pas de roster, pas de dissolution ;
+- la bande de stats du hero a **3 cases** (Elo · Record · Rank), la case `Roster` de `TeamHero` disparaît ;
+- la section Roster est remplacée par **l'état du compte lié**, parce que c'est lui qui garde `POST /matches` (§5.1).
+
+⚠️ **`hasLinkedProvider` est trivaluée.** Si `GET /users/me/external-accounts` échoue, « inconnu » n'est **jamais** traité comme « lié » : le bouton n'apparaît pas. Un bouton que l'API refuserait en 400 laisse une ligne rouge en console, et c'est un motif de rejet du projet. Le check négatif **et** son positif (obtenu en liant le compte, pas en cassant le code) sont tous les deux gardés.
+
+⚠️ **Cas hors carte, tranché ici** : `/solo/<id-d-un-ladder-5v5>` répond **200** côté API — il n'y avait donc aucune erreur à hériter, et sans garde la page rendait « mon dossier » sur un ladder d'équipe, offrait un créneau que `validateSide()` refuserait, et surlignait une ligne joueur sur un classement d'équipes. **C'est le format qui décide**, jamais l'absence d'équipe.
+
+**Extractions au second usage** (règle du repo) : `lib/match-slots.ts` (grille des quarts, 15 min d'avance, chevauchement, plafond de 5) et `lib/match-history.ts` sortis de `team-detail.ts` ; `MatchRow` + `MatchHistoryTable` → `components/matches/` ; `LadderExcerpt` → `components/ladders/` (avec `self: {type, id}` discriminé au lieu de `selfTeamId`) ; `StatStrip` → `components/ui/` (sans domaine, donc immédiatement) ; `GamePosterTile` extrait de `TeamCard`. Les 4 mutations de créneau rejoignent enfin `lib/match-mutations.ts` — l'intention écrite dans `team-mutations.ts` depuis FT-2C — débloquée en remontant `sharedMessage` dans `lib/api.ts` (il décrit le rate limiter, pas une équipe) ; elles sont désormais **pilotées par clé de cache**, et une soumission de résultat 1v1 rafraîchit l'historique solo.
+
+⚠️ **`CreateMatchPanel` n'a PAS été généralisé** (décision de David, 30/07). Ce qui ne doit jamais diverger, ce sont les **règles de pré-emption** — elles sont partagées via `match-slots.ts`. Le JSX solo est autonome : pas de lineup, pas de tuiles joueurs. Fusionner 410 lignes gardées par un scénario de 532, mergées la même semaine, aurait été du risque de merge pour du balisage qui n'est pas commun. Même logique pour `TeamHero`, qui garde sa ligne d'identité.
+
+**Dette et limites connues :**
+
+- **Le rendu d'un classement renseigné n'est couvert par aucun check** — fabriquer une ligne `rankings` exige un match terminé (deux soumissions concordantes + `scheduled_at` reculé) que le scénario ne produit pas. À vérifier à l'œil : `alice@dev.local` → `/solo` → tuile Chess = `1560 Elo · #1`. Fait le 30/07, conforme.
+- **Le libellé « Disbanded team » reste non couvert** (hérité de FT-4A) : sur un ladder solo il est structurellement inatteignable, la branche n'existe que pour l'usage 2v2+.
+- `/solo` télécharge le **classement complet** de chaque ladder 1v1 pour imprimer deux lignes par tuile — 11 lignes aujourd'hui, et la réponse est réutilisée telle quelle par la page de détail (même clé de cache). À ne re-ticketer que si un ladder solo atteint l'échelle des 200 compétiteurs de FT-3.
+- **Réfuté, à ne pas re-ticketer** : conditionner les 3 requêtes de `/solo/$ladderId` à la garde de format n'économise rien — les trois hooks partent dans le **même rendu**, le format n'est pas encore connu ; les enchaîner coûterait un aller-retour à **chaque** visite légitime.
+- Le libellé **« Open a slot »** diverge du « Create match » de la page équipe — assumé, à harmoniser dans une passe de cohérence.
