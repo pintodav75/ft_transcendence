@@ -43,10 +43,33 @@ def run():
     slots = b.get("slots", [])
     s.check("un autre joueur voit mon slot", M1 in [x["id"] for x in slots], True)
     if slots:
+        # ⚠️ [B-MM] a ENRICHI ce payload (nom du ladder et du jeu, verdict `canAccept`).
+        # L'ancienne version figeait la liste exacte des 4 clés, donc tout ajout la rendait
+        # rouge — y compris un ajout parfaitement légitime. Elle est scindée en DEUX checks
+        # qui gardent chacun une chose distincte :
+        #   1. l'ANONYMAT (décision B5b) — la seule règle de sécurité ici : on accepte un
+        #      créneau sans savoir qui l'a ouvert. Formulé en LISTE NOIRE, il reste vrai
+        #      quels que soient les champs ajoutés demain ;
+        #   2. la FORME exacte du payload, mise à jour pour B-MM — elle continue de figer
+        #      le contrat, et retomberait rouge si `team`/`maps` réapparaissaient.
+        leaked = sorted(
+            k for k in slots[0] if k in ("maps", "team", "teamId", "createdBy", "lineup", "sides")
+        )
+        s.check("anonymat : ni team créatrice ni maps", leaked, [])
         s.check(
-            "anonymat : ni team créatrice ni maps",
+            "forme du slot (B-MM : + ladder, jeu, verdict)",
             sorted(slots[0].keys()),
-            ["format", "gameId", "id", "scheduledAt"],
+            [
+                "canAccept",
+                "format",
+                "gameId",
+                "gameName",
+                "id",
+                "ladderId",
+                "ladderName",
+                "reason",
+                "scheduledAt",
+            ],
         )
 
     st, _ = req("GET", f"/matches/{M1}", tokB)
