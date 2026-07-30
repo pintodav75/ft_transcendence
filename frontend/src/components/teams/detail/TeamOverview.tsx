@@ -2,6 +2,7 @@ import { TriangleAlert, X } from 'lucide-react';
 
 import { InlineButton } from '@/components/ui/inline-button';
 import { LadderExcerpt } from '@/components/ladders/LadderExcerpt';
+import { LadderOpenSlots } from '@/components/matchmaking/LadderOpenSlots';
 import { Pill } from '@/components/ui/pill';
 import { RosterChips } from '@/components/teams/detail/RosterChips';
 import { SectionTitle } from '@/components/ui/section-title';
@@ -81,6 +82,8 @@ export function TeamOverview({
           </p>
         )}
       </section>
+
+      <LadderOpenSlots ladderId={team.ladderId} ladderName={team.ladderName} />
 
       <LadderExcerpt
         rankings={rankings}

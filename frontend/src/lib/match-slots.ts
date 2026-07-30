@@ -137,13 +137,20 @@ export type SlotTime = {
   atMs: number;
 };
 
-const slotDayFormat = new Intl.DateTimeFormat('fr-FR', {
+/**
+ * 🔑 `en-GB`, ET PAS `en-US`. The interface is in English, so month and weekday names have to be
+ * English — but the reading order stays day-before-month and the clock stays 24-hour, which is
+ * what `en-GB` gives (`Mon 31 Aug, 23:00`). `en-US` would flip the order and switch to AM/PM.
+ * The locale is HARD-CODED, never left to the browser: the same slot must read the same for
+ * everyone, and an audit check comparing a rendered date cannot depend on the host's locale.
+ */
+const slotDayFormat = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
   day: '2-digit',
   month: 'short',
 });
 
-const slotTimeFormat = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const slotTimeFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 /** The next `days` local days, starting today. */
 export function slotDays(nowMs: number, days = SLOT_HORIZON_DAYS): SlotDay[] {

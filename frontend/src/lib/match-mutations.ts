@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { ApiError, RATE_LIMITED_MESSAGE, apiFetch, sharedApiErrorMessage } from '@/lib/api';
 import { MAX_OPEN_SLOTS } from '@/lib/match-slots';
+import { OPEN_SLOTS_ROOT_KEY } from '@/lib/matchmaking';
 import { WINS_REQUIRED } from '@/lib/match-result-schema';
 import { myMatchesKey } from '@/lib/solo';
 import { teamMatchesKey } from '@/lib/team-detail';
@@ -31,6 +32,8 @@ type CreateMatchBody = paths['/matches']['post']['requestBody']['content']['appl
 type CreateMatchResponse = paths['/matches']['post']['responses'][201]['content']['application/json'];
 type CancelMatchResponse =
   paths['/matches/{id}']['delete']['responses'][200]['content']['application/json'];
+type AcceptMatchResponse =
+  paths['/matches/{id}/accept']['post']['responses'][200]['content']['application/json'];
 
 /**
  * What the server made of my submission — the three ends of the state machine, straight from
@@ -403,6 +406,138 @@ export function useCancelMatch(historyKey: QueryKey) {
     onError: (error) =>
       error instanceof ApiError && (error.status === 409 || error.status === 404)
         ? refreshHistory(queryClient, historyKey)
+        : undefined,
+  });
+}
+
+// ------------------------------------------------------------ accepting a slot (F-MM)
+
+export type AcceptMatchVariables = {
+  matchId: string;
+  /**
+   * EXACTLY `format_size` roster ids on a 2v2+ ladder, **omitted entirely in 1v1**.
+   *
+   * ⚠️ Omitted, not `[]`: `apiFetch` only sets `content-type: application/json` when there is
+   * a body (`prepareBody` in `lib/api.ts`), and Fastify answers 400
+   * `FST_ERR_CTP_EMPTY_JSON_BODY` to a request that announces JSON without sending any. A
+   * 4xx here would be a red console line on the happy path — a rejection criterion.
+   */
+  lineup?: string[];
+  /**
+   * The team I am committing, when there is one. Only used to refresh ITS history: the
+   * accepted match appears there immediately, and so does the cancellation of my own
+   * overlapping slots (option A of the accept).
+   */
+  teamId?: string;
+};
+
+/**
+ * Message for a refusal of `POST /matches/{id}/accept`.
+ *
+ * 🔑 EVERY ONE OF THESE IS PRE-EMPTED BY THE SCREEN — the button only exists on a slot the
+ * server has just declared acceptable (`canAccept`), and the line-up picker cannot produce an
+ * illegal selection. They all describe the same underlying situation: **the board is stale**.
+ * Someone else took the slot, the clock crossed the 15-minute bound, or the roster changed in
+ * another tab. That is why the callers refetch on 409/404 rather than only apologising.
+ */
+export function acceptMatchErrorMessage(error: unknown, members: { id: string; pseudo: string }[]) {
+  // 403 (`only the captain can engage the team` — the team changed hands) and 429.
+  const shared = sharedApiErrorMessage(error);
+  if (shared) return shared;
+
+  if (error instanceof ApiError) {
+    if (error.status === 409) {
+      // Four causes in the contract and NONE of them carries a stable `code`: no longer
+      // pending, expired, race lost against another camp, §5.2 clash. Invariant #8 forbids
+      // routing on the server's prose, so the sentence names what they have in common — the
+      // slot is gone — instead of guessing which one fired.
+      return 'This slot is no longer available: another camp has just taken it, or it has passed its acceptance deadline. The board is refreshing.';
+    }
+
+    if (error.status === 404) return 'This slot no longer exists.';
+
+    if (error.status === 400) {
+      // §5.1 in its TEAM flavour: the answer carries `unlinkedPlayers`, an array of uuids the
+      // caller maps onto its roster — a raw uuid explains nothing to a captain.
+      const unlinked = unlinkedPlayerIds(error.payload);
+      if (unlinked.length > 0) {
+        const named = unlinked
+          .map((id) => members.find((member) => member.id === id)?.pseudo)
+          .filter((pseudo): pseudo is string => Boolean(pseudo))
+          .map((pseudo) => `@${pseudo}`);
+
+        return named.length > 0
+          ? `${named.join(', ')} no longer has a linked game account — unselect them and pick someone else.`
+          : 'One of the selected players no longer has a linked game account.';
+      }
+
+      // Zod (a line-up of the wrong size), a player who has left the roster, or — in 1v1 —
+      // §5.1 with no array to map, since there is only one player and he is reading this.
+      return 'This line-up was refused: every player must still be on this team, with a linked game account.';
+    }
+  }
+
+  return 'Could not accept this slot.';
+}
+
+/**
+ * Did the slot disappear from under the click?
+ *
+ * ⚠️ THE CALLER NEEDS THIS, it is not a nicety. Both statuses make the mutation refetch the
+ * board, which UNMOUNTS the row — and with it the panel or the dialog the message was written
+ * into. A failure rendered inside something that is disappearing is a message nobody reads.
+ * The two screens use this to route the news to the page's live region instead, exactly as
+ * `isSettledElsewhere` does on the match sheet.
+ */
+export function isSlotGone(error: unknown) {
+  return error instanceof ApiError && (error.status === 409 || error.status === 404);
+}
+
+/**
+ * Takes the second side of an open slot. The match starts immediately (`in_progress`), and
+ * the caller then routes to its sheet.
+ *
+ * 🚨 ONLY EVER CALLED ON A SLOT THE SERVER SAID WAS ACCEPTABLE. `GET /matches` replays the
+ * guards of this very route and answers `canAccept`; the screen renders no button anywhere
+ * else. This mutation is the action, not the gate.
+ *
+ * The invalidation promise is returned from `onSuccess` (repo idiom), so the mutation stays
+ * `isPending` until the caches are really refreshed — the board must never flash the slot we
+ * have just taken.
+ */
+export function useAcceptMatch() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ matchId, lineup }: AcceptMatchVariables) =>
+      apiFetch<AcceptMatchResponse>(`/matches/${encodeURIComponent(matchId)}/accept`, {
+        method: 'POST',
+        // See `AcceptMatchVariables.lineup`: no key at all in 1v1, never an empty one.
+        ...(lineup ? { body: { lineup } } : {}),
+      }),
+    onSuccess: (_data, { teamId }) => {
+      const refreshes = [
+        // EVERY filter combination of the board, by prefix: the slot is gone from all of them,
+        // and the accept also cancelled my own overlapping slots, which were listed nowhere
+        // else. Enumerating the current filters would miss the entries left by earlier ones.
+        queryClient.invalidateQueries({ queryKey: OPEN_SLOTS_ROOT_KEY }),
+        // My own histories, all ladders: `myMatchesKey(id)` is `['matches', 'me', id]`, so the
+        // shared prefix sweeps them without this hook having to know which ladder is on
+        // screen. The new match belongs there, and so do the slots it just cancelled.
+        queryClient.invalidateQueries({ queryKey: ['matches', 'me'] }),
+      ];
+
+      if (teamId) refreshes.push(queryClient.invalidateQueries({ queryKey: teamMatchesKey(teamId) }));
+
+      return Promise.all(refreshes);
+    },
+    // The board is LYING (the slot was taken or expired while the page sat open): the message
+    // alone would leave the same dead button on screen.
+    // ⚠️ Deliberately not on 400/403 — those leave the board correct, and a refetch there
+    // would cost a request that cannot change anything.
+    onError: (error) =>
+      error instanceof ApiError && (error.status === 409 || error.status === 404)
+        ? queryClient.invalidateQueries({ queryKey: OPEN_SLOTS_ROOT_KEY })
         : undefined,
   });
 }

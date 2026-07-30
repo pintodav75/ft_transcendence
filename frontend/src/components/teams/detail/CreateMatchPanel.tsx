@@ -2,14 +2,12 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 
-import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Callout } from '@/components/ui/callout';
 import { FormMessage } from '@/components/ui/form-message';
 import { Label } from '@/components/ui/label';
-import { OptionTile } from '@/components/ui/option-tile';
+import { LineupPicker } from '@/components/matches/LineupPicker';
 import { Select } from '@/components/ui/select';
-import { labelClasses } from '@/components/ui/label-variants';
 import { createMatchErrorMessage, isExpiredSlotError, useCreateMatch } from '@/lib/match-mutations';
 import { createMatchSchema } from '@/lib/create-match-schema';
 import { providerLabel, useLadders } from '@/lib/games';
@@ -90,7 +88,6 @@ export function CreateMatchPanel({
   const engagements = matches ? engagementTimes(matches, nowMs) : undefined;
   const openSlots = matches ? openSlotCount(matches, nowMs) : undefined;
   const atCap = openSlots !== undefined && openSlots >= MAX_OPEN_SLOTS;
-  const fieldable = members.filter((member) => member.hasLinkedAccount).length;
 
   const days = slotDays(nowMs);
   const firstUsableDay = days.find((day) => slotTimes(day.startMs, nowMs).length > 0) ?? days[0];
@@ -318,78 +315,20 @@ export function CreateMatchPanel({
             control={control}
             name="lineup"
             render={({ field }) => (
-              <fieldset
-                // `fieldset` maps to role="group", which does take a description: the count
-                // and the failure are announced with the group instead of floating loose.
-                aria-describedby={
-                  lineupError ? `${lineupHintId} ${lineupErrorId}` : lineupHintId
-                }
-                className="flex min-w-0 flex-col gap-2 border-0 p-0"
-              >
-                {/* A <legend>, not a <Label>: it names a GROUP of checkboxes, not one
-                    control. The look is shared through labelClasses() rather than by
-                    copying Label's utility string — same idiom as buttonClasses(). */}
-                <legend className={labelClasses('mb-2')}>Line-up</legend>
-
-                <ul role="list" className="grid gap-2 sm:grid-cols-2">
-                  {members.map((member) => {
-                    const selected = field.value.includes(member.id);
-                    // §5.1 — a player with no linked game account cannot be fielded. The
-                    // 400 `unlinkedPlayers` is mapped anyway, for the stale-page case.
-                    const unlinked = !member.hasLinkedAccount;
-                    const atLineupLimit = !selected && field.value.length >= lineupSize;
-
-                    return (
-                      <li key={member.id} className="min-w-0">
-                        {/* The tile's look moved to `components/ui/option-tile.tsx` at its
-                            second use (the match result form): same markup, same classes,
-                            one owner. */}
-                        <OptionTile selected={selected} disabled={unlinked || atLineupLimit}>
-                          <input
-                            type="checkbox"
-                            className="focus-ring size-4 shrink-0 accent-action-primary"
-                            checked={selected}
-                            disabled={unlinked || atLineupLimit}
-                            onBlur={field.onBlur}
-                            onChange={(event) =>
-                              field.onChange(
-                                event.target.checked
-                                  ? [...field.value, member.id]
-                                  : field.value.filter((id: string) => id !== member.id),
-                              )
-                            }
-                          />
-                          <Avatar
-                            src={member.avatarUrl ?? undefined}
-                            alt=""
-                            fallback={member.pseudo.slice(0, 2).toUpperCase()}
-                            className="size-8 shrink-0"
-                          />
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-bold text-text-primary">
-                              {member.displayName ?? member.pseudo}
-                            </span>
-                            <span className="block truncate text-xs text-text-muted">
-                              {unlinked
-                                ? `no ${providerLabel(team.requiredProvider)} account`
-                                : `@${member.pseudo}`}
-                            </span>
-                          </span>
-                        </OptionTile>
-                      </li>
-                    );
-                  })}
-                </ul>
-
-                <p id={lineupHintId} className="text-xs text-text-muted">
-                  {field.value.length}/{lineupSize} players selected
-                  {field.value.length >= lineupSize
-                    ? ' — unselect one to swap a player.'
-                    : fieldable < lineupSize
-                      ? ` — only ${fieldable} of your players have linked their ${providerLabel(team.requiredProvider)} account.`
-                      : ''}
-                </p>
-              </fieldset>
+              // The whole selector moved to `components/matches/LineupPicker.tsx` at its
+              // second use ([F-MM], where a captain composes the line-up he ACCEPTS a slot
+              // with): same fieldset, same tiles, same counter — only the state stays here,
+              // in this form.
+              <LineupPicker
+                members={members}
+                value={field.value}
+                onChange={field.onChange}
+                onBlur={field.onBlur}
+                size={lineupSize}
+                providerName={providerLabel(team.requiredProvider)}
+                hintId={lineupHintId}
+                errorId={lineupError ? lineupErrorId : undefined}
+              />
             )}
           />
 
