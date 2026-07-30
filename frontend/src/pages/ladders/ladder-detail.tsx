@@ -5,6 +5,7 @@ import { GameBanner } from '@/components/games/GameBanner';
 import { LadderBoard } from '@/components/ladders/LadderBoard';
 import { LadderMapPool } from '@/components/ladders/LadderMapPool';
 import { LadderRules } from '@/components/ladders/LadderRules';
+import { LadderOpenSlots } from '@/components/matchmaking/LadderOpenSlots';
 import { ErrorPanel } from '@/components/ui/error-panel';
 import { Pill } from '@/components/ui/pill';
 import { SectionTitle } from '@/components/ui/section-title';
@@ -214,6 +215,8 @@ export function LadderDetail() {
         </header>
 
         <LadderRules ladder={ladder} game={game} />
+
+        <LadderOpenSlots ladderId={ladder.id} ladderName={ladder.name} />
 
         {/* An empty pool is NOT an error: lol, rl and chess simply have no maps. */}
         {maps.length > 0 && <LadderMapPool maps={maps} gameName={game.name} />}

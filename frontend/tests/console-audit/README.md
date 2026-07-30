@@ -437,6 +437,90 @@ filtre** quelques lignes plus haut.
    « Team name » existe **avant** la rangée de formats. `G11` lisait `aria-pressed` tout de
    suite et comptait 0 boutons — attendre le formulaire n'attend pas le picker.
 
+## `matchmaking` (F-MM) — les six raisons de refus, produites À LA SUITE
+
+`scenarios/matchmaking.mjs` audite `/matchmaking` : le tableau global des créneaux ouverts et
+les **deux chemins d'acceptation**, qui n'ont rien en commun (2v2+ par un panneau de
+composition inline, 1v1 par une confirmation **sans corps de requête**). **23 checks**, et
+**les SIX raisons de refus** du contrat y sont rendues pour de vrai.
+
+🔑 **`MM4` est le check qui garde le motif de rejet** : case décochée, le nombre de boutons
+« Accept » à l'écran est comparé au nombre de créneaux dont l'API dit `canAccept: true` — et le
+check exige **au moins un créneau refusé à l'écran**, sinon « autant de boutons que
+d'acceptables » serait vrai par construction sur un tableau où tout est acceptable.
+
+🔑 **`MM5` → `MM6` → `MM7` → `MM8` sont UNE seule séquence sur LE MÊME créneau**, où seule la
+DONNÉE change : le compte du run n'a pas d'équipe (`no_team`), puis en crée une (`roster_too_small`),
+puis recrute un joueur non lié (`roster_not_linked`), puis fait lier ce joueur (bouton offert).
+C'est ce qui garde la distinction que la carte exige : `roster_too_small` et `roster_not_linked`
+ont **deux remèdes différents**, donc deux phrases et deux liens — les fusionner enverrait un
+capitaine recruter un 3ᵉ joueur alors qu'il lui suffit de faire lier un compte. `MM8` est le
+positif qui prouve que les trois autres peuvent virer au rouge.
+
+🔑 **Les deux dernières raisons ont chacune coûté une pièce de fixture, et elles sont
+irréductibles.** `not_captain` (`MM5b`) exige un **SECOND ladder d'équipe** : un joueur ne peut
+appartenir qu'à UNE équipe par ladder (`team_members_user_ladder_unique`), donc le compte du run
+ne peut pas être à la fois simple membre ici et capitaine là. `schedule_conflict` (`MM15b`) n'est
+atteignable qu'**après** `MM15` : il faut que le compte porte un match `in_progress`, et c'est
+l'acceptation du créneau chess qui le lui donne — un tiers ouvre alors un créneau sur **exactement
+la même heure** (l'instant est retenu dans une variable, jamais recalculé : deux appels à
+`futureQuarter(2)` peuvent franchir un quart).
+
+🔑 **`MM16` garde le dernier chemin vers un 4xx offert par un bouton**, et il n'a besoin d'aucune
+course : le serveur ne liste que les créneaux à plus de 15 min **au moment où il répond**, un
+onglet resté au premier plan ne refetch pas, deux minutes de lecture suffisent. Le créneau est
+posé à **T+16 min par `sql()`** (usage sanctionné : `POST /matches` impose la grille des quarts,
+aucune séquence HTTP ne produit cet état), puis **l'horloge de la page est pilotée**
+(`page.clock.install()` + `fastForward('02:00')`) — c'est la seule façon d'avancer le temps du
+client sans avancer celui du serveur. Le pilotage d'horloge est sous `try/catch` : une panne doit
+rougir CE check, jamais sortir en exit 2.
+
+⚠️ **`MM10` a été vu ROUGE avant vert, et pour une raison à retenir** : « zéro requête portant
+l'uuid inconnu » comptait **1**, sur un front pourtant correct — la **navigation du document**
+(`/matchmaking?ladderId=<uuid>`) porte l'uuid elle aussi. Le filtre de `countRequests` doit être
+scopé à `/api/`. Il porte en plus son **contrôle positif** (le même filtre sur un ladder valide
+doit compter > 0), parce que « 0 requête » est aussi ce que mesure un filtre qui ne matche rien.
+
+⚠️ **`MM13`/`MM14` sont la paire §5.1 en 1v1** : sans compte chess.com lié, le bouton ne doit pas
+exister (`POST /accept` répondrait 400) ; on relie le compte, il doit revenir. On ne casse pas le
+code pour voir rouge, **on retourne la donnée** — même motif que `S8`/`S9` de `solo`.
+
+⚠️ **`MM3` garde l'anonymat B5b** : le nom de l'équipe qui a ouvert le créneau (connu du
+scénario, qui l'a créée) ne doit apparaître **nulle part** dans `<main>`, ni aucune map. Les maps
+ne sont même pas dans la charge utile — le check garde donc le **rendu**, pas l'API.
+
+⚠️ **IL N'ACCEPTE JAMAIS LE CRÉNEAU DU SEED.** La base semée porte un créneau cs2 5v5 ouvert
+(Team Alpha) qui apparaît sur le tableau et sert même de second créneau refusé ; l'accepter
+détruirait un des 7 états cs2 qu'exige `match-detail`. Le scénario fabrique **ses** créneaux
+(4 comptes, 2 équipes, 2 ladders) et ne dépend donc pas du seed — tous ses comptages sont
+**relatifs à ce que l'API répond au même instant**, jamais à un nombre absolu.
+
+⚠️ **Teardown obligatoire, et il est double** : les deux matchs acceptés sont `in_progress`, donc
+ils engagent les comptes (**409 `engaged_in_match`** sur `DELETE /users/me`) **et** les équipes
+(**409 `team_engaged_in_match`** sur `DELETE /teams/:id`). Le scénario force les matchs en
+`cancelled` puis efface les lignes, **même si un check a échoué** ; le runner enchaîne ensuite
+matchs → équipes → comptes.
+
+⚠️ **`MM4b` mesure DEUX choses, et la seconde est la seule qui garde vraiment.**
+`scrollWidth - clientWidth` était **vert par construction** sur `LadderBoard` (leçon FT-3 : 73 px
+sortaient en silence, nom rendu à **0 px** de large) — un conteneur qui CLIPPE ne déborde jamais.
+Le check lit donc aussi la largeur **rendue** du nom de ladder et la cible tactile du bouton
+(WCAG 2.5.8). Vu ROUGE en passant le nom en `w-0 overflow-hidden` : « débordement −15 px (≤ 0) »
+restait vert, « largeur rendue 0 px » a rougi.
+
+⚠️ **`getByRole('listitem')` est scopé au `<ul aria-label="Open slots">`**, jamais à `<main>` :
+`LineupPicker` rend ses candidats en `<li>`, donc un comptage non scopé n'est juste que tant
+qu'aucun panneau n'est ouvert — il deviendrait **faux sans devenir rouge**.
+
+⚠️ **`MM11` a rougi sur une course DU CHECK**, pas du code : le panneau charge son propre roster
+(`GET /teams/{id}`) et `count()` n'attend rien, là où le `check()` juste en dessous patiente. Il
+comptait 0 case pendant que le clic aboutissait. **Attendre la première case avant de les
+compter** — même famille que « lire une région live ».
+
+⚠️ **`exact: true` sur « Accept the slot »** : le bouton de la LIGNE porte un `aria-label`
+« Accept the slot on <ladder> at <date> », et Playwright matche le nom accessible en
+**sous-chaîne** — sans `exact`, le sélecteur du bouton de soumission du panneau attrape les deux.
+
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 
 `teams-matchmaking` (FT-2C) est le seul scénario qui **crée de vrais matchs**. Le runner ne

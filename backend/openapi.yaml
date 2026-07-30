@@ -3897,6 +3897,14 @@ paths:
                       maps:
                         type: array
                         items: { type: string }
+                    # Ces six clés sont TOUJOURS présentes : le handler renvoie la ligne
+                    # `matches` rendue par `.returning()` de l'UPDATE, où `maps` est
+                    # `notNull().default([])`, `started_at` vient d'être posé et `scheduled_at`
+                    # est présent (éventuellement nul, d'où `nullable: true`). Sans ce
+                    # `required`, la codegen sortait tout en optionnel et `match.id` — le seul
+                    # champ dont le front ait besoin pour router vers la fiche du match —
+                    # arrivait en `string | undefined`. Aucun handler touché ([F-MM]).
+                    required: [id, ladderId, status, startedAt, scheduledAt, maps]
                 required: [match]
         '400':
           description: >

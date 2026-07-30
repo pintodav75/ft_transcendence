@@ -264,14 +264,17 @@ export function formatDuration(ms: number) {
 
 // Built once at module scope: an Intl formatter is expensive to create and these options
 // never change.
-const shortDateFormat = new Intl.DateTimeFormat('fr-FR', {
+// 🔑 `en-GB`, ET PAS `en-US` — voir le docblock de `slotDayFormat` dans `lib/match-slots.ts` :
+// noms anglais, mais ordre jour-mois et horloge 24 h conservés. Locale FIGÉE, jamais celle du
+// navigateur.
+const shortDateFormat = new Intl.DateTimeFormat('en-GB', {
   day: '2-digit',
   month: 'short',
   hour: '2-digit',
   minute: '2-digit',
 });
 
-const longDateFormat = new Intl.DateTimeFormat('fr-FR', {
+const longDateFormat = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
   day: '2-digit',
   month: 'short',

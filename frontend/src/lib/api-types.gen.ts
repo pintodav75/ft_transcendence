@@ -3613,16 +3613,16 @@ export interface paths {
                         "application/json": {
                             match: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** Format: uuid */
-                                ladderId?: string;
+                                ladderId: string;
                                 /** @example in_progress */
-                                status?: string;
+                                status: string;
                                 /** Format: date-time */
-                                startedAt?: string;
+                                startedAt: string;
                                 /** Format: date-time */
-                                scheduledAt?: string | null;
-                                maps?: string[];
+                                scheduledAt: string | null;
+                                maps: string[];
                             };
                         };
                     };

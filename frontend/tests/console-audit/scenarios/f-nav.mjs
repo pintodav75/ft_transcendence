@@ -170,21 +170,24 @@ export async function run({ page, setPhase, step, countRequests, ORIGIN }) {
   // rien coûter tant que personne n'a cherché. Deux navigations CLIENT (pas de goto :
   // un rechargement recompterait le bandeau du serveur de dev).
   //
-  // ⚠️ LES CIBLES ONT CHANGÉ AVEC [F-SOLO], et il le fallait. Ce check visait Solo (2) puis
-  // History (5) à une époque où `/solo` était une page VIERGE posée par F-Nav. Elle est
-  // devenue une vraie page, qui charge légitimement `GET /ladders` (elle liste les ladders
-  // 1v1) et deux `/ladders/{id}/rankings` : la naviguer ne prouvait donc plus rien sur la
-  // recherche, et le check est devenu FLAKY avant d'être rouge — il mesurait la course entre
-  // le démontage de `/solo` et le départ de ses requêtes (vert sur une campagne, rouge sur la
-  // suivante, à code identique). On repasse sur Matchmaking (4) et History (5), les deux
-  // seules pages du rail qui n'émettent toujours AUCUNE requête : l'intention du check —
-  // « la table des ladders ne coûte rien tant que personne n'a cherché » — est intacte, et
-  // c'est bien la SearchBar qu'elle mesure à nouveau.
+  // ⚠️ LES CIBLES ONT CHANGÉ DEUX FOIS, ET IL LE FALLAIT LES DEUX FOIS. Ce check visait Solo
+  // (2) puis History (5) quand `/solo` était une page VIERGE ; [F-SOLO] l'a fait basculer sur
+  // Matchmaking (4) + History (5), « les deux seules pages du rail qui n'émettent aucune
+  // requête ». [F-MM] a fait de `/matchmaking` une vraie page, qui charge légitimement
+  // `GET /ladders` (elle nomme le ladder de `?ladderId=` sans dépenser de 404) et `GET /games`
+  // + `GET /teams` : la naviguer ne prouve donc plus rien sur la recherche. Elle rendait N5
+  // rouge (1 requête au lieu de 0) ET N6 rouge par ricochet (les ladders arrivaient en cache,
+  // donc le premier focus ne les redemandait plus). Les cibles sont désormais History (5) et
+  // Home (0), les deux dernières pages du rail sans aucune requête.
+  // 🔑 L'INTENTION EST INTACTE — « la table des ladders ne coûte rien tant que personne n'a
+  // cherché » — et c'est bien la SearchBar qu'on mesure. ⚠️ Le jour où `/home` cessera d'être
+  // un stub, ce check n'aura plus de page libre : il faudra alors le mesurer en repartant
+  // d'un `page.goto` (cache vidé) plutôt qu'en cherchant une page qui ne demande rien.
   const navLadders = await countRequests(async () => {
-    await links.nth(4).click(); // Matchmaking
-    await page.waitForURL('**/matchmaking');
     await links.nth(5).click(); // History
     await page.waitForURL('**/history');
+    await links.nth(0).click(); // Home
+    await page.waitForURL('**/home');
     await page.waitForTimeout(400);
   }, isLadders);
   step('N5', navLadders === 0, `${navLadders} GET /ladders après 2 navigations (0 attendu)`);

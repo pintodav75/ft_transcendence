@@ -3,6 +3,7 @@ import { TriangleAlert, X } from 'lucide-react';
 import { Callout } from '@/components/ui/callout';
 import { InlineButton } from '@/components/ui/inline-button';
 import { LadderExcerpt } from '@/components/ladders/LadderExcerpt';
+import { LadderOpenSlots } from '@/components/matchmaking/LadderOpenSlots';
 import { LinkedAccountStatus } from '@/components/solo/LinkedAccountStatus';
 import { Pill } from '@/components/ui/pill';
 import { SectionTitle } from '@/components/ui/section-title';
@@ -79,6 +80,8 @@ export function SoloOverview({
         linked={linked}
         isError={accountsError}
       />
+
+      <LadderOpenSlots ladderId={ladderId} ladderName={ladderName} />
 
       <LadderExcerpt
         rankings={rankings}
