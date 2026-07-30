@@ -9,7 +9,7 @@ import { MatchResultPanel } from '@/components/matches/MatchResultPanel';
 import { MatchScoreboard } from '@/components/matches/MatchScoreboard';
 import { MatchStateNotice } from '@/components/matches/MatchStateNotice';
 import { ErrorPanel } from '@/components/ui/error-panel';
-import { backLinkClasses } from '@/lib/back-navigation';
+import { backLinkClasses, useBackFrom } from '@/lib/back-navigation';
 import { buttonClasses } from '@/components/ui/button-variants';
 import { ApiError } from '@/lib/api';
 import { useAnnouncement } from '@/lib/use-announcement';
@@ -48,6 +48,9 @@ export function MatchDetail() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   // ONE announcement for the whole screen — see the live region below.
   const resultAnnouncement = useAnnouncement();
+  // ⚠️ Read HERE, not inline in the JSX below: this component returns early on a malformed id
+  // and on every error state, so a hook called down there would run conditionally.
+  const backFrom = useBackFrom();
 
   // Mirrors the backend param schema: a malformed id can only ever come back as a 400, so
   // the error state is rendered without spending a request — and without the red "Failed to
@@ -187,9 +190,14 @@ export function MatchDetail() {
         </p>
       </section>
 
+      {/* ⚠️ `state` is what lets the ladder page label its own way back. Without it, a solo
+          player with no team — who reaches this sheet from their own history — was offered
+          "Back to my teams", i.e. an empty page. The origin travels in the history entry
+          because a browser never tells a page what lies behind it (`lib/back-navigation.ts`). */}
       <Link
         to="/ladders/$ladderId"
         params={{ ladderId: match.ladderId }}
+        state={backFrom}
         className={backLinkClasses}
       >
         <ArrowLeft aria-hidden="true" className="size-4" />

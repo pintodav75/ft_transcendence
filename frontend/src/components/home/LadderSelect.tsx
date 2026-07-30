@@ -32,6 +32,11 @@ type LadderSelectProps = {
       mode?: 'ladder';
       onChange: (ladderId: string | undefined) => void;
       excludeSolo?: boolean;
+      // Ladder selected on load instead of "first game, first format" — used by
+      // `/teams?create=<id>` ([F-GAMES]), so a user who picked a ladder on a game
+      // page does not have to pick it again. Ignored when it is not in the usable
+      // list (unknown id, or a solo ladder under `excludeSolo`).
+      initialLadderId?: string;
     }
   | {
       // Pick a game only: no format row, emits the game id.
@@ -45,6 +50,8 @@ export function LadderSelect(props: LadderSelectProps) {
   const { value, onChange, all = false, gameIds } = props;
   const onlyGame = props.mode === 'game';
   const excludeSolo = props.excludeSolo;
+  // Only the ladder mode can pre-select a ladder — in game mode there is no format row.
+  const initialLadderId = props.mode === 'game' ? undefined : props.initialLadderId;
   const [games, setGames] = useState<Game[]>([]);
   const [ladders, setLadders] = useState<Ladder[]>([]);
   const [gameId, setGameId] = useState<string>();
@@ -76,6 +83,18 @@ export function LadderSelect(props: LadderSelectProps) {
         setLadders(usableLadders);
         setGames(playableGames);
 
+        // A ladder asked for by the caller wins over every default below — but only if it
+        // really is one of the usable ladders. An unknown id (or a solo one under
+        // `excludeSolo`) falls through and the picker behaves exactly as before.
+        const preset = initialLadderId
+          ? usableLadders.find((ladder) => ladder.id === initialLadderId)
+          : undefined;
+        if (preset) {
+          setGameId(preset.gameId);
+          onChangeRef.current(preset.id);
+          return;
+        }
+
         // With `all`, default to the "All" option: no game highlighted, empty filter.
         if (all) {
           setGameId(undefined);
@@ -88,7 +107,7 @@ export function LadderSelect(props: LadderSelectProps) {
         );
       })
       .catch(() => setError('Could not load games and ladders.'));
-  }, [excludeSolo, onlyGame, all]);
+  }, [excludeSolo, onlyGame, all, initialLadderId]);
 
   const gameLadders = useMemo(
     () => ladders.filter((ladder) => ladder.gameId === gameId),

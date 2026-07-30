@@ -300,6 +300,48 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, log
     `coup d’envoi passé : avis « Kick-off was… » ${started} (1 attendu), avis « in X » résiduel ${stillCounting} (0 attendu)`,
   );
 
+  // [F-GAMES] — le lien « … standings » doit EMPORTER son origine dans l'entrée d'historique
+  // (`state={useBackFrom()}`). Sans lui, la page ladder retombe sur « Back to my teams » : une
+  // page vide pour un joueur solo qui n'a pas d'équipe, et il arrive ici depuis SON historique.
+  // ⚠️ Un navigateur ne dit jamais à une page ce qu'il y a derrière : seul le lien peut l'écrire.
+  const toStandings = main.getByRole('link', { name: /standings$/ });
+  const toStandingsCount = await toStandings.count();
+  // Le nom du ladder, lu SUR le lien : il sert à attendre le bon titre juste après.
+  const ladderName =
+    toStandingsCount === 1
+      ? ((await toStandings.textContent()) ?? '').replace(/\s*standings\s*$/i, '').trim()
+      : '';
+  const reachedLadderPage =
+    toStandingsCount === 1 &&
+    ladderName.length > 0 &&
+    (await toStandings
+      .click()
+      // Prédicat sur la CIBLE : un motif rendrait la main tout de suite si l'URL courante le
+      // satisfaisait déjà. Et `.catch()`, sinon une attente qui lève sort en exit 2.
+      .then(() => page.waitForURL((url) => url.pathname.startsWith('/ladders/'), { timeout: 10000 }))
+      // 🔑 ET L'URL NE SUFFIT PAS — vécu en écrivant ce check. `waitForURL` rend la main avant
+      // le rendu React : le `<h1>` de la FICHE DE MATCH est encore monté, donc attendre « un
+      // h1 » rendait la main tout de suite et on comptait les liens d'un écran qui n'existait
+      // pas encore (0 partout, un rouge qui n'accuse rien). On attend le titre NOMMÉ du ladder.
+      .then(() =>
+        appears(main.getByRole('heading', { level: 1, name: ladderName, exact: true })),
+      )
+      .catch(() => false));
+  // ⚠️ Compter AVANT de lire : `getByRole(...).count()` ne lève pas, un `getAttribute` si.
+  const backToMatch = reachedLadderPage
+    ? await main.getByRole('link', { name: /^back to the match$/i }).count()
+    : 0;
+  const backToTeams = reachedLadderPage
+    ? await main.getByRole('link', { name: /^back to my teams$/i }).count()
+    : -1;
+  step(
+    'M11c',
+    toStandingsCount === 1 && reachedLadderPage && backToMatch === 1 && backToTeams === 0,
+    `lien « … standings » ${toStandingsCount} (1 attendu), page ladder atteinte = ${reachedLadderPage}, ` +
+      `« Back to the match » ${backToMatch} (1 attendu), « Back to my teams » ${backToTeams} ` +
+      `(0 attendu — ce serait faux pour un joueur sans équipe)`,
+  );
+
   setPhase('7. un camp a soumis : attente 24 h, et le CHOIX offert à l’autre camp');
   await page.goto(`${ORIGIN}/matches/${demo.awaiting.id}`, { waitUntil: 'networkidle' });
   await main.locator('h1').waitFor({ timeout: 10000 });

@@ -388,6 +388,55 @@ soumissions concordantes et un `scheduled_at` reculé — que ce scénario ne fa
 en revanche présent dans le seed : `alice` est **#1 / 1560 / 30–9** sur Chess 1v1, à vérifier à
 l'œil.
 
+## `games` (F-GAMES) — deux paires de checks qui se prouvent l'une l'autre
+
+`scenarios/games.mjs` audite `/games` et `/games/$gameId` : la grille des 5 jeux et son
+sous-titre **piloté par `GET /ladders`** (comparé à l'API, pas à une liste en dur), un slug
+inconnu (**zéro requête** — `games.id` est un slug texte, c'est la LISTE déjà en cache qui
+tranche, et un 404 laisserait une ligne rouge), le pool de maps comparé map par map à
+`GET /games/cs2`, le CTA **décidé par le format**, le podium comparé à
+`GET /ladders/{id}/rankings`, le partage de cache avec la page ladder, le retour qui nomme son
+origine, et `?create=`. **19 checks**, et il ne **dépend pas du seed** (les 5 jeux et les 9
+ladders viennent des migrations ; le podium est comparé à ce que l'API répond au même instant,
+donc juste sur base peuplée comme sur base vide).
+
+🔑 **Trois checks n'existent que pour empêcher leur jumeau d'être vert par construction** —
+c'est le motif à reprendre, chacun de ces négatifs serait sinon satisfait par une page cassée :
+
+- **`G6`/`G7`** : le compte du run est neuf, il n'a d'équipe **nulle part**. Sur cs2 5v5 cela
+  doit donner « Create a team » et **zéro** « Play solo » ; sur chess 1v1, **le même compte,
+  la même absence d'équipe** doit donner « Play solo » et zéro « Create a team ». Lire un
+  `null` d'équipe comme « solo » est le bug déjà corrigé deux fois (FT-4A, F-SOLO) : un seul
+  des deux checks resterait vert le jour où le CTA cesserait d'être rendu du tout.
+- **`G10`/`G10b`** : arrivé **depuis** `/games/cs2`, le retour dit « Back to the game » et
+  jamais « Back to my teams » (ce serait faux pour un compte sans équipe) ; arrivé **par URL
+  directe**, le repli « Back to my teams » est **inchangé**. Chacun prouve que le sélecteur de
+  l'autre matche vraiment quelque chose.
+- **`G11`/`G12`** : `?create=<id valide>` ouvre le formulaire pré-sélectionné, `?create=<uuid
+  inconnu>` n'ouvre **rien** et ne lève rien. Sans `G11`, « le formulaire n'est pas ouvert »
+  serait vert sur une fonctionnalité entièrement morte.
+- **`G8`/`G8c`** couvrent les deux états du podium **sur la même page** : cs2 5v5 est classé
+  (podium + le `sr-only` « First place », parce qu'une médaille dorée n'est rien pour un
+  lecteur d'écran), cs2 2v2 ne l'est pas (« No one ranked yet », **jamais un podium à
+  trous**). ⚠️ `G8c` vire au ROUGE si la base finit par classer quelqu'un sur les deux : il
+  faudra alors lui trouver un autre ladder, et le message le dit.
+
+⚠️ **`G3` porte son propre contrôle positif** (« 0 requête » est aussi ce que mesure un filtre
+qui ne matche rien), et `G9` — « suivre *See the full standings* ne rejoue AUCUN classement »,
+le point de perf du ticket — s'appuie sur `G4`, qui compte **2** requêtes avec le **même
+filtre** quelques lignes plus haut.
+
+⚠️ **Deux rouges vécus à l'écriture, à connaître** :
+
+1. **`label-caps` met le texte en MAJUSCULES**, donc `innerText()` rend « COUNTER-STRIKE 2 »
+   et « ANCIENT » là où le DOM porte « Counter-Strike 2 » et « Ancient » (`G2`, `G5` : la
+   comparaison est passée en insensible à la casse). ⚠️ Mais **mesuré dans ce harnais : le
+   NOM ACCESSIBLE, lui, n'est pas transformé** — `getByRole(..., { exact: true })` matche
+   toujours « 5v5 ». Ne pas confondre les deux lectures.
+2. **`LadderSelect` lance sa PROPRE requête** (games + ladders) à son montage : le champ
+   « Team name » existe **avant** la rangée de formats. `G11` lisait `aria-pressed` tout de
+   suite et comptait 0 boutons — attendre le formulaire n'attend pas le picker.
+
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 
 `teams-matchmaking` (FT-2C) est le seul scénario qui **crée de vrais matchs**. Le runner ne
