@@ -169,9 +169,20 @@ export async function run({ page, setPhase, step, countRequests, ORIGIN }) {
   // La table des ladders ne sert qu'au sous-titre d'un résultat d'ÉQUIPE : elle ne doit
   // rien coûter tant que personne n'a cherché. Deux navigations CLIENT (pas de goto :
   // un rechargement recompterait le bandeau du serveur de dev).
+  //
+  // ⚠️ LES CIBLES ONT CHANGÉ AVEC [F-SOLO], et il le fallait. Ce check visait Solo (2) puis
+  // History (5) à une époque où `/solo` était une page VIERGE posée par F-Nav. Elle est
+  // devenue une vraie page, qui charge légitimement `GET /ladders` (elle liste les ladders
+  // 1v1) et deux `/ladders/{id}/rankings` : la naviguer ne prouvait donc plus rien sur la
+  // recherche, et le check est devenu FLAKY avant d'être rouge — il mesurait la course entre
+  // le démontage de `/solo` et le départ de ses requêtes (vert sur une campagne, rouge sur la
+  // suivante, à code identique). On repasse sur Matchmaking (4) et History (5), les deux
+  // seules pages du rail qui n'émettent toujours AUCUNE requête : l'intention du check —
+  // « la table des ladders ne coûte rien tant que personne n'a cherché » — est intacte, et
+  // c'est bien la SearchBar qu'elle mesure à nouveau.
   const navLadders = await countRequests(async () => {
-    await links.nth(2).click(); // Solo
-    await page.waitForURL('**/solo');
+    await links.nth(4).click(); // Matchmaking
+    await page.waitForURL('**/matchmaking');
     await links.nth(5).click(); // History
     await page.waitForURL('**/history');
     await page.waitForTimeout(400);

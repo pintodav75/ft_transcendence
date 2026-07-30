@@ -1,7 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { Solo } from '@/pages/solo';
-
-export const Route = createFileRoute('/_authenticated/solo')({
-  component: Solo,
-});
+// Pathless layout for the two solo screens (`/solo` and `/solo/$ladderId`), exactly like
+// `_authenticated.teams.tsx`: it renders its `<Outlet/>` and nothing else. The guard and the
+// app shell already live on `_authenticated`.
+export const Route = createFileRoute('/_authenticated/solo')({});

@@ -208,7 +208,7 @@ export function canReportResult(
 /**
  * How long the other side has to confirm or contest before the job closes the match on its
  * own. Mirror of `CONFIRM_TIMEOUT_MS` in `backend/src/jobs/index.ts` — duplicated on purpose,
- * for the same reason as `MIN_LEAD_MINUTES` in `lib/team-detail.ts`: the screen cannot
+ * for the same reason as `MIN_LEAD_MINUTES` in `lib/match-slots.ts`: the screen cannot
  * announce a deadline it does not know. The server stays the authority.
  */
 export const CONFIRMATION_WINDOW_HOURS = 24;

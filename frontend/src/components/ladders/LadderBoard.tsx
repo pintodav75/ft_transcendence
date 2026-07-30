@@ -1,13 +1,21 @@
 import { LadderRow, LadderRowHeader } from '@/components/ladders/LadderRow';
-import { isTeamCompetitor } from '@/lib/ladders';
 
-import type { RankingEntry } from '@/lib/ladders';
+import type { RankingEntry, SelfCompetitor } from '@/lib/ladders';
 
 type LadderBoardProps = {
   /** Already sorted by the backend (Elo descending) — never re-sorted here. */
   entries: RankingEntry[];
-  /** Team whose row is highlighted instead of linked, when the board is shown on its page. */
-  selfTeamId?: string;
+  /**
+   * Whose row is highlighted instead of linked, when the board is shown on that
+   * competitor's own page.
+   *
+   * ⚠️ DISCRIMINATED since [F-SOLO], where a PLAYER is the competitor: it used to be a bare
+   * `selfTeamId`, and a solo page would have had to pass a user id under a name that says
+   * "team". Worse, the two id spaces are both uuids, so the mistake would have been silent —
+   * a row highlighted for a team that happens not to exist highlights nothing, and nobody
+   * notices a missing highlight. The `type` makes the comparison exact.
+   */
+  self?: SelfCompetitor;
   selfNote?: string;
 };
 
@@ -28,7 +36,7 @@ type LadderBoardProps = {
  * porte sur TOUT le classement, et arriver depuis sa page équipe ne fait perdre personne
  * dans une page 1 qui ne le contient pas. À rouvrir si un ladder dépasse la centaine.
  */
-export function LadderBoard({ entries, selfTeamId, selfNote }: LadderBoardProps) {
+export function LadderBoard({ entries, self, selfNote }: LadderBoardProps) {
   return (
     <div className="overflow-hidden rounded-card border border-border-subtle">
       <LadderRowHeader />
@@ -40,9 +48,9 @@ export function LadderBoard({ entries, selfTeamId, selfNote }: LadderBoardProps)
             <LadderRow
               entry={entry}
               isSelf={
-                selfTeamId !== undefined &&
-                isTeamCompetitor(entry.competitor) &&
-                entry.competitor.id === selfTeamId
+                self !== undefined &&
+                entry.competitor.type === self.type &&
+                entry.competitor.id === self.id
               }
               selfNote={selfNote}
             />

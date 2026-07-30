@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { queryOptions, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 
 import { ApiError, apiFetch } from '@/lib/api';
@@ -25,6 +25,15 @@ export type LadderGame = LadderDetailResponse['game'];
 export type RankingEntry = LadderRankingsResponse['rankings'][number];
 export type Competitor = RankingEntry['competitor'];
 export type TeamCompetitor = Extract<Competitor, { type: 'team' }>;
+export type UserCompetitor = Extract<Competitor, { type: 'user' }>;
+
+/**
+ * WHOSE row is highlighted on a board — a team on `/teams/$teamId`, a player on
+ * `/solo/$ladderId`. Discriminated rather than two optional ids, so a caller cannot pass
+ * both, or pass a user id where a team id was expected: `rankings.user_id` and
+ * `rankings.team_id` are mutually exclusive backend-side (XOR), and the type says so.
+ */
+export type SelfCompetitor = { type: 'team' | 'user'; id: string };
 
 // Mirrors the backend param schema (`z.uuid()` in routes/ladders.ts): an id that cannot be
 // a uuid can only ever come back as a 400, so a page renders its error state without
@@ -70,20 +79,41 @@ export function useLadder(ladderId: string, enabled: boolean) {
 }
 
 /**
- * One rankings request feeds the team page (header stats + ladder excerpt) AND the ladder
- * page. ⚠️ The key must stay `['ladder', id, 'rankings']` for that to hold: it is the cache
- * entry the excerpt already filled, so following "See the full ladder" costs nothing.
+ * ONE definition of the rankings query, shared by every reader.
+ *
+ * ⚠️ The key must stay `['ladder', id, 'rankings']`: one request feeds the team page (header
+ * stats + excerpt), the ladder page, and — since [F-SOLO] — the `/solo` grid and the solo
+ * ladder page. They all land on the same cache entry, so following "See the full ladder" or
+ * clicking a solo tile costs nothing.
+ *
+ * Extracted as `queryOptions()` because `/solo` needs the SAME query through `useQueries`
+ * (one per 1v1 ladder, count decided at runtime), and a hook cannot be called in a loop.
+ * Restating the options there would have been a second source of truth for `staleTime` and
+ * `retry` — i.e. two cache behaviours for one endpoint.
  */
-export function useLadderRankings(ladderId: string | undefined) {
-  return useQuery({
+export function ladderRankingsOptions(ladderId: string) {
+  return queryOptions({
     queryKey: ['ladder', ladderId, 'rankings'],
     queryFn: () => apiFetch<LadderRankingsResponse>(`/ladders/${ladderId}/rankings`),
+    retry: retryServerErrorsOnly,
+    staleTime: RANKINGS_STALE_TIME,
+  });
+}
+
+export function useLadderRankings(ladderId: string | undefined) {
+  return useQuery({
+    // ⚠️ Le `?? ''` fait que toutes les instances DÉSACTIVÉES partagent la même entrée de
+    // cache `['ladder', '', 'rankings']`. C'est volontaire et sans danger : `enabled: false`
+    // les empêche de fetcher, donc l'entrée n'est jamais écrite ni lue. Et si quelqu'un
+    // retirait un jour le `enabled`, la requête partirait sur `/ladders//rankings` et
+    // prendrait un 404 BRUYANT — jamais les données d'un autre ladder.
+    // (Repasser la clé en `ladderId` après le spread ne compile pas : le type de la clé est
+    // figé à `string[]` par `queryOptions`, et l'élargir toucherait `useQueries` dans /solo.)
+    ...ladderRankingsOptions(ladderId ?? ''),
     // On the team page `ladderId` comes from GET /teams/{id}, so it is undefined on the
     // first render: firing early would request /ladders/undefined/rankings and get a 500.
     // The ladder page passes `undefined` for a malformed id, for the same reason.
     enabled: Boolean(ladderId),
-    retry: retryServerErrorsOnly,
-    staleTime: RANKINGS_STALE_TIME,
   });
 }
 
@@ -109,8 +139,31 @@ export function competitorAvatarUrl(competitor: Competitor) {
  * an explicit "not ranked" state rather than a fabricated Elo.
  */
 export function findTeamStanding(rankings: RankingEntry[], teamId: string) {
+  return findStanding(rankings, { type: 'team', id: teamId });
+}
+
+/**
+ * The player's own ladder line on a SOLO ladder — the twin of `findTeamStanding`, added by
+ * [F-SOLO].
+ *
+ * 🚨 THE ASYMMETRY THAT MAKES THIS FUNCTION NECESSARY: on a 1v1 ladder there is no such thing
+ * as JOINING. A `rankings` row is born of the first match RESULT, never of an enrolment — so
+ * `undefined` here is the normal state of every account that has not yet finished a solo
+ * match, not an error and not "no such ladder". `/solo` therefore lists the ladders that
+ * EXIST and shows a standing only where one happens to be; listing "the ladders I am ranked
+ * on" would hand a new account an empty page with no way in.
+ *
+ * ⚠️ `competitor.id` of a `user` row IS the user id (`shapeRankings` in
+ * `backend/src/utils/leaderboard.ts` puts `rankings.user_id` there), never the pseudo.
+ */
+export function findUserStanding(rankings: RankingEntry[], userId: string) {
+  return findStanding(rankings, { type: 'user', id: userId });
+}
+
+/** Shared body of the two above — the discriminant is the whole difference. */
+export function findStanding(rankings: RankingEntry[], self: SelfCompetitor) {
   return rankings.find(
-    (entry) => isTeamCompetitor(entry.competitor) && entry.competitor.id === teamId,
+    (entry) => entry.competitor.type === self.type && entry.competitor.id === self.id,
   );
 }
 

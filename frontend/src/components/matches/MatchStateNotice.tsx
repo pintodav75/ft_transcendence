@@ -10,7 +10,7 @@ import {
   sideName,
   submittedSide,
 } from '@/lib/match-detail';
-import { MIN_LEAD_MINUTES } from '@/lib/team-detail';
+import { MIN_LEAD_MINUTES } from '@/lib/match-slots';
 
 import type { MatchSheet, MatchSide } from '@/lib/match-detail';
 

@@ -2,6 +2,7 @@ import { useId } from 'react';
 
 import { GameImage } from '@/components/games/GameImage';
 import { Avatar } from '@/components/ui/avatar';
+import { StatStrip } from '@/components/ui/stat-strip';
 import { formatRecord } from '@/lib/ladders';
 import { ROSTER_LIMIT, ladderSubtitle } from '@/lib/team-detail';
 import { EM_DASH } from '@/lib/utils';
@@ -31,26 +32,13 @@ type TeamHeroProps = {
   actions?: ReactNode;
 };
 
-type StatProps = {
-  label: string;
-  value: string;
-  extra?: string;
-};
-
-function Stat({ label, value, extra }: StatProps) {
-  return (
-    <div className="min-w-28 border-r border-border-subtle px-6 py-3.5 last:border-r-0">
-      <dt className="text-xs label-caps text-text-muted">{label}</dt>
-      <dd className="mt-0.5 font-mono text-xl font-bold tabular-nums text-text-primary">
-        {value}
-        {extra && <span className="ml-1 text-sm font-normal text-text-muted">{extra}</span>}
-      </dd>
-    </div>
-  );
-}
-
 // "Dossier" header: game artwork, team identity, then the stats strip. Elo, record and
 // rank come from the LADDER RANKINGS, not from GET /teams/{id}.
+//
+// ⚠️ The stats strip itself moved to `components/ui/stat-strip.tsx` ([F-SOLO]): it is handed
+// plain strings and knows nothing of teams, so it belongs in `ui/`. The identity row above it
+// deliberately stayed — a solo header shows an avatar and a pseudo, which is a different row,
+// not a parameter of this one.
 export function TeamHero({
   team,
   gameName,
@@ -97,32 +85,32 @@ export function TeamHero({
         {actions ? <div className="ml-auto flex flex-wrap gap-2">{actions}</div> : null}
       </div>
 
-      <div className="flex flex-wrap items-center border-t border-border-subtle bg-surface-card">
-        <dl className="flex flex-wrap">
-          <Stat label="Elo" value={standing ? String(standing.elo) : EM_DASH} />
-          <Stat
-            label="Record"
-            value={standing ? formatRecord(standing.wins, standing.losses) : EM_DASH}
-          />
-          <Stat
-            label="Rank"
-            value={standing ? `#${standing.rank}` : EM_DASH}
-            extra={standing ? `/ ${ladderSize}` : undefined}
-          />
-          <Stat label="Roster" value={String(memberCount)} extra={`/ ${ROSTER_LIMIT}`} />
-        </dl>
-
-        {!rankingsPending && !rankingsError && !standing && (
-          <p className="px-6 py-3 text-xs text-text-secondary">
-            Not ranked yet — a ladder line is created by this team&apos;s first match result.
-          </p>
-        )}
-        {rankingsError && (
-          <p className="px-6 py-3 text-xs text-text-secondary">
-            Ladder standings could not be loaded.
-          </p>
-        )}
-      </div>
+      <StatStrip
+        stats={[
+          { label: 'Elo', value: standing ? String(standing.elo) : EM_DASH },
+          {
+            label: 'Record',
+            value: standing ? formatRecord(standing.wins, standing.losses) : EM_DASH,
+          },
+          {
+            label: 'Rank',
+            value: standing ? `#${standing.rank}` : EM_DASH,
+            extra: standing ? `/ ${ladderSize}` : undefined,
+          },
+          { label: 'Roster', value: String(memberCount), extra: `/ ${ROSTER_LIMIT}` },
+        ]}
+        note={
+          // "No line yet" and "the request failed" must not look alike — hence the two flags.
+          rankingsError
+            ? 'Ladder standings could not be loaded.'
+            : !rankingsPending && !standing
+              ? // ⚠️ A PLAIN apostrophe (U+0027): the JSX this replaced wrote `&apos;`, which
+                // the JSX parser decodes to U+0027 — a curly ’ here would silently change the
+                // rendered text of a screen this ticket is not supposed to touch.
+                "Not ranked yet — a ladder line is created by this team's first match result."
+              : undefined
+        }
+      />
     </section>
   );
 }
