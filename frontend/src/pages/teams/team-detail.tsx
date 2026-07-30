@@ -13,6 +13,7 @@ import { TeamMatches } from '@/components/teams/detail/TeamMatches';
 import { TeamOverview } from '@/components/teams/detail/TeamOverview';
 import { Tabs } from '@/components/ui/tabs';
 import { panelId, tabId } from '@/components/ui/tab-ids';
+import { backLinkClasses } from '@/lib/back-navigation';
 import { buttonClasses } from '@/components/ui/button-variants';
 import { ApiError } from '@/lib/api';
 import { useAnnouncement } from '@/lib/use-announcement';
@@ -38,10 +39,7 @@ const MANAGE_TAB: TabItem = { id: 'manage', label: 'Manage' };
 
 function BackToTeams() {
   return (
-    <Link
-      to="/teams"
-      className="focus-ring inline-flex items-center gap-2 self-start text-xs label-caps text-text-secondary transition hover:text-text-primary"
-    >
+    <Link to="/teams" className={backLinkClasses}>
       <ArrowLeft className="size-4" />
       My teams
     </Link>

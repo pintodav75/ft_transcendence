@@ -9,6 +9,7 @@ import { MatchResultPanel } from '@/components/matches/MatchResultPanel';
 import { MatchScoreboard } from '@/components/matches/MatchScoreboard';
 import { MatchStateNotice } from '@/components/matches/MatchStateNotice';
 import { ErrorPanel } from '@/components/ui/error-panel';
+import { backLinkClasses } from '@/lib/back-navigation';
 import { buttonClasses } from '@/components/ui/button-variants';
 import { ApiError } from '@/lib/api';
 import { useAnnouncement } from '@/lib/use-announcement';
@@ -189,8 +190,7 @@ export function MatchDetail() {
       <Link
         to="/ladders/$ladderId"
         params={{ ladderId: match.ladderId }}
-        // `py-1` takes the standalone link from 16 px to 24 px, the WCAG 2.5.8 floor.
-        className="focus-ring inline-flex items-center gap-2 self-start py-1 text-xs label-caps text-text-secondary transition hover:text-text-primary"
+        className={backLinkClasses}
       >
         <ArrowLeft aria-hidden="true" className="size-4" />
         {match.ladder.name} standings

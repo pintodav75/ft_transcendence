@@ -12,6 +12,7 @@ import { SoloMatches } from '@/components/solo/SoloMatches';
 import { SoloOverview } from '@/components/solo/SoloOverview';
 import { Tabs } from '@/components/ui/tabs';
 import { ApiError } from '@/lib/api';
+import { backLinkClasses } from '@/lib/back-navigation';
 import { buttonClasses } from '@/components/ui/button-variants';
 import { cancelMatchErrorMessage, useCancelMatch } from '@/lib/match-mutations';
 import { findUserStanding, isValidLadderId, useLadder, useLadderRankings } from '@/lib/ladders';
@@ -38,10 +39,7 @@ const TABS: TabItem[] = [
 
 function BackToSolo() {
   return (
-    <Link
-      to="/solo"
-      className="focus-ring inline-flex items-center gap-2 self-start text-xs label-caps text-text-secondary transition hover:text-text-primary"
-    >
+    <Link to="/solo" className={backLinkClasses}>
       <ArrowLeft className="size-4" />
       Solo ladders
     </Link>

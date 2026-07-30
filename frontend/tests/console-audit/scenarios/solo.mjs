@@ -463,6 +463,61 @@ export async function run({
       `adversaire vivant : ${foeLinkCount} lien (1 attendu) vers « ${foeHref ?? '—aucun—'} » (/players/${foe.pseudo} attendu)`,
     );
 
+    // La page joueur est une FEUILLE atteinte depuis six endroits (classement solo, classement
+    // d'un ladder d'équipe, effectif, composition d'un match, historique, recherche) : son
+    // retour lit l'historique du navigateur, il n'a pas de destination fixe. Le vérifier
+    // DEPUIS le classement solo prouve le cas que David a signalé ; le même bouton sert le
+    // parcours My teams, qui emprunte exactement le même code.
+    // ⚠️ Un prédicat sur l'URL EXACTE, pas un motif : `waitForURL(/\/players\//)` rendrait la
+    // main immédiatement si l'URL courante matchait déjà. Et `.catch()` sur chaque attente —
+    // une attente qui LÈVE fait sortir le harnais en `exit 2` au lieu d'un rouge imputable.
+    await foeLink.click();
+    const reachedPlayer = await page
+      .waitForURL((url) => url.pathname === `/players/${foe.pseudo}`, { timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    // 🔑 Le libellé NOMME l'origine : « Solo ladder », pas « Back ». C'est tout l'intérêt du
+    // ticket — le viser dans le sélecteur garde la table de correspondance chemin -> libellé,
+    // qu'un « Back » générique laisserait passer.
+    // ⚠️ Motif ANCRÉ et insensible à la casse, jamais `{ exact: true }` : `label-caps` met le
+    // libellé en majuscules et la comparaison exacte est sensible à la casse (un premier jet
+    // est sorti ROUGE dessus) ; sans ancres, Playwright matche en SOUS-CHAÎNE.
+    const backButton = main.getByRole('button', { name: /^solo ladder$/i });
+    // ⚠️ `waitForURL` rend la main dès que l'URL CHANGE, avant que React ait rendu la route.
+    // On attend donc un repère de la page RENDUE — son titre — avant de compter quoi que ce
+    // soit : compter tout de suite lit 0 des deux côtés, et le comptage du repli générique
+    // serait vert par construction (il attend justement 0). `appears` rend `false` au lieu de
+    // lever, pour qu'une vraie disparition sorte ROUGE et non en `exit 2`.
+    const playerPageRendered = await appears(
+      main.getByRole('heading', { level: 1, name: `@${foe.pseudo}` }),
+    );
+    const backCount = playerPageRendered ? await backButton.count() : 0;
+    const genericBack = playerPageRendered
+      ? await main.getByRole('button', { name: /^back$/i }).count()
+      : 0;
+    // Le lien fait 16 px de haut sans `py-1`, sous le plancher de 24 px de WCAG 2.5.8.
+    const backBox = backCount === 1 ? await backButton.boundingBox().catch(() => null) : null;
+    const backHeight = backBox ? Math.round(backBox.height) : 0;
+    const wentBack =
+      backCount === 1 &&
+      (await backButton
+        .click()
+        .then(() =>
+          page.waitForURL((url) => url.pathname === `/solo/${chess.id}`, { timeout: 10000 }),
+        )
+        .then(() => true)
+        .catch(() => false));
+    step(
+      'S13d',
+      reachedPlayer &&
+        playerPageRendered &&
+        backCount === 1 &&
+        genericBack === 0 &&
+        backHeight >= 24 &&
+        wentBack,
+      `page joueur rendue=${playerPageRendered}, bouton « Solo ladder » : ${backCount} (1 attendu), repli générique « Back » : ${genericBack} (0 attendu — l'origine est nommée), hauteur ${backHeight}px (≥ 24 attendus — WCAG 2.5.8), retour sur /solo/${chess.id}=${wentBack}`,
+    );
+
     // ⚠️ Sur un non-2xx la réponse n'a pas de clé `sides` et la lecture lèverait -> exit 2
     // « harnais en échec » au lieu d'un rouge imputable.
     const sheetRes = await api(user, `/matches/${playedId}`);

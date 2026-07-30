@@ -3,6 +3,7 @@ import { Trophy } from 'lucide-react';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Pill } from '@/components/ui/pill';
+import { useBackFrom } from '@/lib/back-navigation';
 import { formatEloDelta, sideAvatarUrl, sideInitials, sideName } from '@/lib/match-detail';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +29,7 @@ type MatchSideCardProps = {
  * the backend never computed.
  */
 export function MatchSideCard({ side, isWinner, solo }: MatchSideCardProps) {
+  const backFrom = useBackFrom();
   const name = sideName(side, solo);
   // On a 1v1 the PLAYER is the camp, so the link goes to his profile instead of a team page
   // that does not exist. A teamless side on a TEAM ladder is a dissolved team, not a player:
@@ -62,6 +64,8 @@ export function MatchSideCard({ side, isWinner, solo }: MatchSideCardProps) {
         <Link
           to="/players/$pseudo"
           params={{ pseudo: player.pseudo }}
+          // Names what the player page goes back to (this match sheet).
+          state={backFrom}
           className="focus-ring flex min-w-0 flex-col items-center gap-3 rounded-card underline-offset-4 hover:underline"
         >
           {identity}
