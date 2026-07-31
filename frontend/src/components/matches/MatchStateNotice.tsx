@@ -1,3 +1,5 @@
+import { Link } from '@tanstack/react-router';
+
 import { Callout } from '@/components/ui/callout';
 import {
   CONFIRMATION_WINDOW_HOURS,
@@ -39,7 +41,27 @@ export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps)
       <Callout tone="danger">
         <strong className="text-text-primary">The two sides disagree.</strong> Each reported a
         different result, so the match is on hold until an admin settles it. Nothing is applied to
-        the ladder in the meantime.
+        the ladder in the meantime.{' '}
+        {/* 🔑 THE END OF A DEAD END ([F-DISPUTE]). This sentence used to stop here, and the
+            dispute file it describes had no screen at all: no way to see what each camp claimed,
+            no way to file the screenshot that decides it — while a dispute nobody settles is
+            CANCELLED after 24 h. `disputeId` is served by `GET /matches/{id}` exactly while the
+            match is `disputed`, so the link costs no request. It is guarded rather than assumed:
+            the field is nullable in the contract, and a link to `/disputes/null` would be a 404
+            in the console, i.e. a project-rejection criterion. */}
+        {match.disputeId ? (
+          // Inline prose link, same underline affordance `LadderOpenSlots` uses inside a
+          // `Callout` — plus `focus-ring`, which that one predates. Four utilities written here
+          // rather than a shared helper: there is no third caller yet, and generalising would
+          // mean touching a component this ticket has no business touching.
+          <Link
+            to="/disputes/$disputeId"
+            params={{ disputeId: match.disputeId }}
+            className="focus-ring rounded-control font-bold text-text-primary underline underline-offset-2"
+          >
+            Open the dispute file
+          </Link>
+        ) : null}
       </Callout>
     );
   }

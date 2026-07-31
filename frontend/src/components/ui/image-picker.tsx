@@ -2,6 +2,7 @@ import { ImagePlus, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { FormMessage } from '@/components/ui/form-message';
+import { ProgressBar } from '@/components/ui/progress-bar';
 import { cn } from '@/lib/utils';
 
 // Mirrors the backend's own gate on POST /teams/{id}/logo (and
@@ -138,20 +139,10 @@ export function ImagePicker({
         ) : null}
       </div>
 
+      {/* Moved to `ui/progress-bar.tsx` by [F-DISPUTE] (rule of the second use — the evidence
+          picker needs the same bar). Rendered DOM unchanged, attributes included. */}
       {typeof progress === 'number' ? (
-        <div
-          role="progressbar"
-          aria-valuenow={progress}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={`Uploading ${label.toLowerCase()}`}
-          className="h-1.5 w-full overflow-hidden rounded-full bg-border-subtle"
-        >
-          <div
-            className="h-full rounded-full bg-action-primary transition-[width]"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        <ProgressBar value={progress} label={`Uploading ${label.toLowerCase()}`} />
       ) : null}
 
       {validationError ? <FormMessage>{validationError}</FormMessage> : null}

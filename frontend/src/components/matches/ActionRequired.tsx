@@ -36,10 +36,23 @@ type ActionRequiredProps = {
  * no submission timestamp (only `scheduledAt` / `startedAt` / `completedAt`). Counting down
  * from anything else would put a wrong number on screen; the rule is stated once, in prose.
  *
- * ⚠️ ONE link per row and nothing nested inside it: the whole card goes to the match sheet,
- * which is where confirming and contesting live (FT-4B). The opponent's own page is one click
- * away from the table below — putting a second target inside this one would make a card whose
- * two halves lead to different places.
+ * ⚠️ ONE link per row and nothing nested inside it. The opponent's own page is one click away
+ * from the table below — putting a second target inside this one would make a card whose two
+ * halves lead to different places, and an `<a>` inside an `<a>` is invalid HTML that browsers
+ * repair by silently splitting the DOM.
+ *
+ * 🔑 WHERE THAT ONE LINK GOES DEPENDS ON THE ROW, since [F-DISPUTE]. An `awaiting_confirmation`
+ * match goes to its SHEET, which is where confirming and contesting live (FT-4B). A `disputed`
+ * one goes to its DISPUTE FILE, because the sheet offers it nothing at all: no form, just a
+ * notice saying an admin has to decide. The file is where the two claims, the evidence thread,
+ * the 24 h deadline and the only remaining action — filing a screenshot — actually are. The way
+ * back to the sheet is carried by the file's own header, which is what makes this acceptable.
+ *
+ * 🚨 IT IS THE STATUS THAT DECIDES, NOT THE MERE PRESENCE OF `disputeId`. `GET /matches/me` serves
+ * that id whatever the status precisely so a settled dispute keeps its badge in the history — so
+ * a `completed` match can carry one. Routing on it alone would send a finished match to an
+ * arbitration file instead of to its result. (Within this section the two happen to coincide;
+ * the guard is written for the day a third status joins the list.)
  *
  * 🚨 THE COPY MUST NEVER SAY THE MATCH IS WAITING ON *ME*, AND THIS IS NOT A STYLE CHOICE — the
  * payload cannot support the claim. `GET /matches/me` exposes `score` (`match_sides.score`,
@@ -66,8 +79,8 @@ export function ActionRequired({ matches, ladderOf }: ActionRequiredProps) {
           ? 'One match is still open.'
           : `${matches.length} matches are still open.`}{' '}
         A reported score left alone is applied automatically after 24 hours, and a dispute
-        nobody settles is cancelled after the same delay — open the sheet to see where it
-        stands and who is expected to answer.
+        nobody settles is cancelled after the same delay — open each one to see where it stands
+        and who is expected to answer.
       </p>
 
       {/* Named so a screen reader hears WHICH list this is — the page holds a second one (the
@@ -89,7 +102,14 @@ export function ActionRequired({ matches, ladderOf }: ActionRequiredProps) {
                   system. The class string itself moved to `MatchLineLink` when `/home` became
                   its second reader; the rendered DOM is unchanged. */}
               <MatchLineLink
-                matchId={match.id}
+                target={
+                  // A dispute is settled by an ADMIN reading the file, so that is where the row
+                  // leads — the sheet has no control to offer on a `disputed` match. Guarded on
+                  // the status AND on the id: `disputeId` outlives the dispute (see the docblock).
+                  match.status === 'disputed' && match.disputeId
+                    ? { kind: 'dispute', disputeId: match.disputeId }
+                    : { kind: 'match', matchId: match.id }
+                }
                 accentClass={matchAccentClass(matchStatusView(match).tone)}
               >
                 <MatchStatusPill match={match} />

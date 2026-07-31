@@ -3963,7 +3963,7 @@ export interface paths {
         };
         /**
          * Détail d'une dispute + déclarations des camps + fil de preuves
-         * @description Rend l'état de la dispute (statut, résolution, note d'arbitrage, date), **ce que chaque camp a déclaré** (les `sides` : index, identité de la team ou du joueur, et `submittedWinnerSideId` = le vainqueur annoncé par ce camp) et le **fil de preuves trié par date** — chaque post avec son image, son message, son camp (`matchSideId`) et son auteur (pseudo/avatar). Ce sont les `sides` qui rendent l'arbitrage possible : l'admin voit qui est le side 0/1 et ce que chacun a annoncé, puis choisit `side_0_wins` / `side_1_wins`. Lecture ouverte à tout **participant du match** (banc compris, même garde que `GET /matches/:id`) **OU à un admin**. Projection explicite — aucun champ privé. Chaque `evidenceUrl` est une **URL présignée courte durée** (bucket privé), générée seulement après la garde. Reste consultable après résolution (historique).
+         * @description Rend l'état de la dispute (statut, résolution, note d'arbitrage, date), **ce que chaque camp a déclaré** (les `sides` : index, identité de la team ou du joueur, et `submittedWinnerSideId` = le vainqueur annoncé par ce camp) et le **fil de preuves trié par date** — chaque post avec son image, son message, son camp (`matchSideId`) et son auteur (pseudo/avatar). Ce sont les `sides` qui rendent l'arbitrage possible : l'admin voit qui est le side 0/1 et ce que chacun a annoncé, puis choisit `side_0_wins` / `side_1_wins`. Lecture ouverte à tout **participant du match** (banc compris, même garde que `GET /matches/:id`) **OU à un admin**. Projection explicite — aucun champ privé. Chaque `evidenceUrl` est une **URL présignée courte durée** (bucket privé), générée seulement après la garde. Reste consultable après résolution (historique). Sert aussi le bloc **`match`** (statut, coup d'envoi, ladder + jeu) et le **`dispute.createdAt`** dont dépend l'échéance de 24 h : la page de litige se rend ainsi **en un seul appel**, sans dépendre de `GET /matches/{id}` — qui refuserait un admin sur un match `disputed`.
          */
         get: {
             parameters: {
@@ -3985,68 +3985,99 @@ export interface paths {
                         "application/json": {
                             dispute: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** Format: uuid */
-                                matchId?: string;
+                                matchId: string;
                                 /** @enum {string} */
-                                status?: "open" | "resolved";
+                                status: "open" | "resolved";
                                 /**
                                  * @description `null` tant que la dispute est `open`.
                                  * @enum {string|null}
                                  */
-                                resolution?: "side_0_wins" | "side_1_wins" | "cancelled" | null;
-                                resolutionNotes?: string | null;
+                                resolution: "side_0_wins" | "side_1_wins" | "cancelled" | null;
+                                resolutionNotes: string | null;
+                                /**
+                                 * Format: date-time
+                                 * @description Ouverture de la dispute — c'est CET instant qui arme le timeout de **24 h** du job B7 (ni le coup d'envoi, ni la soumission du score). Sans lui le front ne peut afficher aucune échéance, alors que c'est elle qui fait perdre un match par forfait de fait.
+                                 */
+                                createdAt: string;
                                 /** Format: date-time */
-                                resolvedAt?: string | null;
+                                resolvedAt: string | null;
+                                /**
+                                 * @description **Qui** a clos le dossier : `admin` (arbitrage via `POST /disputes/{id}/resolve`) ou `timeout` (job B7 — la dispute est annulée 24 h après son ouverture faute d'arbitrage). `null` tant que la dispute est `open`. 🚨 Les deux chemins écrivent les **mêmes** colonnes, et la `resolutionNotes` posée par le job est une **ligne de log interne** — sans ce champ le front ne peut ni les distinguer ni éviter de la servir comme la prose d'un arbitre. Dérivé de `resolved_by_user_id`, que le job ne pose jamais — **plus** la `resolution` : le job n'écrit **que** `cancelled`, donc un vainqueur désigné implique un humain. Sans cette seconde branche, un arbitrage dont l'admin a supprimé son compte (`set null`) serait servi comme `timeout`, un état que le job ne sait pas produire. ⚠️ Reste lossy dans un seul cas, assumé : un admin qui règle `cancelled` **puis** supprime son compte est lu comme un timeout — on préfère taire une note vraie que présenter une ligne de log interne comme la prose d'un arbitre.
+                                 * @enum {string|null}
+                                 */
+                                settledBy: "admin" | "timeout" | null;
+                            };
+                            /** @description Le match et l'identité de son ladder, servis AVEC la dispute (une requête jointe, après la garde). ⚠️ Le front ne peut PAS aller les chercher sur `GET /matches/{id}` : cette route refuse (403) un match `disputed` à qui n'est pas participant, or un **admin** lit légitimement cette dispute. Et `format` est la **seule autorité** pour dire « 1v1 » — un `team: null` dans `sides` ne signifie pas solo (une équipe peut être dissoute une fois le match terminé, et une dispute reste consultable après arbitrage). */
+                            match: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Statut du MATCH, pas de la dispute : `disputed` tant qu'elle est ouverte, `completed`/`cancelled` une fois arbitrée. */
+                                status: string;
+                                /** Format: date-time */
+                                scheduledAt: string | null;
+                                ladder: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** @example Counter-Strike 2 5v5 */
+                                    name: string;
+                                    /** @enum {string} */
+                                    format: "1v1" | "2v2" | "3v3" | "5v5";
+                                    /** @example cs2 */
+                                    gameId: string;
+                                    /** @example Counter-Strike 2 */
+                                    gameName: string;
+                                };
                             };
                             /** @description Les deux camps, triés par `sideIndex` (0 = créateur, 1 = accepteur). `submittedWinnerSideId` = le side que CE camp a déclaré vainqueur (B6). */
                             sides: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** @enum {integer} */
-                                sideIndex?: 0 | 1;
+                                sideIndex: 0 | 1;
                                 /**
                                  * Format: uuid
                                  * @description Vainqueur annoncé par ce camp ; `null` si pas de soumission.
                                  */
-                                submittedWinnerSideId?: string | null;
+                                submittedWinnerSideId: string | null;
                                 /** @description `null` en 1v1 (pas de team). */
-                                team?: {
+                                team: {
                                     /** Format: uuid */
-                                    id?: string;
-                                    name?: string;
-                                    logoUrl?: string | null;
+                                    id: string;
+                                    name: string;
+                                    logoUrl: string | null;
                                     /** Format: uuid */
-                                    captainId?: string;
+                                    captainId: string;
                                 } | null;
-                                players?: {
+                                players: {
                                     /** Format: uuid */
-                                    id?: string;
+                                    id: string;
                                     /** @example alice */
-                                    pseudo?: string;
-                                    displayName?: string | null;
-                                    avatarUrl?: string | null;
+                                    pseudo: string;
+                                    displayName: string | null;
+                                    avatarUrl: string | null;
                                 }[];
                             }[];
                             /** @description Le fil, trié par `submittedAt` croissant. */
                             evidence: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** Format: uuid */
-                                matchSideId?: string;
+                                matchSideId: string;
                                 /** @description URL présignée courte durée (bucket privé), valable ~5 min. */
-                                evidenceUrl?: string;
-                                message?: string | null;
+                                evidenceUrl: string;
+                                message: string | null;
                                 /** Format: date-time */
-                                submittedAt?: string;
+                                submittedAt: string;
                                 /** @description `null` si l'auteur a supprimé son compte. */
-                                author?: {
+                                author: {
                                     /** Format: uuid */
-                                    id?: string;
+                                    id: string;
                                     /** @example alice */
-                                    pseudo?: string;
-                                    displayName?: string | null;
-                                    avatarUrl?: string | null;
+                                    pseudo: string;
+                                    displayName: string | null;
+                                    avatarUrl: string | null;
                                 } | null;
                             }[];
                         };

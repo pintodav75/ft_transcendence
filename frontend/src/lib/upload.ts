@@ -7,6 +7,26 @@ export type UploadOptions = {
   // 'avatar'). The server only looks at the first file part, but the name is
   // still the documented contract.
   field: string
+  /**
+   * Extra TEXT parts sent alongside the file, in the same multipart body.
+   *
+   * 🔑 Added by [F-DISPUTE], which is the first route that takes a file AND a
+   * field: `POST /disputes/{id}/evidence` wants `evidence` (the file) plus a
+   * mandatory `message`, and refuses anything else. Before this, `uploadFile`
+   * could only ever send the file, so the dispute form would have had to drop
+   * down to `fetch` — and `fetch` has NO upload-progress event, which is the
+   * one thing this module exists to provide. That is exactly the gap review
+   * flagged on [F4]; do not reintroduce it.
+   *
+   * ⚠️ THE PART COUNT IS A CONTRACT, NOT A DETAIL. That route caps the body at
+   * `files: 1, fields: 1, parts: 2`, so ONE extra entry here — even an empty
+   * hidden one — makes the whole request a 400. Callers pass exactly what the
+   * route documents.
+   *
+   * Omitted by the avatar and team-logo callers, whose routes read the file and
+   * nothing else: the body they send is byte-identical to before.
+   */
+  fields?: Record<string, string>
   // Percent (0-100), derived from XHR's native `upload.onprogress` — `fetch`
   // has no upload-progress event, which is the whole reason this file uses
   // XMLHttpRequest instead of apiFetch.
@@ -104,6 +124,14 @@ function sendUpload<T>(
     }
 
     const formData = new FormData()
+    // Text parts FIRST, file last. The multipart body is a STREAM and busboy hands the parts
+    // over in wire order; the small fields are therefore parsed before the handler starts
+    // buffering a 5 MB body. The current handler happens to loop over every part before it
+    // validates, so this buys nothing today — it is ordering hygiene, so that a server that
+    // ever short-circuits on a missing field can do so without reading the upload first.
+    for (const [name, value] of Object.entries(options.fields ?? {})) {
+      formData.append(name, value)
+    }
     formData.append(options.field, file)
     xhr.send(formData)
   })
