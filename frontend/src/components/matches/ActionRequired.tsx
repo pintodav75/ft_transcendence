@@ -1,8 +1,6 @@
-import { Link } from '@tanstack/react-router';
-
+import { MatchLineLink } from '@/components/matches/MatchLineLink';
 import { MatchStatusPill } from '@/components/matches/MatchStatusPill';
 import { SectionTitle } from '@/components/ui/section-title';
-import { cn } from '@/lib/utils';
 import { formatMatchDate } from '@/lib/match-detail';
 import { matchAccentClass, matchStatusView } from '@/components/matches/match-status';
 import { matchOpponentView } from '@/lib/solo';
@@ -16,8 +14,12 @@ type ActionRequiredProps = {
 };
 
 /**
- * The « waiting on somebody » section of `/history`, and the real reason the page is worth
- * building.
+ * The « waiting on somebody » section, shared by `/history` (where it is the real reason the
+ * page is worth building) and by `/home`.
+ *
+ * ⚠️ It MOVED from `components/history/` to `components/matches/` when `/home` became its second
+ * reader — it describes matches, not a history — exactly as `MatchStatusPill` did on FT-4A. Not
+ * a line of its logic or of its markup changed with the move.
  *
  * 🔑 NOTHING ELSE IN THE APP GROUPS THESE. A match in `awaiting_confirmation` or `disputed`
  * is visible only from the page of the team that played it, or from the one solo ladder it
@@ -82,18 +84,13 @@ export function ActionRequired({ matches, ladderOf }: ActionRequiredProps) {
 
           return (
             <li key={match.id}>
-              <Link
-                to="/matches/$matchId"
-                params={{ matchId: match.id }}
-                // The card is NEUTRAL and its left edge carries the colour — the same accent
-                // the table rows use (`matchAccentClass`), so the two halves of the page read
-                // as one system. Painting the whole card red was the first attempt: a match
-                // merely waiting on my confirmation is not an error, and two red blocks made
-                // the top of the page shout at 375 px.
-                className={cn(
-                  'focus-ring flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-control border border-l-2 border-border-subtle bg-surface-card-strong/60 px-4 py-3 transition hover:bg-surface-card',
-                  matchAccentClass(matchStatusView(match).tone),
-                )}
+              {/* The card is NEUTRAL and its left edge carries the colour — the same accent the
+                  table rows use (`matchAccentClass`), so the two halves of the page read as one
+                  system. The class string itself moved to `MatchLineLink` when `/home` became
+                  its second reader; the rendered DOM is unchanged. */}
+              <MatchLineLink
+                matchId={match.id}
+                accentClass={matchAccentClass(matchStatusView(match).tone)}
               >
                 <MatchStatusPill match={match} />
                 <span className="text-sm font-bold text-text-primary">
@@ -107,7 +104,7 @@ export function ActionRequired({ matches, ladderOf }: ActionRequiredProps) {
                 <span className="font-mono text-xs text-text-secondary sm:ms-auto">
                   {formatMatchDate(match.scheduledAt)}
                 </span>
-              </Link>
+              </MatchLineLink>
             </li>
           );
         })}

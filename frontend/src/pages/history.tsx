@@ -1,7 +1,7 @@
 import { History as HistoryIcon } from 'lucide-react';
 import { useState } from 'react';
 
-import { ActionRequired } from '@/components/history/ActionRequired';
+import { ActionRequired } from '@/components/matches/ActionRequired';
 import { Callout } from '@/components/ui/callout';
 import { HistoryFilters } from '@/components/history/HistoryFilters';
 import { HistoryMatches } from '@/components/history/HistoryMatches';

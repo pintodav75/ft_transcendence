@@ -68,6 +68,15 @@ export type OpenSlotFilters = {
    * would hide the very slots the user can take.
    */
   acceptableOnly: boolean;
+  /**
+   * How many slots to ask for. Omitted means `OPEN_SLOTS_LIMIT` — the board's own value.
+   *
+   * Added for `/home`, which shows a THREE-row teaser and sends the reader here for the rest.
+   * ⚠️ It is part of the cache key by construction (the key is this whole object), so the
+   * teaser and the board never share an entry — which is what we want: they are two different
+   * lists. Leaving it out keeps `/matchmaking`'s key byte-identical to what it was.
+   */
+  limit?: number;
 };
 
 /**
@@ -82,7 +91,7 @@ function openSlotsSearch(filters: OpenSlotFilters) {
   if (filters.gameId) params.set('gameId', filters.gameId);
   if (filters.format) params.set('format', filters.format);
   if (filters.acceptableOnly) params.set('acceptable', 'true');
-  params.set('limit', String(OPEN_SLOTS_LIMIT));
+  params.set('limit', String(filters.limit ?? OPEN_SLOTS_LIMIT));
 
   return params.toString();
 }

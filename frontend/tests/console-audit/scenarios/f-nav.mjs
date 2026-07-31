@@ -179,9 +179,22 @@ export async function run({ page, setPhase, step, countRequests, ORIGIN }) {
   // AUCUNE paire de pages libres, et le mécanisme « deux navigations client » est mort.
   //
   // ⚠️ MAIS LE CHECK N'EST PAS DEVENU INDÉPENDANT D'UNE PAGE POUR AUTANT : `N5` exige toujours
-  // que **`/home` ne demande pas les ladders**. Tant que c'est un stub, c'est gratuit ; le jour
-  // où `/home` cessera d'en être un, il faudra lui trouver une cible — la dernière page du rail
-  // qui ne dépende pas des données de référence, ou une route neutre créée pour la mesure.
+  // que **`/home` ne demande pas les ladders**.
+  //
+  // 🔑 CE N'EST PLUS GRATUIT, ET C'EST CE QUI LE REND MEILLEUR. [F-HOME] a rempli `/home` — elle
+  // émet désormais 5 requêtes — mais **`GET /ladders` n'en fait délibérément pas partie** : c'est
+  // le budget de la page. Nommer le ladder d'une ligne aurait coûté une 6ᵉ requête, et
+  // `matchLabeller(undefined, games)` retombe déjà sur `<jeu> <format>`. La cible de `N5` est
+  // donc passée d'« une page qui ne demande rien » (opportuniste, périssable, re-ciblée trois
+  // fois) à « une page dont la contrainte est écrite » — elle ne bougera plus toute seule.
+  //
+  // ⚠️ La contrainte est gardée des DEUX côtés : `H2` de `scenarios/home.mjs` échoue si `/home`
+  // se met à demander les ladders. Sans lui, un futur ticket ferait tomber `N5` ici, sur un
+  // scénario qui parle de la barre de recherche et n'a rien à voir avec la cause.
+  //
+  // ⚠️ Le jour où `/home` devrait vraiment charger les ladders, il faudra rendre à `N5` une
+  // cible : la dernière page du rail qui ne dépende pas des données de référence, ou une route
+  // neutre créée pour la mesure.
   //
   // 🔑 LE REPLI ÉTAIT DÉJÀ ÉCRIT ICI ET C'EST CELUI QU'ON APPLIQUE : repartir d'un `page.goto`
   // (cache React Query vidé par le rechargement) plutôt que de chercher une page qui ne
