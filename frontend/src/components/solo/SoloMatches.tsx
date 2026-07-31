@@ -11,8 +11,11 @@ type SoloMatchesProps = {
   isPending: boolean;
   isError: boolean;
   onCancelSlot?: (match: SoloMatch) => void;
-  /** Focus landing point after a slot is cancelled — see `MatchHistoryTable`. */
-  historyRef?: Ref<HTMLDivElement>;
+  /**
+   * Focus landing point after a slot is cancelled — see `MatchHistoryTable`. `HTMLElement`
+   * since [FX-TABLE]: under `sm` it lands on the card list, not on the table's region.
+   */
+  historyRef?: Ref<HTMLElement>;
 };
 
 /**

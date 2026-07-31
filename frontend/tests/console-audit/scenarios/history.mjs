@@ -494,26 +494,64 @@ export async function run({
     );
 
     // ------------------------------------------------------------------ §10 375 px
-    setPhase('10. /history à 375 px');
+    // 🚨 RÉÉCRIT PAR [FX-TABLE]. Ce check exigeait l'inverse : que la table DÉBORDE dans sa
+    // propre boîte à 375 px (426 px hors champ sur cet écran), ce qui était vrai et illisible —
+    // l'adversaire et le statut passaient derrière un défilement horizontal. Sous `sm` la table
+    // est désormais REMPLACÉE par une liste de cartes, et c'est ce remplacement qu'on garde.
+    setPhase('10. /history à 375 px : la table cède la place aux cartes');
     await page.goto(`${ORIGIN}/history`, { waitUntil: 'networkidle' });
     await appears(historyRegion);
     await page.setViewportSize({ width: 375, height: 900 });
-    await page.waitForTimeout(400);
+    // La bascule lit `matchMedia` en synchrone (pas d'effet, pas de flash), mais React doit
+    // tout de même rendre : on attend la LISTE elle-même plutôt qu'un délai arbitraire.
+    const cardList = main.getByRole('list', { name: /Match history/ });
+    const cardsShown = await appears(cardList);
+    const cards = cardsShown ? await cardList.locator('> li').count() : 0;
+    // 🚨 UN SEUL ARBRE DANS LE DOM, jamais deux. Un double rendu CSS (`sm:hidden` /
+    // `hidden sm:block`) ferait remonter DEUX nœuds à chaque `getByText` — ici, et à 1280 px
+    // sur les huit scénarios qui assertent ce tableau. La table doit avoir disparu, pas être
+    // masquée : `main.locator('table')` compte aussi ce qui est en `display:none`.
+    const tablesAt375 = await main.locator('table').count();
+    const regionsAt375 = await main.getByRole('region', { name: /Match history/ }).count();
+    // Plus d'en-tête de colonne : un chiffre nu ne veut plus rien dire, chaque valeur porte
+    // donc son étiquette (`<dt>`), et la règle produit tient toujours — la date ouvre la fiche.
+    const cardLabels = await cardList.locator('dt').evaluateAll((nodes) =>
+      [...new Set(nodes.map((node) => node.textContent.trim()))].sort(),
+    );
+    const cardSheetLinks = await cardList.locator('a[href^="/matches/"]').count();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
-    // La table déborde DANS SA PROPRE BOÎTE, et c'est voulu (elle est `overflow-x-auto`,
-    // focusable et nommée pour rester atteignable au clavier) : ce qui ne doit jamais déborder,
-    // c'est le DOCUMENT. Les deux mesures ensemble disent laquelle est laquelle.
-    const boxScroll = await historyRegion
-      .evaluate((node) => node.scrollWidth - node.clientWidth)
-      .catch(() => -1);
+    const labelsExpected = ['Elo', 'Ladder', 'Score'];
     step(
       'H16',
-      overflow <= 0 && boxScroll > 0,
-      `débordement horizontal du DOCUMENT à 375 px : ${overflow}px (≤ 0 attendu) ; débordement interne de la table : ${boxScroll}px (> 0 attendu — elle scrolle dans sa boîte, qui est focusable et nommée)`,
+      overflow <= 0 &&
+        cards === 4 &&
+        tablesAt375 === 0 &&
+        regionsAt375 === 0 &&
+        cardSheetLinks === 4 &&
+        labelsExpected.every((label) => cardLabels.includes(label)),
+      `débordement horizontal du DOCUMENT à 375 px : ${overflow}px (≤ 0 attendu) ; cartes rendues : ${cards} (4 attendues), tableau résiduel : ${tablesAt375} (0 attendu — un seul arbre monté), région défilante résiduelle : ${regionsAt375} (0 attendue — plus rien ne déborde), liens vers une fiche : ${cardSheetLinks} (4 attendus), étiquettes : ${JSON.stringify(cardLabels)} (${labelsExpected.join(', ')} attendues)`,
     );
+
+    // ------------------------------------------------------- §10b retour à 1280 px
+    // 🔑 LA LARGEUR QUE PERSONNE NE GARDAIT. Seul 375 px était mesuré : le `<span class="sr-only">`
+    // de l'en-tête Actions avait déjà élargi le DOCUMENT de 253 px, et rien n'aurait vu la même
+    // faute revenir en grand. Le critère est le débordement du DOCUMENT — la table, elle, a le
+    // droit de défiler dans sa propre boîte.
+    setPhase('10b. /history à 1280 px : la table revient, le document ne déborde pas');
     await page.setViewportSize({ width: 1280, height: 900 });
+    const backToTable = await appears(historyRegion);
+    const wideRows = backToTable ? await historyRegion.locator('tbody tr').count() : 0;
+    const wideCards = await main.getByRole('list', { name: /Match history/ }).count();
+    const wideOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    step(
+      'H16b',
+      backToTable && wideRows === 4 && wideCards === 0 && wideOverflow <= 0,
+      `débordement horizontal du DOCUMENT à 1280 px : ${wideOverflow}px (≤ 0 attendu) ; tableau revenu = ${backToTable} avec ${wideRows} ligne(s) (4 attendues), liste de cartes résiduelle : ${wideCards} (0 attendue)`,
+    );
 
     // ------------------------------------- §11 les deux pannes que la doc PROMET de tenir
     // ⚠️ CES DEUX ÉTATS ÉTAIENT REVENDIQUÉS DANS `docs/frontend.md` ET GARDÉS PAR RIEN — c'est

@@ -260,6 +260,20 @@ export async function run({ page, setPhase, step, countRequests, ORIGIN }) {
 
   setPhase('8. le champ ne survit pas à un changement de route');
   await input.pressSequentially('au', { delay: 60 });
+  // ⚠️ On REFERME le panneau avant de cliquer dans le rail, et le champ garde sa valeur : c'est
+  // exactement le geste que N9 vient de valider (clic extérieur = panneau fermé, texte intact ;
+  // seul Escape vide le champ, cf. N10). L'intention de N11 est donc entière — on navigue bien
+  // avec « au » encore saisi.
+  //
+  // 🚨 SANS CE CLIC, LE SCÉNARIO DÉPEND DU CONTENU DE LA BASE DE DEV. Le panneau de résultats
+  // se déploie sous la recherche, c'est-à-dire PAR-DESSUS les items du rail : dès que « au »
+  // ramène assez de comptes (les `audit…` laissés par des campagnes précédentes s'accumulent et
+  // matchent tous), il recouvre le lien Solo et Playwright refuse de cliquer sur un élément
+  // intercepté → `locator.click` expire à 30 s et la campagne sort en **exit 2**, sans un seul
+  // check rouge pour l'expliquer. Reproduit sur `master` comme sur la branche, avec le compte
+  // `audit479552133x1` daté du 31/07 06:32. Invariant du repo : un scénario ne doit JAMAIS
+  // supposer qu'il est seul sur la base de dev — on durcit le scénario, on ne purge pas.
+  await page.locator('main').click({ position: { x: 4, y: 4 } });
   await links.nth(2).click(); // Solo
   await page.waitForURL('**/solo');
   const afterNav = await input.inputValue();

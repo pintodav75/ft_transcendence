@@ -84,7 +84,9 @@ export function TeamDetail() {
   // Overview aucun titre ne survit (la section « Next match » disparaît en entier), on se
   // rabat donc sur le panneau, qui est nommé par son onglet.
   const overviewPanelRef = useRef<HTMLDivElement>(null);
-  const matchHistoryRef = useRef<HTMLDivElement>(null);
+  // `HTMLElement` depuis [FX-TABLE] : l'historique pose le focus sur sa région défilante à
+  // partir de `sm`, et sur le `<ul>` de ses cartes en dessous — deux balises, un seul usage.
+  const matchHistoryRef = useRef<HTMLElement>(null);
   // UNE région live pour la page, donc UN message : deux états concurrents (« ouvert » et
   // « annulé ») laissaient le plus ancien gagner et la région finissait par contredire la
   // bannière visible. Défaut trouvé en review de FX-FOCUS.

@@ -1,10 +1,12 @@
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { X } from 'lucide-react';
 
 import { InlineButton } from '@/components/ui/inline-button';
+import { MatchDateLink } from '@/components/matches/MatchDateLink';
+import { MatchOpponentLink } from '@/components/matches/MatchOpponentLink';
 import { MatchStatusPill } from '@/components/matches/MatchStatusPill';
-import { matchAccentClass, matchStatusView } from '@/components/matches/match-status';
-import { useBackFrom } from '@/lib/back-navigation';
+import { eloDeltaClass, matchAccentClass, matchStatusView } from '@/components/matches/match-status';
+import { opensMatchSheet } from '@/components/matches/match-sheet-click';
 import { formatEloDelta, formatMatchDate } from '@/lib/match-detail';
 import { formatScore, isCancellableSlot } from '@/lib/match-history';
 import { EM_DASH, cn } from '@/lib/utils';
@@ -20,6 +22,12 @@ import type { MatchOpponentView } from '@/lib/match-history';
  * row is unchanged** — the only difference is that the opponent cell is now driven by a
  * normalised `opponent` prop instead of reading a team-shaped payload directly, because the
  * two routes do not describe an opponent the same way (see `MatchOpponentView`).
+ *
+ * ⚠️ [FX-TABLE] — this row is the DESKTOP half of a match history: under `sm`, `MatchCard`
+ * renders the same entry as a card and this component is not mounted at all (one tree in the
+ * DOM, never two). Everything the two halves must say identically left for its own module:
+ * `MatchDateLink`, `MatchOpponentLink`, `opensMatchSheet`, `eloDeltaClass`. **The DOM of this
+ * row is unchanged.**
  */
 
 /**
@@ -40,7 +48,12 @@ export type MatchHistoryMatch = {
   opponent: object | null;
 };
 
-type MatchRowProps<M extends MatchHistoryMatch> = {
+/**
+ * ⚠️ EXPORTED SINCE [FX-TABLE] and shared as-is with `MatchCard`: the table picks one of the
+ * two by viewport, so a prop that existed on only one of them would be a silent difference of
+ * behaviour between the desktop and the mobile rendering of the same list.
+ */
+export type MatchRowProps<M extends MatchHistoryMatch> = {
   match: M;
   /** Who to show in the Opponent cell, already normalised by the caller. */
   opponent: MatchOpponentView;
@@ -91,12 +104,10 @@ export function MatchRow<M extends MatchHistoryMatch>({
   canOpenSheet = false,
 }: MatchRowProps<M>) {
   const navigate = useNavigate();
-  const backFrom = useBackFrom();
   const { tone } = matchStatusView(match);
   // A finished match is the only one carrying a RESULT — that is what drives the row's
   // emphasis, and it is deliberately NOT the same question as "can it be opened".
   const hasResult = match.status === 'completed';
-  const date = formatMatchDate(match.scheduledAt);
   const opponentName = opponent?.name;
   const disputed = match.disputeStatus === 'open' || match.status === 'disputed';
   const eloDelta = match.eloDelta;
@@ -104,11 +115,6 @@ export function MatchRow<M extends MatchHistoryMatch>({
   // row also dimmed the status pill, and dropped the "Disputed" pill to 3.07:1 contrast:
   // the one row the design wants to shout became the least readable of the page.
   const muted = hasResult ? undefined : 'opacity-70';
-
-  // The DATE always carries the sheet link on a row that can open it. It is the row's keyboard
-  // and screen-reader access — the row's click handler is a convenience on top of it, never a
-  // replacement (a handler is not focusable and cannot be middle-clicked into a tab).
-  const sheetParams = { matchId: match.id };
 
   return (
     <tr
@@ -120,27 +126,10 @@ export function MatchRow<M extends MatchHistoryMatch>({
       onClick={
         canOpenSheet
           ? (event) => {
-              // A modified click asks the BROWSER for something (new tab, new window) that
-              // `navigate()` cannot give: it would silently replace the current page instead.
-              // Left it inert rather than wrong — the date link honours all three. Middle click
-              // fires `auxclick`, never `click`, so it is inert here for free.
-              if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)
-                return;
-              // Anything interactive inside the row keeps its own target: the opponent link and
-              // the Cancel button would otherwise both be swallowed by the row.
-              // ⚠️ Keep this list in sync with what the row renders — a new control not listed
-              // here is swallowed SILENTLY (no error, just a stray navigation).
-              if (
-                event.target instanceof Element &&
-                event.target.closest('a,button,input,select,textarea,summary,[role="button"]')
-              )
-                return;
-              // A user dragging across a pseudo or a score is selecting text, not navigating.
-              // (A double-click still navigates: the first click lands before any selection
-              // exists — no click-through-row pattern survives that, and it is not worth a
-              // timer that would delay every honest click.)
-              if (!window.getSelection()?.isCollapsed) return;
-              void navigate({ to: '/matches/$matchId', params: sheetParams });
+              // The three guards (modified click, control inside the row, text selection)
+              // live in `opensMatchSheet` — `MatchCard` has to honour exactly the same ones.
+              if (!opensMatchSheet(event)) return;
+              void navigate({ to: '/matches/$matchId', params: { matchId: match.id } });
             }
           : undefined
       }
@@ -152,27 +141,11 @@ export function MatchRow<M extends MatchHistoryMatch>({
           muted,
         )}
       >
-        {canOpenSheet ? (
-          <Link
-            to="/matches/$matchId"
-            params={sheetParams}
-            // Both branches read the LONG date: two sibling labels of the same column in two
-            // different formats is a reading glitch for anyone browsing the column by voice.
-            aria-label={
-              opponentName
-                ? `Match sheet against ${opponentName}, ${formatMatchDate(match.scheduledAt, 'long')}`
-                : `Match sheet of the slot of ${formatMatchDate(match.scheduledAt, 'long')}`
-            }
-            // `-my-1.5 py-1.5` lifts the hit area from 14 px to 26 px WITHOUT changing the row's
-            // height: WCAG 2.5.8 wants 24 px, and this link is a standalone target, not a word
-            // inside a sentence — the "Inline" exception does not cover it.
-            className="focus-ring -my-1.5 inline-flex items-center py-1.5 underline-offset-4 hover:underline"
-          >
-            {date}
-          </Link>
-        ) : (
-          date
-        )}
+        {/* The DATE always carries the sheet link on a row that can open it. It is the row's
+            keyboard and screen-reader access — the row's click handler is a convenience on top
+            of it, never a replacement (a handler is not focusable and cannot be middle-clicked
+            into a tab). */}
+        <MatchDateLink match={match} opponentName={opponentName} canOpenSheet={canOpenSheet} />
       </td>
 
       {showLadder && (
@@ -193,52 +166,8 @@ export function MatchRow<M extends MatchHistoryMatch>({
         </td>
       )}
 
-      {/*
-        The opponent's NAME goes to the opponent's page, the rest of the row to the match
-        sheet. Before FX-ROW the name opened the match, which is exactly backwards: clicking
-        "Bravo" has to lead to Bravo.
-
-        ⚠️ These links are NOT gated on `canOpenSheet`: a team page is readable by any
-        logged-in account and so is a player page, so no 403 is possible. Only the MATCH sheet
-        has a participant guard.
-
-        🚨 `kind: 'gone'` is PLAIN TEXT and that is the whole point of the union. `opponent`
-        being null has four causes and two of them mean an opponent really did play and then
-        vanished (team dissolved, account deleted) — there is no page left to link to, but an
-        em dash there would quietly erase him. See `matchOpponentView`.
-      */}
       <td className={cn('px-3 py-3 font-bold', muted)}>
-        {opponent === null ? (
-          /* Kept to a dash: the "Open slot" pill on the same row already says nobody has
-             accepted, and a sentence here wrapped the row over three lines. */
-          <span className="font-normal text-text-muted">{EM_DASH}</span>
-        ) : opponent.kind === 'team' ? (
-          <Link
-            to="/teams/$teamId"
-            params={{ teamId: opponent.id }}
-            aria-label={`Team page of ${opponent.name}`}
-            // `py-1.5` lifts EVERY line fragment of the name from 16 px to 28 px without
-            // breaking the wrap (an `inline-flex` would). It matters more than it looks: this
-            // target is now adjacent, at 0 px, to the row itself — which leads SOMEWHERE ELSE.
-            // A near miss used to land on inert background, it now changes page.
-            className="focus-ring py-1.5 underline-offset-4 hover:underline"
-          >
-            {opponent.name}
-          </Link>
-        ) : opponent.kind === 'user' ? (
-          <Link
-            to="/players/$pseudo"
-            params={{ pseudo: opponent.pseudo }}
-            // Names what the player page goes back to (this history table).
-            state={backFrom}
-            aria-label={`Player page of ${opponent.name}`}
-            className="focus-ring py-1.5 underline-offset-4 hover:underline"
-          >
-            {opponent.name}
-          </Link>
-        ) : (
-          <span className="font-normal text-text-muted">{opponent.name}</span>
-        )}
+        <MatchOpponentLink opponent={opponent} />
       </td>
 
       {showLineup && (
@@ -258,11 +187,7 @@ export function MatchRow<M extends MatchHistoryMatch>({
       <td
         className={cn(
           'px-3 py-3 text-right font-mono font-bold tabular-nums',
-          eloDelta === null || eloDelta === 0
-            ? 'text-text-muted'
-            : eloDelta < 0
-              ? 'text-arena-red'
-              : 'text-success',
+          eloDeltaClass(eloDelta),
         )}
       >
         {formatEloDelta(eloDelta)}

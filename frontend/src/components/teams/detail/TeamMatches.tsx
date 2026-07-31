@@ -17,12 +17,14 @@ type TeamMatchesProps = {
    */
   onCancelSlot?: (match: TeamMatch) => void;
   /**
-   * Handle sur la région « Match history », utilisée comme point d'atterrissage du focus
-   * après une annulation de créneau (cf. `ConfirmDialog.returnFocusRef`) : la ligne qui
-   * portait le bouton disparaît, cette région NOMME la liste d'où elle vient de partir.
-   * Elle est déjà `tabIndex={0}` pour son défilement horizontal — rien à ajouter.
+   * Handle sur l'historique des matchs, utilisé comme point d'atterrissage du focus après
+   * une annulation de créneau (cf. `ConfirmDialog.returnFocusRef`) : la ligne qui portait le
+   * bouton disparaît, cet élément NOMME la liste d'où elle vient de partir.
+   *
+   * ⚠️ `HTMLElement` et non `HTMLDivElement` depuis [FX-TABLE] : selon la largeur, il se pose
+   * sur la région défilante du tableau ou sur le `<ul>` des cartes — voir `MatchHistoryTable`.
    */
-  historyRef?: Ref<HTMLDivElement>;
+  historyRef?: Ref<HTMLElement>;
 };
 
 /**

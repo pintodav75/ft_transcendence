@@ -547,18 +547,46 @@ export async function run({
     );
 
     // ------------------------------------------------------------------ §10 375 px
-    setPhase('10. le dossier solo à 375 px');
+    // ⚠️ ÉTENDU PAR [FX-TABLE]. Ce check ne mesurait QUE le débordement du document, donc il
+    // serait resté vert avec l'historique illisible qu'il avait à 375 px (la table défilait
+    // dans sa boîte, adversaire et statut hors champ). Sous `sm` elle est REMPLACÉE par des
+    // cartes : on garde le remplacement lui-même, et surtout qu'il n'y en ait qu'UN des deux
+    // dans le DOM — un double rendu CSS ferait remonter deux nœuds à chaque sélecteur, à
+    // TOUTES les largeurs.
+    setPhase('10. le dossier solo à 375 px : l’historique passe en cartes');
+    const wideRows = await history.locator('tbody tr').count();
     await page.setViewportSize({ width: 375, height: 900 });
-    await page.waitForTimeout(400);
+    const cardList = main.getByRole('list', { name: /Match history/ });
+    const cardsShown = await appears(cardList);
+    const cards = cardsShown ? await cardList.locator('> li').count() : 0;
+    // La table ne vit QUE dans cette région : la région partie, elle est partie avec.
+    // (`main.locator('table')` compterait aussi le classement de l'onglet Overview, monté
+    // masqué derrière celui-ci.)
+    const regionsAt375 = await history.count();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     step(
       'S15',
-      overflow <= 0,
-      `débordement horizontal du document à 375 px : ${overflow}px (≤ 0 attendu)`,
+      overflow <= 0 && cards === wideRows && cards > 0 && regionsAt375 === 0,
+      `débordement horizontal du document à 375 px : ${overflow}px (≤ 0 attendu) ; cartes rendues : ${cards} (${wideRows} attendues — autant que de lignes à 1280 px), région défilante résiduelle : ${regionsAt375} (0 attendue, la table n’est pas masquée mais démontée)`,
     );
+
+    // 🔑 LE RETOUR EN GRAND, que rien ne gardait sur cet écran : le tableau doit revenir (et
+    // les cartes disparaître — un seul arbre monté), sans que le DOCUMENT déborde. La table,
+    // elle, a le droit de défiler dans sa propre boîte.
+    setPhase('10b. le dossier solo de retour à 1280 px : le tableau reprend sa place');
     await page.setViewportSize({ width: 1280, height: 900 });
+    const backToTable = await appears(history);
+    const wideCards = await main.getByRole('list', { name: /Match history/ }).count();
+    const wideOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    step(
+      'S15b',
+      backToTable && wideCards === 0 && wideOverflow <= 0,
+      `débordement horizontal du document à 1280 px : ${wideOverflow}px (≤ 0 attendu) ; tableau revenu = ${backToTable}, liste de cartes résiduelle : ${wideCards} (0 attendue)`,
+    );
   } finally {
     // ---------------------------------------------------------------- §11 teardown
     // Exécuté MÊME si un check a échoué : sinon le premier run raté laisserait deux comptes

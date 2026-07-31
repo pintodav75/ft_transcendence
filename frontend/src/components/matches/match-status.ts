@@ -80,3 +80,16 @@ const accentClasses: Record<PillTone, string> = {
 export function matchAccentClass(tone: PillTone) {
   return accentClasses[tone];
 }
+
+/**
+ * Colour of an Elo change: green won, red lost, quiet when there is nothing to read.
+ *
+ * ⚠️ Inlined in `MatchRow` until [FX-TABLE], which renders the same number in `MatchCard`
+ * under `sm` — rule of the second use, and the exact kind of mapping that drifts once it is
+ * written twice (a "0" shown in green on one screen and grey on the other).
+ * `null` and `0` share the quiet branch on purpose: neither is a result to celebrate.
+ */
+export function eloDeltaClass(eloDelta: number | null) {
+  if (eloDelta === null || eloDelta === 0) return 'text-text-muted';
+  return eloDelta < 0 ? 'text-arena-red' : 'text-success';
+}
