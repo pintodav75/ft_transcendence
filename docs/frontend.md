@@ -412,6 +412,30 @@ Conséquences directes, toutes voulues :
 
 ---
 
+---
+
+## [FS-0] — fondation du rail social et du temps réel
+
+Branche `feature/fs0-social-foundation`, **aucune migration**, corrigée après deux passes de review. Le shell authentifié possède un rail social permanent sur desktop et un panneau partagé accessible depuis le header mobile. Ce panneau conserve son aspect de carte et occupe la hauteur disponible avec **12 px de marge sur les quatre côtés** (`inset-3`). Le client `lib/realtime-client.ts` maintient une seule WebSocket native vers `/api/ws/chat`, avec backoff exponentiel et jitter, gestion `online`/`offline`, arrêt sur `1008`, purge au changement de compte et resynchronisation de présence.
+
+🔑 **Une rotation de l'access token ne change pas la session.** Le JWT n'est vérifié qu'au handshake : la socket active reste ouverte et mémorise le nouveau token pour sa prochaine vraie reconnexion. Un changement d'utilisateur ferme toujours la socket et purge l'état temps réel.
+
+🔑 **Le rail est un chrome persistant.** Les sélecteurs métier d'onglets et panneaux doivent partir de `<main>`, jamais du document entier. Même règle pour les régions live : une seule région `role="status"` / `aria-live` par écran, portée par le contenu qui doit réellement annoncer un changement.
+
+Décisions produit : l'onglet s'appelle **Messages** en préparation de FS-4 ; Ajouter un ami reste un placeholder jusqu'à FS-5 ; après échange avec l'équipe, Walid confirme que le rail desktop reste fixe, sans repli/dépli. La recherche F-Nav qui peut recouvrir Solo reste une dette distincte, hors FS-0.
+
+La migration du panneau mobile vers `<dialog>` natif est reportée : refonte jugée trop risquée avant livraison. Le piège actuel couvre `textarea` et `contenteditable`, détecte un dialogue enfant sans dépendre de son libellé et restaure le focus. Le scénario `fs0-social` mesure socket, rotation du token, présence à deux comptes, reconnexion, purge, clavier et géométrie mobile.
+
+Validation finale après **second rebase, sur le `master` du 31/07 au soir** (au-dessus de F-DISPUTE, F-ADMIN, FX-TABLE, BX-HASPWD, BX-LEAVE et du fix des 409 d'équipe) : `tsc -b` + lint + build verts, `fs0-social` **9/9**, puis campagne complète **21 scénarios / 359 checks / exit 0**, console **0 partout**. Les attentes de reconnexion et de dialogue rendent un check rouge sans faire sortir le harnais en `exit 2`.
+
+**Le second rebase a coûté 3 corrections, toutes dans le HARNAIS, aucune dans le code applicatif** — c'est exactement ce que le rebase servait à trouver :
+
+1. **`getByRole('link', { name: 'My teams' })` non scopé.** [F-HOME] a ajouté un bouton « Go to my teams » **dans la page** : le sélecteur en attrapait deux et sortait en `exit 2`. Le scénario navigue désormais par `getByRole('navigation', { name: 'Primary navigation' })`, c'est-à-dire par le rail — ce qui est aussi ce que `S1` prétend mesurer (la socket survit à la navigation **de chrome**).
+2. 🚨 **`import('/src/stores/auth-store.ts')` NE REND PAS LE STORE DE L'APPLICATION.** Dès que le HMR de Vite a invalidé le module une seule fois depuis le démarrage du serveur de dev — une écriture sous `frontend/`, un `git checkout`, un rebase — l'app tourne sur `…/auth-store.ts?t=<horodatage>` et l'URL nue construit une **seconde instance vierge** (`accessToken` null, `ready` false). `S1b` était donc vert **uniquement sur un serveur de dev fraîchement démarré**, et rouge le reste du temps sans que rien ne soit cassé. Mesuré au `performance.getEntriesByType('resource')`, qui montrait bien les **deux** URLs chargées. Le scénario résout maintenant l'URL réellement chargée, la plus récente d'abord. **Même famille que l'invariant #10.**
+3. **`header:visible` ambigu.** Le hero de `/home` est lui aussi un `<header>` : `S5` mesurait la mauvaise boîte. Il vise désormais le landmark `banner`, que seul l'en-tête mobile porte — le hero est **dans `<main>`**, l'élément sectionnant lui retire ce rôle. 🔑 **Règle : un scénario du rail ne doit jamais viser une balise que le contenu de page peut réutiliser.**
+
+⚠️ **Deux échecs de la campagne n'étaient PAS imputables à FS-0** et ont failli lui être attribués : `dispute` et `match-detail` sortaient `0/0` parce que les comptes de fixture `alice`/`bob`/`carol` avaient perdu leur mot de passe en base **et** que les matchs de démo du seed avaient expiré (le job de 24 h avait annulé la dispute, les créneaux étaient passés). Réparé par un `seed:dev`, après avoir **mesuré** qu'il ne détruisait rien (les données de démo posées à la main avaient déjà disparu ; les 3 matchs restants appartiennent à une équipe que le seed ne touche pas). **Un scénario qui rend `0/0` accuse toujours l'état de la base avant le ticket.**
+
 ## Détail par ticket — bloc déporté de `CLAUDE.md` (refacto du 31/07)
 
 > Ce paragraphe vivait sur **une seule ligne de 17,5 Ko** dans `CLAUDE.md` — à lui seul 20 % du fichier chargé à chaque session. Rapatrié ici verbatim.

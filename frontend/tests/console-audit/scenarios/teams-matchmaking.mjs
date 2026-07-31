@@ -80,6 +80,8 @@ const QUARTER_MS = 15 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 export async function run({ page, setPhase, step, countRequests, expectHttp, createUser, user, ORIGIN, focusLanding, pressEnterOn }) {
+  const main = page.getByRole('main');
+
   // Filet transverse : un seul 404 suffit à faire rougir la console d'un correcteur.
   const notFound = [];
   page.on('response', (res) => {
@@ -303,7 +305,7 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
     .waitFor({ timeout: 15000 })
     .then(() => true)
     .catch(() => false);
-  await page.getByRole('tab', { name: 'Matches' }).click();
+  await main.getByRole('tab', { name: 'Matches' }).click();
   const openRows = await page.locator('tbody tr', { hasText: 'Open slot' }).count();
   step(
     'M5',
@@ -314,7 +316,7 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
   // --------------------------------------- §6 PRÉ-EMPTION DU LOCKOUT (le check central)
   setPhase('6. pré-emption du lockout : bornes STRICTES, et zéro requête pour le savoir');
   const reopenCalls = await apiCallsDuring(async () => {
-    await page.getByRole('tab', { name: 'Overview' }).click();
+    await main.getByRole('tab', { name: 'Overview' }).click();
     await createButton.click();
     await timeSelect.waitFor({ timeout: 10000 });
     await daySelect.selectOption(tomorrow);
@@ -378,7 +380,7 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
   await page.context().clearCookies();
   await page.context().addCookies(user.cookies);
   await page.goto(`${ORIGIN}/teams/${teamId}`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: 'Matches' }).click();
+  await main.getByRole('tab', { name: 'Matches' }).click();
   const slotRow = page.locator('tbody tr', { hasText: 'Open slot' });
   // AU CLAVIER : voir `pressEnterOn` dans runner.mjs.
   await pressEnterOn(slotRow.locator('button[aria-label^="Cancel the slot of"]'));
@@ -424,7 +426,7 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
 
   // ------------------------------------------- §9 409 chevauchement sur page périmée
   setPhase('9. page périmée : le 409 de chevauchement, distingué SANS lire la prose serveur');
-  await page.getByRole('tab', { name: 'Overview' }).click();
+  await main.getByRole('tab', { name: 'Overview' }).click();
   await createButton.click();
   await timeSelect.waitFor({ timeout: 10000 });
   await daySelect.selectOption(tomorrow);
@@ -513,7 +515,7 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
   // ------------------------------------------------------------- §11 375 px et filets
   setPhase('11. largeur étroite et filets transverses');
   await page.getByRole('button', { name: 'Close' }).click();
-  await page.getByRole('tab', { name: 'Matches' }).click();
+  await main.getByRole('tab', { name: 'Matches' }).click();
   // Les deux moitiés de l'historique depuis [FX-TABLE] : le TABLEAU à partir de `sm`, les
   // CARTES en dessous. Les deux largeurs se mesurent, parce qu'elles gardent deux pièges
   // différents.

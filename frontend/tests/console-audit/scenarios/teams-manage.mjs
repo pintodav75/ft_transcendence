@@ -101,9 +101,10 @@ export async function run({
     if (init.body) headers['content-type'] = 'application/json';
     return fetch(`${ORIGIN}/api${path}`, { ...init, headers });
   };
+  const main = page.getByRole('main');
 
   const openManage = async () => {
-    await page.getByRole('tab', { name: 'Manage' }).click();
+    await main.getByRole('tab', { name: 'Manage' }).click();
     await page.getByLabel('Team name').waitFor({ timeout: 10000 });
   };
 
@@ -124,11 +125,11 @@ export async function run({
   const teamUrl = page.url();
   const teamId = new URL(teamUrl).pathname.split('/').pop();
 
-  const tabStrip = page.locator('[role="tablist"]');
+  const tabStrip = main.locator('[role="tablist"]');
   await tabStrip.waitFor({ timeout: 15000 });
   // ⚠️ `innerText` rend le texte TEL QU'AFFICHÉ : `label-caps` applique `text-transform:
   // uppercase`, donc « Manage » revient en « MANAGE ». On compare en minuscules.
-  const tabLabels = (await page.locator('[role="tab"]').allInnerTexts()).map((t) =>
+  const tabLabels = (await main.locator('[role="tab"]').allInnerTexts()).map((t) =>
     t.trim().toLowerCase(),
   );
   step(
@@ -143,7 +144,7 @@ export async function run({
   setPhase('2. largeurs : 616 px de colonne centrale, puis 375 px');
   // La colonne centrale du shell ne fait que 616 px à 1280 : une section qui réclame plus
   // sort du champ SANS RIEN DIRE. On mesure, on ne regarde pas.
-  const panelBox = await page
+  const panelBox = await main
     .locator('[role="tabpanel"]:not([hidden])')
     .evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
   step(
@@ -445,7 +446,7 @@ export async function run({
 
   // ⚠️ Scopé au panneau VISIBLE : le roster est rendu deux fois (Overview et Manage), et
   // la copie de l'onglet inactif est `hidden` — un `.first()` nu viserait la mauvaise.
-  const visiblePanel = page.locator('[role="tabpanel"]:not([hidden])');
+  const visiblePanel = main.locator('[role="tabpanel"]:not([hidden])');
   const rivalChip = visiblePanel.locator(`li:has(a[href$="/players/${rival.pseudo}"])`);
   const rivalPendingChip = rivalChip.filter({ hasText: 'Pending' });
   // Compteur de PLAFOND de l'onglet Manage (« Roster slots » = membres + invitations en
@@ -691,7 +692,7 @@ export async function run({
   setPhase('18. la même page vue par un NON-MEMBRE (invité, pas encore membre)');
   await page.goto(teamUrl, { waitUntil: 'networkidle' });
   await page.locator('h1').first().waitFor({ timeout: 15000 });
-  const manageTabForGuest = await page.getByRole('tab', { name: 'Manage' }).count();
+  const manageTabForGuest = await main.getByRole('tab', { name: 'Manage' }).count();
   // ⚠️ LE check de divulgation progressive : `invitations` est ABSENT de GET /teams/{id}
   // pour un non-membre. Le compte utilisé ici est justement CELUI QUI EST INVITÉ — s'il ne
   // voit aucune puce « Pending », personne hors de l'équipe n'en voit.

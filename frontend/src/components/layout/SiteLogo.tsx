@@ -13,7 +13,7 @@ import { useAuthStore } from '@/stores/auth-store';
 // reader user navigates by, ahead of the real page title, and inside a navigation
 // landmark. Each page carries its own <h1>. (A second, near-identical component did
 // wrap it in an <h1>; it was removed on 28/07 in favour of this one.)
-export function SiteLogo({ className }: { className?: string }) {
+export function SiteLogo({ className, compact = false }: { className?: string; compact?: boolean }) {
   const user = useAuthStore((state) => state.user);
   const to = user ? '/home' : '/';
 
@@ -29,7 +29,7 @@ export function SiteLogo({ className }: { className?: string }) {
         className,
       )}
     >
-      VSMODE
+      {compact ? 'VS' : 'VSMODE'}
     </Link>
   );
 }

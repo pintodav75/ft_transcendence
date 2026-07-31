@@ -441,7 +441,7 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, log
     if (viaBack) await page.goBack();
     else await page.goto(`${ORIGIN}/teams/${teamId}`, { waitUntil: 'networkidle' });
     await page.waitForURL(`${ORIGIN}/teams/${teamId}`, { timeout: 10000 });
-    await page.locator('[role="tab"]', { hasText: 'Matches' }).click();
+    await main.locator('[role="tab"]', { hasText: 'Matches' }).click();
     await main.locator('table tbody tr').first().waitFor({ timeout: 10000 });
   };
 

@@ -872,6 +872,60 @@ donc **imputé à un ticket innocent**. `login()` fait maintenant suivre un
 `waitForLoadState('networkidle')` (sous `catch`, et **dans** la phase « login », donc hors
 périmètre). Concerne les 7 appels de `match-result`, `match-detail`, `teams-detail` et
 `teams-manage`.
+## FS-0 — le chrome persistant doit rester hors des sélecteurs métier
+
+Le rail social ajoute son propre `tablist` et son `tabpanel` sur toutes les pages authentifiées.
+Les scénarios qui ciblent les onglets d'une page doivent donc partir de
+`page.getByRole('main')`, comme `L7` de `ladder-detail` après F-Nav. Un scénario filtré sert à
+itérer ; après un rebase, le ticket rejoue toujours la campagne complète, car de nouveaux
+écrans peuvent avoir rejoint le shell depuis sa base précédente.
+
+⚠️ Une attente attendue par un check devient un booléen avec `.catch(() => false)` : le check
+rougit, le harnais ne sort pas en `exit 2`. `S1b` simule une rotation de token dans le vrai
+store et exige zéro nouvelle socket. `S5` mesure les quatre marges de 12 px du panneau mobile,
+son rayon de 8 px, le centrage des notifications, les deux Escape et la restitution du focus.
+
+Après le second rebase, sur le `master` du 31/07 au soir, la campagne compte
+**21 scénarios / 359 checks** et sort en **exit 0**, console **0 partout**. `matchmaking`
+passe notamment **31/31** avec sa mesure à 375 px : le header mobile persistant de FS-0 ne
+crée aucun débordement horizontal sur ce nouvel écran.
+
+### 🚨 Trois pièges de HARNAIS que ce rebase a sortis — à connaître avant d'écrire un scénario
+
+**① Ne jamais naviguer par un lien de la PAGE quand on veut prouver quelque chose sur le
+CHROME.** `S1` cliquait `getByRole('link', { name: 'My teams' })` ; [F-HOME] a ajouté un
+bouton « Go to my teams » dans le contenu de `/home`, le sélecteur en a trouvé deux et le
+harnais est sorti en `exit 2`. Passer par
+`page.getByRole('navigation', { name: 'Primary navigation' })`. La règle vaut dans les deux
+sens : le chrome hors des sélecteurs métier (voir ci-dessus), **et** la page hors des
+sélecteurs de chrome.
+
+**② `import('/src/…')` depuis `page.evaluate()` ne rend PAS le module de l'application.**
+C'est le piège le plus coûteux des trois, parce qu'il produit un rouge **intermittent** sur
+du code parfaitement sain. Dès que le HMR de Vite a invalidé un module une seule fois depuis
+le démarrage du serveur de dev — n'importe quelle écriture sous `frontend/`, un
+`git checkout`, un rebase — l'application tourne sur `…/mon-module.ts?t=<horodatage>` tandis
+que l'URL nue **construit une seconde instance vierge**. `S1b` lisait donc un store sans
+session et échouait sur « access token absent », sur une app dont la session était
+parfaitement ouverte. Diagnostic : `performance.getEntriesByType('resource')` montre les
+**deux** URLs. Remède : résoudre l'URL réellement chargée (la plus récente) avant d'importer.
+🔑 **Si un `page.evaluate` lit un état applicatif et le trouve vide, soupçonner le double
+module AVANT de soupçonner l'application.**
+
+**③ Viser un rôle, pas une balise, dès qu'une balise est réutilisable.** `S5` mesurait
+`header:visible` ; le hero de `/home` est aussi un `<header>`. `getByRole('banner')` est
+sans ambiguïté : le hero est **dans `<main>`**, et un élément sectionnant retire ce rôle à
+son `<header>`. Même famille pour `<section>`, `<nav>` et `<aside>`.
+
+### ⚠️ Un scénario qui rend `0/0` accuse la BASE, pas le ticket
+
+`dispute` et `match-detail` sont sortis `0/0` pendant ce rebase. Aucun rapport avec FS-0 :
+les comptes de fixture `alice`/`bob`/`carol` avaient perdu leur mot de passe en base, et les
+matchs de démo du seed avaient expiré (le job de 24 h avait annulé la dispute, les créneaux
+étaient passés). Ces deux scénarios sont **les seuls à se connecter avec un compte semé**
+plutôt qu'avec un compte qu'ils créent — donc les seuls que l'état de la base peut mettre à
+terre. Remède : `docker compose exec backend npm run seed:dev`. 🔑 **Un `0/0` n'est jamais
+« rien à tester » : c'est un scénario qui n'a pas démarré.**
 
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 
