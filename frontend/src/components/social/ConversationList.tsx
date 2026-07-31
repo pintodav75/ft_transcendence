@@ -10,10 +10,10 @@ import {
   CONVERSATIONS_KEY,
   bumpConversation,
   conversationsErrorMessage,
-  formatConversationTime,
   useConversations,
 } from '@/lib/messages';
 import { presenceOf, presenceStatusOf } from '@/lib/presence';
+import { formatRailTime } from '@/lib/rail-time';
 import { realtimeClient } from '@/lib/realtime-client';
 import { useAuthStore } from '@/stores/auth-store';
 import { useRealtimeStore } from '@/stores/realtime-store';
@@ -329,7 +329,7 @@ function ConversationRow({ conversation, meId, presence, onOpen }: ConversationR
               dateTime={lastMessage.createdAt}
               className="shrink-0 text-xs text-text-muted"
             >
-              {formatConversationTime(lastMessage.createdAt)}
+              {formatRailTime(lastMessage.createdAt)}
             </time>
           </span>
 

@@ -520,6 +520,40 @@ Validation finale après **second rebase, sur le `master` du 31/07 au soir** (au
 
 **Audit** : `fs4-messages.mjs`, **8 checks**. 🚨 **`M5` a été vu FAUX VERT, puis rouge, puis vert** : sa première version reproduisait une **éviction** (qui retire l'entrée de l'état, donc l'app se comporte correctement) au lieu d'un **changement de largeur** (qui la garde en état sans l'afficher). Vérifié en **réintroduisant le défaut dans le code** — le check restait vert. Réécrit, il est rouge avec le défaut et vert sans, mesuré dans les deux sens. **C'est le 4ᵉ faux vert trouvé de cette façon sur ce projet.** → `frontend/tests/console-audit/README.md`.
 
+---
+
+## [FS-2] — cloche de notifications
+
+**Livré** : `lib/notifications.ts` (clés de cache, pagination par curseur, tampon du direct, compteur), `lib/notification-mutations.ts`, `lib/notification-copy.ts` (une phrase et une cible par type), `lib/rail-time.ts` (formateur d'heure extrait au 2ᵉ usage), et `components/social/NotificationsSlot.tsx` rempli. `SocialPanel` porte la pastille, `MobileHeader` un indicateur.
+
+🚨 **IL Y A 17 TYPES, PAS 16 — et le 17ᵉ était un vrai bug dormant.** `match_cancelled_member_left` (migration `0024`, BX-LEAVE) **manquait au miroir Zod du front** : `parseRealtimeServerEvent` jetait, `realtime-client.ts` avalait l'exception, et ces notifications **n'arrivaient jamais en direct**. Rien ne le signalait. 🔑 **Toute valeur ajoutée à l'enum serveur doit l'être aussi dans `realtime-schema.ts`.**
+
+🚨 **UNE NOTIFICATION RACONTE UN FAIT PASSÉ : le droit qu'on avait à l'envoi peut être perdu au clic.** C'est la règle qui gouverne tous les liens de cet écran, et un lien mort écrit une ligne rouge — motif de rejet.
+
+- **Jamais de lien vers `/players/$pseudo`** : le payload ne porte qu'un **instantané** du pseudo, et `DELETE /users/me` supprime vraiment la ligne.
+- **Jamais de lien vers `/teams/$teamId`** : dissoudre une équipe **supprime la ligne**. Les 3 notifications d'équipe mènent au **ladder** — c'est précisément pour ça que le serveur met un `ladderId` dans ces payloads.
+- **`match_cancelled_member_left` → le ladder aussi** : le destinataire inclut le **capitaine, qui peut être hors composition** ; il peut ensuite dissoudre son équipe (légal, le match est annulé) et perd alors le droit de lire le match.
+- **`dispute_needs_admin` → aucun lien** : la lecture du dossier revérifie `is_admin` **à chaque appel**, et l'équipe retire ce statut en base avant chaque campagne d'audit.
+- Cibles retenues et vérifiées : `/matches/$matchId` (un match n'est jamais supprimé), `/disputes/$disputeId`, `/ladders/$ladderId`, `/teams`.
+
+**Défauts de review à ne pas rouvrir** :
+
+1. 🚨 **La pastille se désynchronisait DÉFINITIVEMENT.** Une notification arrivée pendant un rechargement du compteur était comptée (+1) puis écrasée par la réponse — et comme son identifiant était déjà dans le jeu « déjà compté », **elle n'était jamais recomptée**. Même perte sur « tout marquer lu », qui forçait le compteur à zéro. Corrigé par une fraîcheur de 30 s sur le compteur (qui supprime le second appel déclenché par l'ouverture, la porte la plus ordinaire vers la course), un abandon-relance si un appel est en vol, et une invalidation après « tout marquer lu ». **Le serveur garde le dernier mot.**
+2. **`Escape` ne rendait pas le focus à la cloche** — avant ce ticket le panneau ne contenait aucun élément focalisable, c'est FS-2 qui rend le problème atteignable. ⚠️ Le focus n'est rendu **que si** il était dans le panneau à la fermeture : sinon fermer en cliquant un onglet volait le focus à la cible du clic.
+3. **Rien ne signalait une notification sous 1024 px** : la pastille ne vit que dans le rail, masqué à cette largeur. Le déclencheur mobile porte désormais un point et le nombre dans son nom accessible.
+4. **Les erreurs étaient réessayées 3 fois** → 4 lignes rouges au lieu d'une. `retryServerErrorsOnly` (helper du repo) appliqué aux deux requêtes. D'autant plus important que **cette route est désormais la plus appelée de l'app**.
+
+**Décisions** :
+
+- **Le compteur s'obtient par `GET /notifications?limit=1`** : il n'existe pas de route dédiée, et `unreadCount` compte **toutes** mes non-lues, pas la page. La ligne est jetée.
+- **Le tampon du direct vit à CÔTÉ du cache**, pas dedans : une écriture dans le cache serait écrasée par une requête déjà en vol — exactement le cas « une notification arrive pendant l'ouverture du panneau ». Fusion au rendu, dédup par id, **les pages serveur l'emportent**.
+- **Pas d'annonce vocale à l'arrivée** : le rail est monté sur toutes les pages, une région live qui parle à chaque événement interromprait la lecture. Le compte est dans le nom accessible de la cloche.
+- 🔑 **`AuthenticatedLayout` monte DEUX `SocialPanel`** (rail permanent + overlay mobile). Sans garde, une notification en direct incrémentait la pastille de **2**. Un jeu d'identifiants au niveau module l'absorbe — **à connaître avant d'ajouter tout compteur au rail**.
+
+**Audit** : `fs2-notifications.mjs`, **8 checks**. 🔑 **Aucune notification n'est écrite en base** : elles sont produites par de **vraies demandes d'ami**, parce qu'une fixture écrite à la main peut avoir une forme que le vrai code n'émet jamais. `N2` refuse la **technique** (uuid, accolade, nom de champ) plutôt que d'exiger une formulation exacte. → `frontend/tests/console-audit/README.md`.
+
+⚠️ **`home` H1 a dû accueillir `/api/notifications` dans sa liste `SOCIAL_RAIL`** — 3ᵉ carte du rail à toucher ce budget, et grâce à la liste posée en FS-1 la correction est **une ligne** au lieu d'un débat sur le bon chiffre.
+
 ## Détail par ticket — bloc déporté de `CLAUDE.md` (refacto du 31/07)
 
 > Ce paragraphe vivait sur **une seule ligne de 17,5 Ko** dans `CLAUDE.md` — à lui seul 20 % du fichier chargé à chaque session. Rapatrié ici verbatim.

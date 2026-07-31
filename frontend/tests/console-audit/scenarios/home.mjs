@@ -181,7 +181,11 @@ export async function run({
   // acte délibéré, justifié par « le rail en a besoin sur toutes les pages ». Tout ce qui n'est
   // pas ici reste imputé à la page, y compris `GET /ladders` — c'est ce qui maintient `N5` de
   // `f-nav` en vie (voir l'en-tête).
-  const SOCIAL_RAIL = ['/api/friends'];
+  // ⚠️ `/api/notifications` est ajouté par [FS-2] : c'est la PASTILLE de la cloche, qui doit
+  // être juste sur toutes les pages — donc son compteur part partout, par construction. La
+  // LISTE, elle, n'est chargée qu'à l'ouverture du panneau (gardé par `N1` de
+  // `fs2-notifications`), et ce budget-ci ne saurait pas les distinguer : même route.
+  const SOCIAL_RAIL = ['/api/friends', '/api/notifications'];
   const pageCalls = seen.filter(
     (path) => !BOOTSTRAP.includes(path) && !SOCIAL_RAIL.includes(path),
   );

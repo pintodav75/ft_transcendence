@@ -872,6 +872,34 @@ donc **imputé à un ticket innocent**. `login()` fait maintenant suivre un
 `waitForLoadState('networkidle')` (sous `catch`, et **dans** la phase « login », donc hors
 périmètre). Concerne les 7 appels de `match-result`, `match-detail`, `teams-detail` et
 `teams-manage`.
+## `fs2-notifications` (FS-2) — les fixtures sont produites par de VRAIES actions
+
+`scenarios/fs2-notifications.mjs`, **8 checks**.
+
+🔑 **Aucune notification n'est écrite en base.** Un compte tiers envoie une vraie demande d'ami
+(→ `friend_request_received`), et c'est cette notification-là qui est lue à l'écran. Motif : une
+fixture écrite à la main peut avoir une forme que le vrai code n'émet **jamais** — on auditerait
+alors un rendu qui ne se produit pas en usage réel. Le prix est la couverture : seuls 2 des 17
+types sont atteignables ainsi, les autres se regardent à l'œil avec `seed:social`.
+
+🚨 **`N2` refuse la TECHNIQUE, il n'exige pas une phrase précise.** Il cherche un uuid, une
+accolade ou un nom de champ dans la ligne rendue : leur présence signifie qu'un payload est
+affiché brut. Asserter une formulation exacte aurait rendu le check faux au premier
+réajustement de copie, sans rien garder de plus.
+
+⚠️ **`N1` sépare deux appels que le serveur sert par la MÊME route.** Le compteur (`limit=1`) a
+le droit de partir sur chaque page — c'est la pastille. La **liste** ne doit partir qu'à
+l'ouverture du panneau, sinon elle part sur tous les écrans authentifiés. On les distingue par
+leur paramètre, et le check navigue entre deux pages avant d'ouvrir quoi que ce soit.
+
+⚠️ **`N4` recharge la page exprès.** Sans ce rechargement, le check prouverait un affichage
+optimiste et pas une écriture serveur — le défaut serait invisible.
+
+⚠️ **`N6` et `N7` gardent deux défauts de review** : `Escape` ne rendait pas le focus à la
+cloche (avant FS-2 le panneau ne contenait aucun élément focalisable, c'est lui qui rend le
+problème atteignable), et **rien ne signalait une notification sous 1024 px** — la pastille ne
+vit que dans le rail, masqué à cette largeur.
+
 ## `fs4-messages` (FS-4) — un check vu FAUX VERT, puis rouge, puis vert
 
 `scenarios/fs4-messages.mjs`, **8 checks**. La liste des conversations et les fenêtres multiples.

@@ -13,6 +13,7 @@ import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { panelId, tabId } from '@/components/ui/tab-ids'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { sendErrorMessage } from '@/lib/messages'
+import { useNotificationBell } from '@/lib/notifications'
 import { realtimeClient } from '@/lib/realtime-client'
 import { useAnnouncement } from '@/lib/use-announcement'
 import { cn } from '@/lib/utils'
@@ -133,6 +134,14 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
   /** Bumped when the LAST window is closed: the focus has to land on something that remains. */
   const [tabFocusRequests, setTabFocusRequests] = useState(0)
   const notificationsRef = useRef<HTMLDivElement>(null)
+  /** The bell itself: where the focus goes back when its panel is closed under it. */
+  const bellRef = useRef<HTMLButtonElement>(null)
+  /**
+   * Was the focus INSIDE the popover when it was closed? Read at the moment of closing, not in
+   * the effect below: by then React has already detached the focused element and the browser
+   * has moved the focus to `<body>`, so the question can no longer be asked.
+   */
+  const restoreBellFocusRef = useRef(false)
   const tabsId = useId()
   const isFloating = useMediaQuery(FLOATING_QUERY)
   const fitsTwoWindows = useMediaQuery(TWO_WINDOWS_QUERY)
@@ -140,6 +149,15 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
   const maxWindows = !isFloating ? 1 : fitsThreeWindows ? 3 : fitsTwoWindows ? 2 : 1
   const user = useAuthStore((state) => state.user)
   const connectionState = useRealtimeStore((state) => state.connectionState)
+  /**
+   * 🚨 THE ONE PLACE THIS HOOK MAY BE CALLED. It owns the live subscription that keeps the
+   * badge exact, so a second copy would count every incoming notification twice. Anything
+   * else that needs the number reads `useUnreadNotificationCount()` — same cache, no listener.
+   *
+   * It is also the ONLY request the rail makes before the user asks for anything: the list
+   * itself is fetched by `NotificationsSlot`, which is not rendered until the bell is opened.
+   */
+  const unreadCount = useNotificationBell()
   // Destructured: the effect below depends on `announce` alone, and `useAnnouncement` returns
   // a fresh object every render — depending on that object would re-subscribe on every render.
   const { message: announcement, announce } = useAnnouncement()
@@ -162,18 +180,42 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
   const inlineConversation = openConversations.at(-1)
   const displayName = user?.displayName || user?.pseudo || 'Player'
   const fallback = (user?.pseudo ?? '?').slice(0, 2).toUpperCase()
+  /**
+   * 🚨 CLOSING THE BELL'S PANEL DESTROYS WHATEVER HAD THE FOCUS INSIDE IT. Before [FS-2] the
+   * popover held nothing focusable, so nobody could be standing in it; now it holds a list of
+   * links and "mark as read" buttons, and `Escape` — or a click outside — would drop a keyboard
+   * user back on `<body>`, at the top of the page. The bell is the control that opened it, so
+   * the bell is where the focus goes back (same rule as `MobileHeader` and its trigger).
+   *
+   * ⚠️ ONLY when the focus was actually in there. Closing the popover as a side effect of
+   * clicking a tab, or of opening a conversation, must not yank the focus away from what the
+   * user just aimed at.
+   */
+  const closeNotifications = useCallback(() => {
+    restoreBellFocusRef.current =
+      notificationsRef.current?.contains(document.activeElement) ?? false
+    setNotificationsOpen(false)
+  }, [])
+
+  useEffect(() => {
+    if (notificationsOpen || !restoreBellFocusRef.current) return
+
+    restoreBellFocusRef.current = false
+    bellRef.current?.focus()
+  }, [notificationsOpen])
+
   useEffect(() => {
     if (!notificationsOpen) return
 
     function closeOnOutsideClick(event: PointerEvent) {
       if (!notificationsRef.current?.contains(event.target as Node)) {
-        setNotificationsOpen(false)
+        closeNotifications()
       }
     }
 
     function closeOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === 'Escape') {
-        setNotificationsOpen(false)
+        closeNotifications()
       }
     }
 
@@ -184,7 +226,7 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
       document.removeEventListener('pointerdown', closeOnOutsideClick)
       document.removeEventListener('keydown', closeOnEscape)
     }
-  }, [notificationsOpen])
+  }, [closeNotifications, notificationsOpen])
 
   /**
    * Where the focus goes when the LAST conversation is closed. Its window is gone, so there is
@@ -299,7 +341,7 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
 
   function selectTab(tabId: SocialTabId) {
     setActiveTab(tabId)
-    setNotificationsOpen(false)
+    closeNotifications()
   }
 
   function requestFocus(partnerId: string) {
@@ -339,7 +381,7 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
     // On desktop it is a floating window: switching tab would only take the friends list away
     // from someone who is probably about to open a second conversation.
     if (!isFloating) setActiveTab('chat')
-    setNotificationsOpen(false)
+    closeNotifications()
   }
 
   /**
@@ -373,7 +415,10 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
   }
 
   function toggleNotifications() {
-    setNotificationsOpen((open) => !open)
+    // Closing with the bell already has the focus in the right place, but it goes through the
+    // same door as every other close — one path, so there is only one thing to get right.
+    if (notificationsOpen) closeNotifications()
+    else setNotificationsOpen(true)
   }
 
   /**
@@ -461,17 +506,35 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
             {/* `peer` stays in `className`: the tooltip below is a sibling that reacts to this
                 button's focus, and that is the one thing `IconButton` cannot own for it. */}
             <IconButton
+              ref={bellRef}
               onClick={toggleNotifications}
               className={cn(
-                'peer',
+                // `relative`: the badge below is positioned against this button, and the
+                // wrapper around it is `static` under 1024 px (see the `lg:relative` there).
+                'peer relative',
                 notificationsOpen && 'bg-surface-card-strong text-text-primary',
               )}
-              aria-label="Notifications"
+              // 🔑 THE COUNT IS IN THE NAME, not only in the badge. The badge is `aria-hidden`
+              // (a bare number read out of nowhere says nothing), so this is what tells a
+              // screen reader — and voice control — how many are waiting.
+              aria-label={
+                unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'
+              }
               aria-haspopup="dialog"
               aria-expanded={notificationsOpen}
               aria-controls={notificationsOpen ? `${tabsId}-notifications-panel` : undefined}
             >
               <Bell className="size-5" aria-hidden="true" />
+              {unreadCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  // Capped: past 99 the exact figure stops being information, and a 4-digit
+                  // badge would grow wider than the button it sits on.
+                  className="absolute right-1 top-1 min-w-4 rounded-full bg-arena-red px-1 text-center text-xs font-bold leading-4 text-background-app"
+                >
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
             </IconButton>
 
             {notificationsOpen && (
@@ -481,7 +544,16 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
                 aria-label="Notifications"
                 className="absolute inset-x-3 top-full z-30 mt-2 overflow-hidden rounded-control border border-border-subtle bg-surface-card shadow-card lg:left-auto lg:right-0 lg:w-72"
               >
-                <NotificationsSlot />
+                <NotificationsSlot
+                  announce={announce}
+                  // Closes the popover AND, under 1024 px, the social overlay around it: a
+                  // link that navigates without closing leaves the visitor behind an
+                  // `aria-modal` overlay, exactly like the profile link above.
+                  onNavigate={() => {
+                    closeNotifications()
+                    onClose?.()
+                  }}
+                />
               </div>
             )}
 

@@ -24,6 +24,9 @@ import {
   messagesTable,
   blocksTable,
   notificationsTable,
+  matchesTable,
+  disputesTable,
+  teamsTable,
 } from '../db/schema.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
@@ -41,8 +44,16 @@ const OUTGOING = ['ivan'];
 /** Comptes bloqués par `alice`, à débloquer depuis l'onglet Ajouter. */
 const BLOCKED = ['karl'];
 
-/** Marqueur de propriété : ne purger que les notifications posées par CE script. */
-const OWNED = { seedSocial: true };
+/**
+ * Préfixe d'id déterministe : c'est LUI qui dit « cette notification vient de ce script ».
+ *
+ * 🚨 Surtout PAS un marqueur dans `data` : les payloads de notifications sont validés en
+ * `strictObject` côté serveur ET côté front, une clé en trop les fait rejeter — on livrerait
+ * une fixture que l'application refuse d'afficher. Même convention que les matchs de démo
+ * `ffff1xxx` de `seed-dev`.
+ */
+const NOTIF_ID_PREFIX = 'dddd0000-0000-4000-8000-';
+const notifId = (n: number) => `${NOTIF_ID_PREFIX}${String(n).padStart(12, '0')}`;
 
 const HOURS = 3_600_000;
 
@@ -75,24 +86,6 @@ const CHAT_WITH_OTHERS: Array<{ friend: string; from: string; content: string }>
   { friend: 'carol', from: ME, content: 'de temps en temps ouais' },
   { friend: 'carol', from: 'carol', content: 'on se fait une partie cette semaine ?' },
   { friend: 'dave', from: 'dave', content: 'gg pour hier' },
-];
-
-/**
- * Notifications de `alice`. On couvre plusieurs familles pour que la cloche ait de quoi
- * afficher, dont `team_member_added` — MORT depuis B-INV mais toujours présent en base :
- * le rendu doit le gérer, pas l'exclure.
- */
-const NOTIFICATIONS: Array<{ type: string; data: Record<string, unknown>; read: boolean }> = [
-  { type: 'friend_request_received', data: { fromPseudo: 'grace' }, read: false },
-  { type: 'friend_request_received', data: { fromPseudo: 'heidi' }, read: false },
-  { type: 'friend_request_accepted', data: { byPseudo: 'dave' }, read: false },
-  { type: 'team_invitation_received', data: { teamName: 'Team Bravo', byPseudo: 'bob' }, read: false },
-  { type: 'match_accepted', data: { teamName: 'Team Alpha' }, read: false },
-  { type: 'result_submitted', data: { teamName: 'Team Bravo' }, read: true },
-  { type: 'dispute_opened', data: { teamName: 'Team Bravo' }, read: true },
-  { type: 'team_member_removed', data: { teamName: 'Team Charlie', byPseudo: 'carol' }, read: true },
-  { type: 'team_member_added', data: { teamName: 'Team Charlie', byPseudo: 'carol' }, read: true },
-  { type: 'team_disbanded', data: { teamName: 'Team Charlie', byPseudo: 'carol' }, read: true },
 ];
 
 async function main() {
@@ -144,16 +137,19 @@ async function main() {
     .where(
       and(inArray(blocksTable.blockerId, everyone), inArray(blocksTable.blockedId, everyone)),
     );
-  // Les notifications, elles, ne se reconnaissent pas à leurs acteurs : `seed-dev` et l'app
-  // en produisent aussi pour `alice`. On ne supprime QUE celles que ce script a marquées.
+  // Les notifications ne se reconnaissent pas à leurs acteurs : `seed-dev` et l'application
+  // en produisent aussi pour `alice`. On ne supprime que celles dont l'id porte notre préfixe.
   await db
     .delete(notificationsTable)
-    .where(
-      and(
-        inArray(notificationsTable.userId, everyone),
-        sql`${notificationsTable.data} @> ${JSON.stringify(OWNED)}::jsonb`,
-      ),
-    );
+    .where(sql`${notificationsTable.id}::text LIKE ${NOTIF_ID_PREFIX + '%'}`);
+  // Nettoyage de la PREMIÈRE version de ce script, qui marquait ses notifications par une clé
+  // `seedSocial` dans le payload. C'était une mauvaise idée — les payloads sont validés en
+  // `strictObject`, une clé en trop les fait rejeter — et les lignes ainsi posées ne portent
+  // pas le préfixe d'id, donc la purge ci-dessus ne les voit pas. À retirer quand plus aucune
+  // base de dev de l'équipe n'en contient.
+  await db
+    .delete(notificationsTable)
+    .where(sql`${notificationsTable.data} @> '{"seedSocial": true}'::jsonb`);
 
   // ---------------------------------------------------------------- amitiés et blocages
   const now = Date.now();
@@ -216,17 +212,147 @@ async function main() {
   await db.insert(messagesTable).values([...peerMessages, ...otherMessages]);
 
   // ---------------------------------------------------------------- notifications
+  // 🚨 CHAQUE NOTIFICATION POINTE VERS UNE CIBLE QUI EXISTE VRAIMENT.
+  // La cloche mène à l'écran concerné : semer un `matchId` inventé produirait un 404 au clic,
+  // donc une ligne rouge dans la console — motif de rejet du projet. On construit donc les
+  // payloads à partir des VRAIES lignes posées par `seed:dev` et par ce script, et on saute
+  // simplement les familles dont la cible manque.
+  const pendingIn = await db
+    .select({
+      id: friendshipsTable.id,
+      requesterId: friendshipsTable.requesterId,
+    })
+    .from(friendshipsTable)
+    .where(and(eq(friendshipsTable.addresseeId, me), eq(friendshipsTable.status, 'pending')));
+
+  const [acceptedWithDave] = await db
+    .select({ id: friendshipsTable.id })
+    .from(friendshipsTable)
+    .where(
+      and(eq(friendshipsTable.requesterId, me), eq(friendshipsTable.addresseeId, idOf.get('dave')!)),
+    );
+
+  // Les matchs de démo de `seed:dev` : on prend un état par famille de notification.
+  const demoMatches = await db
+    .select({
+      id: matchesTable.id,
+      ladderId: matchesTable.ladderId,
+      status: matchesTable.status,
+      scheduledAt: matchesTable.scheduledAt,
+    })
+    .from(matchesTable)
+    .where(inArray(matchesTable.status, ['in_progress', 'awaiting_confirmation', 'disputed']));
+
+  const matchOf = (status: string) => demoMatches.find((m) => m.status === status);
+  const [demoDispute] = await db
+    .select({ id: disputesTable.id, matchId: disputesTable.matchId })
+    .from(disputesTable)
+    .limit(1);
+
+  const [charlie] = await db
+    .select({ id: teamsTable.id, name: teamsTable.name, ladderId: teamsTable.ladderId })
+    .from(teamsTable)
+    .where(eq(teamsTable.name, 'Team Charlie'));
+
+  type SeedNotification = {
+    type: (typeof notificationsTable.$inferInsert)['type'];
+    data: Record<string, unknown>;
+    read: boolean;
+  };
+  const notifications: SeedNotification[] = [];
+
+  for (const request of pendingIn) {
+    const fromPseudo = [...idOf.entries()].find(([, id]) => id === request.requesterId)?.[0];
+    if (!fromPseudo) continue;
+    notifications.push({
+      type: 'friend_request_received',
+      data: { friendshipId: request.id, fromUserId: request.requesterId, fromPseudo },
+      read: false,
+    });
+  }
+
+  if (acceptedWithDave) {
+    notifications.push({
+      type: 'friend_request_accepted',
+      data: {
+        friendshipId: acceptedWithDave.id,
+        byUserId: idOf.get('dave')!,
+        byPseudo: 'dave',
+      },
+      read: false,
+    });
+  }
+
+  // Un match ACCEPTÉ dont le coup d'envoi est passé porte le statut `in_progress` : c'est la
+  // cible juste pour « quelqu'un a accepté ton créneau ». Il n'existe pas de statut `accepted`.
+  const accepted = matchOf('in_progress');
+  if (accepted?.scheduledAt) {
+    notifications.push({
+      type: 'match_accepted',
+      data: {
+        matchId: accepted.id,
+        ladderId: accepted.ladderId,
+        scheduledAt: accepted.scheduledAt.toISOString(),
+      },
+      read: false,
+    });
+  }
+
+  const awaiting = matchOf('awaiting_confirmation');
+  if (awaiting) {
+    notifications.push({
+      type: 'result_submitted',
+      data: { matchId: awaiting.id, ladderId: awaiting.ladderId },
+      read: false,
+    });
+  }
+
+  const disputed = matchOf('disputed');
+  if (disputed && demoDispute && demoDispute.matchId === disputed.id) {
+    notifications.push({
+      type: 'dispute_opened',
+      data: { matchId: disputed.id, ladderId: disputed.ladderId, disputeId: demoDispute.id },
+      read: true,
+    });
+  }
+
+  if (charlie) {
+    // ⚠️ `team_member_added` est MORT depuis B-INV — plus personne ne l'émet, mais la valeur
+    // reste en base et d'anciennes notifications y font référence. On en sème une EXPRÈS :
+    // le rendu doit la gérer, pas l'exclure.
+    for (const type of ['team_member_added', 'team_member_removed'] as const) {
+      notifications.push({
+        type,
+        data: {
+          teamId: charlie.id,
+          teamName: charlie.name,
+          ladderId: charlie.ladderId,
+          byUserId: idOf.get('carol')!,
+          byPseudo: 'carol',
+        },
+        read: true,
+      });
+    }
+  }
+
   await db.insert(notificationsTable).values(
-    NOTIFICATIONS.map((notification, index) => ({
+    notifications.map((notification, index) => ({
+      // Id déterministe : c'est ce qui rend la purge de ce script exacte et sans marqueur
+      // dans le payload (voir `NOTIF_ID_PREFIX`).
+      id: notifId(index + 1),
       userId: me,
-      type: notification.type as (typeof notificationsTable.$inferInsert)['type'],
-      data: { ...notification.data, ...OWNED },
+      type: notification.type,
+      data: notification.data,
       readAt: notification.read ? new Date(now - (index + 1) * HOURS) : null,
       createdAt: new Date(now - (index + 1) * 40 * 60_000),
     })),
   );
 
-  const unread = NOTIFICATIONS.filter((n) => !n.read).length;
+  const unread = notifications.filter((n) => !n.read).length;
+  const skipped =
+    charlie && demoMatches.length
+      ? ''
+      : '  ⚠️ cibles de match/équipe absentes — relancer `seed:dev` pour les avoir';
 
   console.log(`\n👥 Rail social semé pour « ${ME} » :`);
   console.log(`   ${FRIENDS.length} amis            ${FRIENDS.join(', ')}`);
@@ -236,7 +362,9 @@ async function main() {
   console.log(
     `   ${peerMessages.length + otherMessages.length} messages         ${CHAT_WITH_PEER.length} avec ${PEER}, le reste réparti sur les autres conversations`,
   );
-  console.log(`   ${NOTIFICATIONS.length} notifications    dont ${unread} non lues`);
+  console.log(
+    `   ${notifications.length} notifications     dont ${unread} non lues — toutes pointées sur de VRAIES cibles${skipped}`,
+  );
 
   console.log('\n🔑 Recette à deux fenêtres (mot de passe : Test1234!) :');
   console.log(`   alice@dev.local   le compte à regarder — c'est lui qui porte tous les états`);

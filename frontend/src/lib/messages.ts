@@ -1,6 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { ApiError, apiFetch, sharedApiErrorMessage } from '@/lib/api';
+// The row-age formatter this module used to own moved to `lib/rail-time.ts` when [FS-2]
+// became its second consumer; the day key AND the two `Intl` formatters come back from there
+// so the two files cannot drift. See the note above `formatMessageTime` below.
+import { dayKey, formatClockTime, formatFullDate } from '@/lib/rail-time';
 
 import type { components, paths } from '@/lib/api-types.gen';
 
@@ -241,27 +245,19 @@ export function sendErrorMessage(code: 'not_friends' | 'blocked' | 'invalid_mess
 // -------------------------------------------------------------------- formatting
 
 /**
- * `en-GB` is pinned, like every other formatter of the repo: a 24-hour clock, and the same
- * string on every machine (a host locale would make the console audit compare against a
- * moving target).
+ * 🔑 THE FORMATTERS THEMSELVES LIVE IN `rail-time.ts`, not here — the extraction [FS-2] started
+ * is finished. `formatMessageTime` and `formatRailTime` print the SAME clock, and two identical
+ * `Intl.DateTimeFormat('en-GB')` declared in two files is exactly how one of them ends up
+ * switching to a 12-hour clock and the rail starts disagreeing with the bubble under it.
+ *
+ * What stays here is the only thing that is really this file's own: WHICH form to print for a
+ * chat log (a bubble, a day separator), where the rail answers the same question for a 312 px
+ * row. The `en-GB` pinning and its reasoning moved with the code.
  */
-const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
-const dayFormat = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-});
-/** Same date without the year — a conversation row has one line and a 312 px rail to fit in. */
-const shortDayFormat = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' });
 
 /** `14:32` — all a bubble shows. WHICH DAY it belongs to is carried by the day separators. */
 export function formatMessageTime(isoDate: string) {
-  return clockFormat.format(new Date(isoDate));
-}
-
-/** Local calendar day, so "same day" means what the reader's clock says, not what UTC says. */
-function dayKey(date: Date) {
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  return formatClockTime(new Date(isoDate));
 }
 
 /** Do these two messages belong to the same day? Decides where a separator is inserted. */
@@ -288,31 +284,5 @@ export function formatMessageDayLabel(isoDate: string) {
   yesterday.setDate(yesterday.getDate() - 1);
   if (dayKey(date) === dayKey(yesterday)) return 'Yesterday';
 
-  return dayFormat.format(date);
-}
-
-/**
- * `14:32` / `Yesterday` / `28 Jul` / `28 Jul 2025` — the age of a conversation, in the width
- * of a list row.
- *
- * 🔑 NOT a relative "2 min ago". That reads well for a minute and then lies quietly: it needs
- * a timer to stay true, and a rail that is mounted on every page would run that timer forever.
- * A clock time is exact, needs nothing, and is the same information the bubbles already show.
- *
- * The year only appears when it is NOT the current one — inside the current year it is noise,
- * outside it, dropping it would make a message from last July indistinguishable from today's.
- */
-export function formatConversationTime(isoDate: string) {
-  const date = new Date(isoDate);
-  const today = new Date();
-
-  if (dayKey(date) === dayKey(today)) return clockFormat.format(date);
-
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (dayKey(date) === dayKey(yesterday)) return 'Yesterday';
-
-  return date.getFullYear() === today.getFullYear()
-    ? shortDayFormat.format(date)
-    : dayFormat.format(date);
+  return formatFullDate(date);
 }
