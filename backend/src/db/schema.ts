@@ -438,6 +438,12 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'team_invitation_received',
   'team_invitation_accepted',
   'team_invitation_declined',
+  // BX-LEAVE — un joueur quitte (ou est exclu de) l'équipe alors qu'il est ALIGNÉ dans un
+  // créneau `pending` : le créneau tombe en `cancelled`, et le reste de la lineup + le
+  // capitaine doivent l'apprendre autrement que par un 404. ⚠️ Aucune valeur existante ne
+  // convenait : `match_ghost_cancelled` raconte l'abandon détecté par le job des 24 h, et
+  // `team_member_removed` s'adresse à l'EXCLU, pas au camp qui perd son créneau.
+  'match_cancelled_member_left',
 ]);
 
 export const notificationsTable = pgTable(

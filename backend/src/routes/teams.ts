@@ -14,8 +14,13 @@ import {
   disputesTable,
 } from '../db/schema.js';
 import { eq, ne, and, asc, desc, count, inArray, sql } from 'drizzle-orm';
-import { notify, pushNotifications } from '../utils/notifications.js';
-import { ENGAGING_STATUSES } from '../utils/match-status.js';
+import {
+  notify,
+  pushNotifications,
+  getMatchParticipantIds,
+  type CreatedNotification,
+} from '../utils/notifications.js';
+import { ENGAGING_STATUSES, LOCKING_STATUSES } from '../utils/match-status.js';
 import { isBlocked } from '../utils/blocks.js';
 import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { IMAGE_MIME } from './users.js';
@@ -89,9 +94,15 @@ const playerLadderKey = (userId: string, ladderId: string) => `user:${userId}:${
  * | `POST /teams/invitations/:id/accept`    | les deux (+ cascade métier)    | team + user      |
  * | `DELETE /teams/:id`                     | **4 tables par cascade DB**    | team            |
  * | `POST /teams` (création)                | `team_members` + cascade métier | user            |
+ * | `DELETE /teams/:id/members/:userId`     | `team_members` + `match_participants` + `matches` | team |
  * | `DELETE /teams/:id/invitations/:invId`  | 1 ligne `team_invitations`     | aucun — voir ci-dessous |
  * | `POST /teams/invitations/:id/decline`   | 1 ligne `team_invitations`     | aucun — voir ci-dessous |
- * | `DELETE /teams/:id/members/:userId`     | 1 ligne `team_members`         | aucun — voir ci-dessous |
+ *
+ * ⚠️ **`DELETE /teams/:id/members/:userId` a CHANGÉ DE RÉGIME (BX-LEAVE)** et c'est
+ * exactement le cas prévu par l'avertissement du bas de ce docblock : elle n'écrivait
+ * qu'une ligne adressée par son id, elle nettoie désormais aussi la composition des
+ * créneaux `pending` du partant et les annule. Elle est donc remontée dans ce tableau.
+ * Le raisonnement complet — pourquoi UNE clé et laquelle — est en tête de la route.
  *
  * ✱ la clé `user:` de l'invitation porte sur le JOUEUR INVITÉ (pas sur le capitaine).
  *
@@ -1370,36 +1381,217 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           return reply.code(400).send({ error: 'captain cannot leave, dissolve the team instead' });
 
         // Cette route sert À LA FOIS le kick (capitaine) et le départ volontaire.
-        // On ne notifie QUE le kick : si le joueur part de lui-même il est l'acteur, et
-        // la règle B9 est « jamais l'acteur ».
+        // On ne notifie `team_member_removed` QUE sur le kick : si le joueur part de
+        // lui-même il est l'acteur, et la règle B9 est « jamais l'acteur ».
         const isKick = me !== targetId;
-        const actor = isKick
-          ? (
-              await db
-                .select({ id: usersTable.id, pseudo: usersTable.pseudo })
-                .from(usersTable)
-                .where(eq(usersTable.id, me))
-            )[0]
-          : undefined;
 
-        const notifs = await db.transaction(async (tx) => {
-          // ⚠️ `.returning()` : la route est IDEMPOTENTE (retirer un non-membre rend 200).
-          // Sans ce garde, on notifierait « tu as été exclu » à quelqu'un qui n'a jamais
-          // été dans l'équipe. On ne notifie que si une ligne a réellement disparu.
+        // Deux pseudos, deux rôles, et sur un kick ce n'est PAS la même personne :
+        // l'ACTEUR signe l'exclusion (`team_member_removed`), la CIBLE nomme la cause de
+        // l'annulation de créneau (`match_cancelled_member_left`). Lus en une requête,
+        // projection explicite — jamais de `select()` nu sur `users` (invariant #6).
+        const people = await db
+          .select({ id: usersTable.id, pseudo: usersTable.pseudo })
+          .from(usersTable)
+          .where(inArray(usersTable.id, [...new Set([me, targetId])]));
+        const actor = people.find((u) => u.id === me);
+        const target = people.find((u) => u.id === targetId);
+        if (!actor) return reply.code(500).send({ error: 'Internal error' });
+        // Cible inexistante : aucune ligne `team_members` ne peut la référencer (FK), donc
+        // il n'y a rien à retirer. On rend le 200 idempotent de la route, pas un 404 —
+        // c'est le contrat historique et le front s'en sert.
+        if (!target) return reply.code(200).send({ ok: true });
+
+        const outcome = await db.transaction(async (tx) => {
+          // ── 🔒 BX-LEAVE — LE VERROU, ET POURQUOI IL EN FAUT UN MAINTENANT ────────────
+          // Cette route n'écrivait qu'UNE ligne adressée par son id : elle vivait donc
+          // dans le régime « sans verrou » documenté par `lockRoster`. Elle écrit
+          // désormais aussi `match_participants` et `matches`, et elle DÉCIDE d'après une
+          // lecture (« ce joueur est-il aligné ? ») — un contrôle en code n'est jamais
+          // atomique (piège #14). Sans verrou, la course qui compte est celle-ci :
+          //   * `POST /matches` lit le roster (`validateSide`) et voit le partant ENCORE
+          //     membre, parce que notre DELETE n'est pas commité ;
+          //   * on scanne les créneaux `pending` et on ne voit pas le sien, parce que son
+          //     INSERT n'est pas commité non plus ;
+          //   → les deux commitent, et un créneau TOUT NEUF aligne un non-membre : très
+          //     exactement le défaut que ce ticket corrige, réintroduit par la fenêtre.
+          //
+          // 🚨 CE VERROU EST NÉCESSAIRE MAIS NE SUFFIT PAS, et ce n'est pas une nuance :
+          // sérialiser les deux transactions ne rafraîchit pas une lecture faite AVANT
+          // elles, or `validateSide()` lit le roster hors transaction. Il lui faut son
+          // pendant côté `matches.ts` — `lineupOffRoster()`, la re-vérification de la
+          // composition sous CE MÊME verrou, appelée par la création ET l'acceptation.
+          // Mesuré, pas supposé (§8 de `test_teams_leave.py`) : verrou seul = créneau
+          // fantôme 3 fois sur 3 ; re-vérification seule = fantôme par intermittence ;
+          // les deux = 3/3 propres. Retirer l'un des deux rouvre le trou.
+          //
+          // POURQUOI UNE SEULE CLÉ, ET POURQUOI CELLE-LÀ (`team:<id>`) :
+          //   * `hashtext('team:<id>')` est la MÊME valeur que `competitorKey()` de
+          //     `matches.ts` — la convention est commune aux deux fichiers, donc ce verrou
+          //     nous sérialise avec `POST /matches` ET avec `POST /matches/:id/accept`
+          //     (qui verrouille les DEUX camps, celui du créateur compris) ;
+          //   * l'invariant qu'on protège — « aucun non-membre aligné dans un créneau de
+          //     CETTE équipe » — a pour portée l'ÉQUIPE, pas le couple (joueur, ladder).
+          //     La clé `user:<id>:<ladder>` de l'acceptation d'invitation garde l'unicité
+          //     « une équipe par ladder » : on ne fait que LIBÉRER une place dans cet
+          //     index, jamais la disputer, il n'y a donc rien à sérialiser de ce côté.
+          //
+          // Cette clé unique est aussi ce qui garde la route SÛRE : une transaction qui
+          // ne détient qu'un verrou consultatif ne peut pas fermer un cycle. Et elle le
+          // prend en PREMIER, avant toute écriture — même discipline que la dissolution,
+          // dont le docblock raconte l'interblocage réel qu'un verrou pris trop tard
+          // laissait passer.
+          //
+          // 🔑 Deux départs simultanés n'annulent ni ne notifient deux fois : ils prennent
+          // la même clé, donc ils s'exécutent l'un après l'autre. Le second relit la
+          // composition sous verrou et ne trouve plus rien à faire. Ceinture et bretelles,
+          // l'UPDATE d'annulation est conditionné à `status = 'pending'` et ne notifie que
+          // s'il a réellement touché une ligne — ce qui couvre aussi les acteurs qui NE
+          // prennent PAS ce verrou (`DELETE /matches/:id`, les jobs des 24 h).
+          await lockRoster(tx, [teamKey(teamId)]);
+
+          // Adhésion relue SOUS le verrou : c'est CETTE lecture qui fait autorité.
+          const [membership] = await tx
+            .select({ id: teamMembersTable.id })
+            .from(teamMembersTable)
+            .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, targetId)));
+          // ⚠️ L'IDEMPOTENCE PASSE AVANT LA GARDE, et l'ordre est un choix : retirer un
+          // non-membre rend 200, y compris s'il traîne encore dans un match actif de
+          // l'équipe (l'état hérité que ce ticket corrige justement). Un 409 dirait au
+          // capitaine d'annuler un match pour retirer quelqu'un qui n'est déjà plus là.
+          if (!membership) return { ok: true as const, notifs: [] };
+
+          // ── ① MATCH ACTIF → refus, rien n'est écrit ─────────────────────────────────
+          // Même `code` que `DELETE /users/me` (BX-DEL) — donc le même parcours de sortie
+          // déjà documenté — mais la liste de statuts est VOLONTAIREMENT PLUS ÉTROITE :
+          // `users.ts` refuse sur `ENGAGING_STATUSES` (créneau `pending` inclus), ici on
+          // refuse sur `LOCKING_STATUSES` seuls. La différence est la décision de la carte :
+          // un créneau `pending` n'empêche pas de partir, il tombe (② plus bas). Ne pas
+          // « réaligner » les deux listes en croyant corriger une incohérence.
+          // ⚠️ Portée volontairement limitée aux camps de CETTE équipe : un match en cours
+          // avec une AUTRE équipe (autre ladder) n'a rien à voir avec ce roster, le
+          // bloquer serait un refus incompréhensible et sans remède ici.
+          // ⚠️ Les DEUX filtres sélectifs sont indexés — vérifié à l'`EXPLAIN`, pas supposé :
+          // `match_sides_team_match_idx` (team_id) et `match_participants_user_idx` (user_id,
+          // en Index Only Scan). Le coût suit donc l'activité de CETTE équipe et de CE
+          // joueur, jamais le volume de matchs de la plateforme. (Sur la base de dev, 18
+          // lignes de composition, le planificateur préfère un Seq Scan : c'est normal, les
+          // index n'apparaissent qu'avec `enable_seqscan=off` ou à l'échelle.)
+          const [locking] = await tx
+            .select({ matchId: matchesTable.id })
+            .from(matchParticipantsTable)
+            .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
+            .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
+            .where(
+              and(
+                eq(matchParticipantsTable.userId, targetId),
+                eq(matchSidesTable.teamId, teamId),
+                inArray(matchesTable.status, LOCKING_STATUSES),
+              ),
+            )
+            .limit(1);
+          if (locking)
+            return {
+              ok: false as const,
+              status: 409,
+              error: 'this player is aligned in an ongoing match — finish or cancel it first',
+              code: 'engaged_in_match' as const,
+            };
+
+          // ── ② CRÉNEAUX `pending` → on laisse partir, mais on annule ─────────────────
+          // Décision produit de la carte : refuser ici fabriquerait un cul-de-sac, seul le
+          // capitaine peut annuler un créneau — un simple membre n'aurait AUCUNE action
+          // possible pour se débloquer. Un créneau dont la composition n'est plus valide
+          // ne doit pas rester acceptable : il tombe.
+          const slots = await tx
+            .select({
+              matchId: matchesTable.id,
+              ladderId: matchesTable.ladderId,
+              scheduledAt: matchesTable.scheduledAt,
+              sideId: matchSidesTable.id,
+            })
+            .from(matchParticipantsTable)
+            .innerJoin(matchSidesTable, eq(matchSidesTable.id, matchParticipantsTable.matchSideId))
+            .innerJoin(matchesTable, eq(matchesTable.id, matchSidesTable.matchId))
+            .where(
+              and(
+                eq(matchParticipantsTable.userId, targetId),
+                eq(matchSidesTable.teamId, teamId),
+                eq(matchesTable.status, 'pending'),
+              ),
+            );
+
+          // ⚠️ `.returning()` MALGRÉ la lecture d'adhésion sous verrou, et ce n'est pas une
+          // ceinture inutile : `DELETE /users/me` supprime la ligne `team_members` PAR
+          // CASCADE, sans transaction ni verrou — elle peut donc passer entre notre SELECT
+          // et ce DELETE. Sans ce garde, on notifierait un compte qui n'existe plus et la
+          // FK de `notifications` remonterait un 23503 (500 opaque pour le capitaine).
           const deleted = await tx
             .delete(teamMembersTable)
             .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, targetId)))
             .returning({ id: teamMembersTable.id });
-          if (deleted.length === 0 || !isKick || !actor) return [];
-          return notify(tx, [targetId], 'team_member_removed', {
-            teamId,
-            teamName: team.name,
-            ladderId: team.ladderId,
-            byUserId: actor.id,
-            byPseudo: actor.pseudo,
-          });
+          if (deleted.length === 0) return { ok: true as const, notifs: [] };
+
+          const created: CreatedNotification[] = [];
+          for (const slot of slots) {
+            // Destinataires lus AVANT le nettoyage : on veut la composition telle qu'elle
+            // était, et exclure le partant EXPLICITEMENT plutôt que par effet de bord.
+            const lineup = await getMatchParticipantIds(tx, slot.matchId);
+            await tx
+              .delete(matchParticipantsTable)
+              .where(
+                and(
+                  eq(matchParticipantsTable.matchSideId, slot.sideId),
+                  eq(matchParticipantsTable.userId, targetId),
+                ),
+              );
+            // UPDATE CONDITIONNEL : si un tiers a annulé ou fait expirer ce créneau entre
+            // la lecture et ici, aucune ligne ne bouge et on ne notifie pas une annulation
+            // qu'on n'a pas faite.
+            const [cancelled] = await tx
+              .update(matchesTable)
+              .set({ status: 'cancelled' })
+              .where(and(eq(matchesTable.id, slot.matchId), eq(matchesTable.status, 'pending')))
+              .returning({ id: matchesTable.id });
+            if (!cancelled) continue;
+            // Invariant #2 : le camp concerné, JAMAIS l'acteur. Le partant non plus — il
+            // sait qu'il part. Le capitaine est ajouté car il peut être hors composition
+            // et c'est le seul à pouvoir rouvrir un créneau. `notify()` dédoublonne quand
+            // il est aussi dans la lineup.
+            const recipients = [...lineup, team.captainId].filter(
+              (userId) => userId !== targetId && userId !== me,
+            );
+            created.push(
+              ...(await notify(tx, recipients, 'match_cancelled_member_left', {
+                matchId: slot.matchId,
+                ladderId: slot.ladderId,
+                // Colonne nullable en base (seul Zod l'impose à la création) : on rend
+                // l'absence visible plutôt que de faire échouer une annulation légitime
+                // sur un champ d'affichage.
+                scheduledAt: slot.scheduledAt ? slot.scheduledAt.toISOString() : null,
+                teamId,
+                teamName: team.name,
+                playerId: target.id,
+                playerPseudo: target.pseudo,
+              })),
+            );
+          }
+
+          if (isKick)
+            created.push(
+              ...(await notify(tx, [targetId], 'team_member_removed', {
+                teamId,
+                teamName: team.name,
+                ladderId: team.ladderId,
+                byUserId: actor.id,
+                byPseudo: actor.pseudo,
+              })),
+            );
+          return { ok: true as const, notifs: created };
         });
-        pushNotifications(notifs);
+
+        if (!outcome.ok)
+          return reply.code(outcome.status).send({ error: outcome.error, code: outcome.code });
+        pushNotifications(outcome.notifs);
         return reply.code(200).send({ ok: true });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });

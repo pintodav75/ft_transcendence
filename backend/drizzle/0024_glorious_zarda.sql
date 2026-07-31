@@ -1,0 +1,1 @@
+ALTER TYPE "public"."notification_type" ADD VALUE 'match_cancelled_member_left';
