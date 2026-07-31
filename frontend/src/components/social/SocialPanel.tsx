@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Bell, MessageCircle, UserPlus, Users, X } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 
@@ -7,8 +7,11 @@ import { ChatSlot } from '@/components/social/ChatSlot'
 import { FriendsSlot } from '@/components/social/FriendsSlot'
 import { NotificationsSlot } from '@/components/social/NotificationsSlot'
 import { Avatar } from '@/components/ui/avatar'
+import { IconButton } from '@/components/ui/icon-button'
 import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { panelId, tabId } from '@/components/ui/tab-ids'
+import { sendErrorMessage } from '@/lib/messages'
+import { realtimeClient } from '@/lib/realtime-client'
 import { useAnnouncement } from '@/lib/use-announcement'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
@@ -16,6 +19,8 @@ import {
   useRealtimeStore,
   type RealtimeConnectionState,
 } from '@/stores/realtime-store'
+
+import type { ChatPartner } from '@/lib/messages'
 
 type SocialTabId = 'friends' | 'chat' | 'addFriend'
 
@@ -47,6 +52,12 @@ const CONNECTION_DETAILS: Record<
   },
 }
 
+/**
+ * How long the panel keeps watching for the server's answer to a send whose conversation was
+ * closed under it. Same budget as the composer's own net: past it, no answer is coming.
+ */
+const ABANDONED_SEND_WATCH_MS = 10_000
+
 type SocialPanelProps = {
   onClose?: () => void
 }
@@ -54,11 +65,33 @@ type SocialPanelProps = {
 export function SocialPanel({ onClose }: SocialPanelProps) {
   const [activeTab, setActiveTab] = useState<SocialTabId>('friends')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  /**
+   * The ONE open conversation ([FS-3]; the list and the several windows belong to [FS-4]).
+   *
+   * It is held HERE and not inside `ChatSlot` because the friends list is what opens it, and
+   * that list lives in another tab. Re-opening the same friend re-uses the very same
+   * conversation instead of stacking a duplicate.
+   *
+   * ⚠️ This alone did NOT make a conversation survive a tab switch — the slot was unmounted
+   * under it, taking the draft and the realtime buffer with it. What saves those is the panel
+   * keeping all three tabs mounted (see the panels below); this state is only the "which one".
+   */
+  const [conversation, setConversation] = useState<ChatPartner | null>(null)
+  /**
+   * Bumped on every EXPLICIT open request, and nothing else. Opening from the friends list
+   * destroys the button that had focus (the row unmounts with the tab), so the focus has to be
+   * moved by hand — and it must move ONLY then: keying this on the conversation itself would
+   * steal the focus from the tab strip every time someone simply comes back to this tab.
+   */
+  const [openRequests, setOpenRequests] = useState(0)
   const notificationsRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLInputElement>(null)
   const tabsId = useId()
   const user = useAuthStore((state) => state.user)
   const connectionState = useRealtimeStore((state) => state.connectionState)
-  const outcome = useAnnouncement()
+  // Destructured: the effect below depends on `announce` alone, and `useAnnouncement` returns
+  // a fresh object every render — depending on that object would re-subscribe on every render.
+  const { message: announcement, announce } = useAnnouncement()
   const connectionDetails = CONNECTION_DETAILS[connectionState]
   const displayName = user?.displayName || user?.pseudo || 'Player'
   const fallback = (user?.pseudo ?? '?').slice(0, 2).toUpperCase()
@@ -86,13 +119,81 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
     }
   }, [notificationsOpen])
 
+  // Runs after the Messages tab has rendered its composer, which is why it is an effect and
+  // not a line inside `openConversation`: the field does not exist yet when the click happens.
+  useEffect(() => {
+    if (openRequests === 0) return
+
+    composerRef.current?.focus()
+  }, [openRequests])
+
+  /**
+   * 🚨 A SEND CAN OUTLIVE ITS CONVERSATION. Closing the window (or opening another friend's)
+   * while a message is still in flight destroys the only listener there was, and the server's
+   * refusal — "you are not friends any more", "you are blocked" — then arrives with nobody to
+   * show it: the text is gone and the user is never told why.
+   *
+   * This panel survives all of that, so the conversation hands it the watch on the way out
+   * (`onSendAbandoned`) and the refusal is spoken in the rail's own live region.
+   */
+  const abandonedSendWatchRef = useRef<number | null>(null)
+
+  const handleSendAbandoned = useCallback(() => {
+    abandonedSendWatchRef.current = Date.now() + ABANDONED_SEND_WATCH_MS
+  }, [])
+
+  useEffect(
+    () =>
+      realtimeClient.subscribe((event) => {
+        if (event.type !== 'error') return
+
+        const watchUntil = abandonedSendWatchRef.current
+        // No orphan, or too late to be its answer: a mounted conversation owns this refusal and
+        // displays it in place, and saying it here as well would state it twice.
+        if (watchUntil === null || Date.now() > watchUntil) return
+
+        abandonedSendWatchRef.current = null
+        announce(sendErrorMessage(event.code))
+      }),
+    [announce],
+  )
+
   function selectTab(tabId: SocialTabId) {
     setActiveTab(tabId)
     setNotificationsOpen(false)
   }
 
+  /**
+   * Opens (or brings forward) the conversation with one friend. Called from the friends list.
+   *
+   * Re-clicking the SAME friend keeps the same conversation — `ChatSlot` keys the component on
+   * the partner id — and only brings the tab forward with the focus in the composer. Clicking
+   * another friend replaces it.
+   */
+  function openConversation(partner: ChatPartner) {
+    setConversation(partner)
+    setOpenRequests((count) => count + 1)
+    setActiveTab('chat')
+    setNotificationsOpen(false)
+  }
+
   function toggleNotifications() {
     setNotificationsOpen((open) => !open)
+  }
+
+  /**
+   * The shared attributes of the three tab panels, built here rather than copied three times —
+   * and the `hidden` is the whole point: see the block that renders them.
+   */
+  function panelProps(id: SocialTabId) {
+    return {
+      id: panelId(tabsId, id),
+      role: 'tabpanel' as const,
+      'aria-labelledby': tabId(tabsId, id),
+      tabIndex: 0,
+      hidden: activeTab !== id,
+      className: 'min-h-0 flex-1 overflow-y-auto focus:outline-none',
+    }
   }
 
   return (
@@ -115,7 +216,7 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
        * otherwise unmount the announcement before it is spoken.
        */}
       <p role="status" className="sr-only">
-        {outcome.message}
+        {announcement}
       </p>
 
       <div className="relative flex items-center gap-3 border-b border-border-subtle p-3">
@@ -162,11 +263,12 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
 
         <div className="flex items-center gap-1">
           <div ref={notificationsRef} className="group static lg:relative">
-            <button
-              type="button"
+            {/* `peer` stays in `className`: the tooltip below is a sibling that reacts to this
+                button's focus, and that is the one thing `IconButton` cannot own for it. */}
+            <IconButton
               onClick={toggleNotifications}
               className={cn(
-                'peer focus-ring flex size-11 items-center justify-center rounded-control text-text-secondary transition hover:bg-surface-card-strong hover:text-text-primary',
+                'peer',
                 notificationsOpen && 'bg-surface-card-strong text-text-primary',
               )}
               aria-label="Notifications"
@@ -175,7 +277,7 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
               aria-controls={notificationsOpen ? `${tabsId}-notifications-panel` : undefined}
             >
               <Bell className="size-5" aria-hidden="true" />
-            </button>
+            </IconButton>
 
             {notificationsOpen && (
               <div
@@ -202,14 +304,9 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
           </div>
 
           {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="focus-ring flex size-11 items-center justify-center rounded-control text-text-secondary transition hover:bg-surface-card-strong hover:text-text-primary"
-              aria-label="Close social panel"
-            >
+            <IconButton onClick={onClose} aria-label="Close social panel">
               <X className="size-5" aria-hidden="true" />
-            </button>
+            </IconButton>
           )}
 
         </div>
@@ -224,22 +321,49 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
         variant="icon"
       />
 
-      <div
-        id={panelId(tabsId, activeTab)}
-        role="tabpanel"
-        aria-labelledby={tabId(tabsId, activeTab)}
-        tabIndex={0}
-        className="min-h-0 flex-1 overflow-y-auto focus:outline-none"
-      >
-        {/* `onClose` travels down for the same reason the profile link above uses it: under
-            1024 px this panel is an `aria-modal` overlay, so a link that navigates without
-            closing it leaves the visitor behind the overlay. `undefined` on desktop. */}
+      {/**
+       * 🚨 THE THREE PANELS ARE ALL RENDERED, and the two inactive ones are `hidden`.
+       *
+       * `ChatSlot` is the reason. Holding "which conversation is open" up here saved the
+       * conversation across a tab switch, but the SLOT was still unmounted — so the draft being
+       * typed, every realtime message received since the history was fetched and the send in
+       * flight all died for a two-second trip to "Friends", which is about as ordinary as it
+       * gets. Kept mounted, it keeps all three.
+       *
+       * The two other tabs stay CONDITIONAL inside their own panel: mounting them would fire
+       * their requests on every authenticated page, since this rail is on all of them. Chat
+       * asks for nothing until a conversation is actually opened.
+       *
+       * ⚠️ A hidden panel is `display: none`, so its content is out of the accessibility tree
+       * AND has no layout — `ChatConversation` is told with `isVisible` so it stays quiet in
+       * the live region and re-scrolls its log when it comes back.
+       */}
+      {/* `onClose` travels down for the same reason the profile link above uses it: under
+          1024 px this panel is an `aria-modal` overlay, so a link that navigates without
+          closing it leaves the visitor behind the overlay. `undefined` on desktop. */}
+      <div {...panelProps('friends')}>
         {activeTab === 'friends' && (
-          <FriendsSlot onNavigate={onClose} announce={outcome.announce} />
+          <FriendsSlot
+            onNavigate={onClose}
+            announce={announce}
+            onOpenConversation={openConversation}
+          />
         )}
-        {activeTab === 'chat' && <ChatSlot />}
-        {activeTab === 'addFriend' && <AddFriendSlot />}
       </div>
+
+      <div {...panelProps('chat')}>
+        <ChatSlot
+          partner={conversation}
+          onClose={() => setConversation(null)}
+          announce={announce}
+          onNavigate={onClose}
+          inputRef={composerRef}
+          isVisible={activeTab === 'chat'}
+          onSendAbandoned={handleSendAbandoned}
+        />
+      </div>
+
+      <div {...panelProps('addFriend')}>{activeTab === 'addFriend' && <AddFriendSlot />}</div>
     </div>
   )
 }
