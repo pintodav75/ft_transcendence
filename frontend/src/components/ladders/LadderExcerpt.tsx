@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { LadderBoard } from '@/components/ladders/LadderBoard';
 import { SectionTitle } from '@/components/ui/section-title';
 import { rankingWindow } from '@/lib/ladders';
+import { sectionLinkClasses } from '@/components/ui/link-variants';
 
 import type { RankingEntry, SelfCompetitor } from '@/lib/ladders';
 
@@ -53,7 +54,9 @@ export function LadderExcerpt({
           <Link
             to="/ladders/$ladderId"
             params={{ ladderId }}
-            className="focus-ring border-b border-border-strong pb-0.5 font-sans text-[0.6875rem] normal-case tracking-normal text-text-secondary hover:text-text-primary"
+            // Moved to `sectionLinkClasses` when `/home`'s slot teaser became its second
+            // reader — same rendered markup, one definition.
+            className={sectionLinkClasses()}
           >
             See the full ladder
           </Link>

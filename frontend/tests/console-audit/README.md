@@ -521,6 +521,150 @@ compter** — même famille que « lire une région live ».
 « Accept the slot on <ladder> at <date> », et Playwright matche le nom accessible en
 **sous-chaîne** — sans `exact`, le sélecteur du bouton de soumission du panneau attrape les deux.
 
+## `home` (F-HOME) — le budget de requêtes est un check, pas un commentaire
+
+`scenarios/home.mjs` audite `/home` : le **budget de 5 requêtes** et le **zéro `GET /ladders`**,
+le rappel §5.1 piloté par `games.required_provider`, sa fermeture **définitive** (rechargement
+compris), le focus rendu au `<h1>`, l'**échéance de retrait** d'un créneau ouvert, la condition
+d'affichage de l'onboarding **dans les deux sens**, le partage d'entrée de cache avec `/games`, la
+**panne partielle** qui doit se dire même sur une page pleine, et les **deux largeurs** qui
+comptent. **18 checks**, et il ne **dépend pas du seed** : le compte du
+run est neuf — ce qui est exactement l'état par défaut qu'on veut auditer — et le seul état peuplé
+est fabriqué par l'API (deux comptes chess.com liés, un créneau ouvert par un **tiers** puis trois
+créneaux à moi, sur **chess 1v1**, ladder issu des migrations `0009`).
+
+🚨 **QUATRE CHECKS EXISTENT PARCE QUE 12 CHECKS VERTS N'ONT RIEN VU ET QU'UN COUP D'ŒIL A TOUT
+TROUVÉ.** La première livraison sortait 12/12 et console 0 ; une relecture des captures à 1280 et
+375 px a sorti **quatre défauts réels**, tous invisibles à l'automatisation parce qu'un check ne
+garde que ce à quoi on a pensé :
+
+| Check | Le défaut qu'il garde |
+| --- | --- |
+| `H11` | le compte à rebours portait un format d'**horloge** — « in 18 h 43 » se lit 18:43, et « in 18 h 03 » n'en est pas distinguable, sur une page qui affiche de **vraies heures** juste à côté (coup d'envoi `22:00`, retrait `21:45`). Le check exige l'unité (`in 18h 43m`) **et refuse** l'ancien format |
+| `H10` | la pastille de statut n'existait **que** sur la carte vedette : sur une page faite de créneaux ouverts, « OPEN SLOT » apparaissait une seule fois, et un match accepté ne se distinguait d'un créneau que par la présence d'un adversaire |
+| `H12` | la date et le rebours étaient **inversés** entre la carte et les lignes — l'œil zigzaguait. Mesuré sur les **positions rendues**, pas sur l'ordre du DOM |
+| `H8` | l'onboarding exigeait que **tout** soit vide : un compte de 4 équipes, 0 match, qui voyait deux créneaux acceptables ne l'avait donc pas — alors qu'il est le lecteur visé. Le signal est « **aucun match** », pas « page vide » |
+
+Les quatre ont été **vus rouges avant vert** (sabotage des quatre en un seul run, chacun rouge
+pour sa propre raison, `H13` restant vert — il garde autre chose). **La leçon vaut pour tout
+ticket front : réclamer la capture, et la lire.**
+
+⚠️ **`H8` et `H13` sont une paire et aucun ne se déduit de l'autre** : `H8` exige l'onboarding
+**présent** alors que « Slots you can take » est rempli (0 match), `H13` l'exige **absent** dès
+qu'un match existe. Sans `H13`, un bloc affiché en permanence passerait `H8` ; sans `H8`, la
+condition trop stricte d'origine passait `H13`.
+
+🚨 **UN CINQUIÈME DÉFAUT EST SORTI DE LA CAPTURE SUIVANTE, APRÈS LE HERO.** Le `<h1>` vit dans un
+conteneur **`overflow-hidden`** (l'art du hero est en `absolute inset-0`, il le faut), et un pseudo
+est un **token insécable de 30 caractères max** : à 375 px, « WELCOME BACK, PROBE5461829 » perdait
+**63 px de son propre texte** hors champ — **mesuré** — pendant que le document ne débordait pas et
+que les 16 autres checks restaient verts. C'est la leçon FT-3 appliquée à un titre : **un conteneur
+qui CLIPPE ne déborde jamais**, donc le seul moyen de le voir est de mesurer l'ÉLÉMENT
+(`h1.scrollWidth - h1.clientWidth`), ce que font désormais `H15` et `H16`. Correctif : `break-words`
+sur le `<h1>`. Vu **rouge à 63 px avant** le correctif, vert (0 px) après.
+
+⚠️ **`H15` mesure la colonne CENTRALE, pas la fenêtre.** `RightRail` est monté en `w-78` (312 px)
+même vide, donc la colonne à 1280 px vaut déjà **625 px** — ce qu'elle vaudra une fois le rail
+social rempli. Concevoir une ligne en pleine largeur et découvrir le débordement au merge du rail
+est exactement ce que ce check empêche, d'autant que la ligne porte **cinq** éléments depuis
+`H10`. Il mesure **trois** choses : débordement du document, débordement de **la ligne**, et la
+**largeur rendue** du nom de ladder — le troisième parce qu'un conteneur qui CLIPPE ne déborde
+jamais (leçon FT-3, 73 px sortis en silence).
+
+🔑 **`H2` existe pour protéger `N5` de `f-nav`, et c'est la vraie leçon de ce scénario.** `N5`
+exige que `/home` ne demande pas les ladders ; tant que `/home` était un stub, c'était gratuit et
+le check avait déjà été **re-ciblé trois fois**. [F-HOME] en fait une vraie page (5 requêtes) mais
+**pas** une consommatrice de `GET /ladders` : nommer le ladder d'une ligne coûterait une 6ᵉ
+requête, et `matchLabeller(undefined, games)` retombe déjà sur `<jeu> <format>`. `H2` écrit cette
+contrainte **du côté de la page**, si bien qu'un futur ticket qui ajouterait `useLadders()` ici
+rougit sur `home` — au lieu de faire tomber `N5` sur un scénario qui parle de la barre de
+recherche et n'a rien à voir avec la cause.
+
+⚠️ **Le chemin doit être comparé EXACTEMENT** : `/api/teams/invitations/me` **commence par**
+`/api/teams`, donc un `includes('/api/teams')` rendrait `H2` faux **sans le rendre rouge**.
+
+⚠️ **« Zéro requête en navigant depuis `/home` » n'est vrai que pour les données de référence.**
+Le `QueryClient` de l'app est construit sans defaults (`staleTime: 0`), donc `GET /matches/me`,
+`/teams/invitations/me` et `/users/me/external-accounts` sont **refetchés en fond** au montage de
+l'écran suivant. Ce qui est partagé — et ce qui compte pour l'utilisateur — c'est **l'entrée de
+cache** : la page suivante peint instantanément, sans spinner. Seul `['games']` (1 h de fraîcheur)
+donne un vrai zéro requête, et c'est donc lui que mesure `H14`, avec son témoin positif (le même
+filtre à froid doit compter ≥ 1). Poser un `staleTime` sur `matches/me` pour élargir le check
+servirait un historique **périmé** sur `/history` : mauvais échange, refusé.
+
+🔑 **`H17` a été vu ROUGE avant vert**, et il garde une clé, pas du code : on jongle entre
+`alice`/`bob`/`carol` dans le même Chrome toute la journée (l'audit compris), donc la clé
+`localStorage` de la fermeture du rappel est **préfixée par l'userId**. Sur une clé partagée, la
+fermeture par un compte masquerait le bandeau de **tous** les suivants — un défaut qui ne se
+reproduit qu'une fois et qu'on impute alors au rendu. Vérifié en remplaçant le préfixe par une
+constante : `H17` rouge, **`H7` toujours vert** — les deux gardent bien des choses différentes
+(persistance d'un côté, portée de l'autre), aucun ne rend l'autre superflu.
+
+⚠️ **`H13` est le contrôle positif de l'état vide.** « L'onboarding est affiché » resterait vert sur
+un bloc qui s'afficherait **toujours** : ce qui compte est qu'il **disparaisse** dès que l'historique
+contient un match, et c'est ça que `H13` mesure, sur le même run.
+
+⚠️ **`H5` ne cherche PAS le mot « queue » tout seul.** L'onboarding dit légitimement « there is no
+queue and no automatic pairing » — c'est même le point. Le check vise les **deux formulations
+précises** de l'ancienne copie de `LinkAccountBanner` (« enter the queue », « matchmatching »),
+que ce ticket a réécrites.
+
+🚨 **`H5` porte son contrôle positif depuis la review, parce qu'un check qui ne cherche qu'une
+ABSENCE est vert sur une page qu'on n'a pas lue.** Il faisait `innerText()` puis « 0 formulation
+interdite » : un `<main>` qui ne résout plus, ou un `innerText` rendant `''`, sortait vert **sans
+avoir rien regardé** — la forme exacte que ce scénario corrige déjà ailleurs (`H14` et son témoin à
+froid, `H8` et son `slotsShown`, `H10` qui compte avant de lire). Il exige désormais de retrouver la
+phrase d'intro de la page (inconditionnelle, elle est dans le hero) **avant** de conclure sur ce
+qu'il n'y a pas trouvé, et le `.catch(() => '')` fait ROUGIR un sélecteur périmé au lieu de sortir en
+**exit 2**. Vu rouge en visant `main#nope`, vert ensuite.
+
+⚠️ **`H9` lit l'écran ET l'`aria-label` de la carte vedette.** Un `aria-label` **remplace** le
+contenu du lien : qui parcourt la page par liens n'entendait que « Next match: Chess 1v1, in 6h 6m »
+et **jamais** « withdrawn at 09:45 » — la seule information que [F-HOME] ajoute à l'app. Trouvé en
+review, pas par un check. Les deux rendus lisent maintenant la **même** fonction
+(`withdrawalText`), deux phrases tenues à la main divergeraient.
+
+🚨 **`H18` garde la promesse « la page n'est jamais muette », qui n'était tenue qu'à moitié.**
+L'encadré « Part of this page could not be loaded » était conditionné à une page **vide**
+(`!hasSomething`) : avec un match à venir à l'écran et `GET /teams/invitations/me` en 500, le
+compteur d'invitations retombe à `0` (dégradation volontaire — `/teams` porte l'erreur réelle et les
+actions), le bloc ne rend rien, **aucun** encadré n'apparaît, et une invitation en attente disparaît
+sans le moindre signal. Le cas exact où le silence coûte quelque chose était donc le seul non
+couvert. La condition ne dépend plus que de `hasFailed` (moins `matchesQuery.isError`, qui a déjà son
+propre `Callout` — deux phrases pour un fait, c'est ainsi qu'on apprend à sauter les deux), et
+l'encadré est remonté **en tête de page** : il ne s'affichait qu'un écran vide, donc sa place n'avait
+aucune importance ; sur une page pleine, le pied d'une page qui défile est le seul endroit où il ne
+serait jamais lu. La panne est fabriquée par **`page.route`** et déclarée par **`expectHttp`**
+(cloisonnée à sa phase, sinon le 500 voulu compterait comme une entrée console du ticket). ⚠️ Le
+check exige AUSSI que la carte « Next up » soit rendue : sans ce contrôle positif il re-mesurerait
+l'ancien comportement (page vide → encadré), c'est-à-dire rien. Vu **rouge** avec l'ancienne
+condition, vert après. ⚠️ On attend le message, on ne le compte pas à `networkidle` : TanStack
+réessaie (1 s, 2 s, 4 s) et l'absence d'encadré pendant les réessais est légitime.
+
+⚠️ **`H18` s'exécute AVANT `H17` dans le rapport, ce n'est pas un défaut** : il vit en §5b et `H17`
+en §6, qui **bascule de compte** et doit donc rester le dernier pas du scénario. `H18` a besoin d'un
+compte qui a des matchs (son contrôle positif), le nouveau compte de `H17` n'en a aucun.
+
+⚠️ **`H17` bascule de compte, donc `clearCookies()` d'abord** : `/login` **redirige** vers `/home`
+tant qu'une session existe, et `login()` expirerait sur un `#email` introuvable — soit un
+**exit 2** au lieu d'un rouge. Vider les cookies ne touche pas le `localStorage`, ce qui est
+exactement la situation que le check veut éprouver.
+
+⚠️ **Pas de teardown particulier** : le créneau reste `pending`, donc `purgeUserMatches()` du
+runner l'annule seul avant `DELETE /users/me`. Contrairement à `history` ou `match-result`, ce
+scénario ne produit aucun match **engageant**, donc rien à forcer en SQL.
+
+## ⚠️ `login()` attend désormais la quiescence réseau (F-HOME)
+
+`login()` rendait la main sur `waitForURL('**/home')`. C'était sûr tant que `/home` était un stub
+**sans aucune requête** ; depuis [F-HOME] elle en émet **5**, et le `page.goto` que l'appelant
+enchaîne aussitôt les **avorte** — Playwright émet alors un `requestfailed`
+(`net::ERR_ABORTED`) que le runner enregistre en `netfail`, **après** le `setPhase` du scénario,
+donc **imputé à un ticket innocent**. `login()` fait maintenant suivre un
+`waitForLoadState('networkidle')` (sous `catch`, et **dans** la phase « login », donc hors
+périmètre). Concerne les 7 appels de `match-result`, `match-detail`, `teams-detail` et
+`teams-manage`.
+
 ## Un scénario qui laissait des comptes derrière lui — réglé par [BX-DEL]
 
 `teams-matchmaking` (FT-2C) est le seul scénario qui **crée de vrais matchs**. Le runner ne

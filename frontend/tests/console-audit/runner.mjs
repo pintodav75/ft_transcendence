@@ -622,7 +622,20 @@ export async function runScenario(scenario) {
     return n;
   };
 
-  /** Connexion par l'UI, étiquetée hors périmètre : ce parcours n'est pas l'objet du run. */
+  /**
+   * Connexion par l'UI, étiquetée hors périmètre : ce parcours n'est pas l'objet du run.
+   *
+   * ⚠️ ON ATTEND LA QUIESCENCE RÉSEAU, PAS SEULEMENT L'URL — et ce n'est pas de la prudence
+   * gratuite. `waitForURL` rend la main dès que la route a changé, alors que `/home` vient de
+   * lancer ses requêtes ; le `page.goto` que l'appelant enchaîne aussitôt les AVORTE, et
+   * Playwright émet un `requestfailed` (`net::ERR_ABORTED`) que le runner enregistre en
+   * `netfail`. Comme il tombe après le `setPhase` du scénario, il est imputé à un ticket
+   * innocent. Tant que `/home` était un stub sans aucune requête, cette attente ne servait à
+   * rien ; depuis [F-HOME] c'est une vraie page (5 requêtes), et 5 scénarios appellent `login()`
+   * juste avant de naviguer.
+   *
+   * L'attente reste DANS la phase « login », donc tout ce qu'elle capte reste hors périmètre.
+   */
   const login = async (as = user) => {
     setPhase('login (hors périmètre)');
     await page.goto(`${ORIGIN}/login`, { waitUntil: 'networkidle' });
@@ -630,6 +643,9 @@ export async function runScenario(scenario) {
     await page.fill('#password', as.password);
     await page.click('button:has-text("Sign in")');
     await page.waitForURL('**/home', { timeout: 15000 });
+    // `catch` : une page qui ne se calme jamais ne doit pas faire sortir le harnais en exit 2
+    // sur une étape hors périmètre — au pire on retombe sur le comportement d'avant.
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   };
 
   let crashed = null;
