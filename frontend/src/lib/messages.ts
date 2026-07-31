@@ -25,8 +25,20 @@ export type Message = components['schemas']['Message'];
  */
 export type ChatPartner = components['schemas']['FriendSummary'];
 
+/**
+ * One row of `GET /messages/conversations`: a friend, plus the last message exchanged with
+ * them. Straight from the codegen — the server sends nothing else, and in particular NO
+ * unread count (it does not track read receipts, so any counter shown here would be a
+ * number the backend never computed).
+ */
+export type Conversation = components['schemas']['ConversationSummary'];
+
 type ConversationResponse =
   paths['/messages/{friendId}']['get']['responses'][200]['content']['application/json'];
+
+/** Exported so the live listener can type the cache it rewrites with the very same shape. */
+export type ConversationsResponse =
+  paths['/messages/conversations']['get']['responses'][200]['content']['application/json'];
 
 /** Mirror of the server rule (`content: z.string().min(1).max(1000)` in `routes/chat.ts`). */
 export const MAX_MESSAGE_LENGTH = 1000;
@@ -71,6 +83,70 @@ export function useConversation(friendId: string) {
      */
     refetchOnReconnect: false,
   });
+}
+
+/**
+ * Key of the conversation LIST, exported for the same reason `conversationKey` is: the live
+ * listener of `ConversationList` rewrites this cache directly, and two spellings of one key in
+ * two modules is what stopped a cache from refreshing once already (`MY_INVITATIONS_KEY`).
+ *
+ * ⚠️ It shares its first segment with `conversationKey(friendId)` on purpose (both are "the
+ * messages domain") and cannot collide with it: the second segment there is always a uuid.
+ */
+export const CONVERSATIONS_KEY = ['messages', 'conversations'] as const;
+
+/**
+ * Every friend I have ever exchanged a message with, most recent conversation first.
+ *
+ * 🚨 SAME RULE AS `useConversation`: ONLY CALL IT FROM A COMPONENT THAT IS MOUNTED WHEN THE
+ * MESSAGES TAB IS VISIBLE. The social rail is mounted on every authenticated page, and the
+ * Messages tab panel is kept mounted even while hidden (that is what saves the draft of an
+ * open conversation), so a hook called unconditionally would fire this GET on every single
+ * screen of the app. `ChatSlot` renders the list only while the tab is on screen — there is
+ * deliberately no `enabled` flag to get wrong.
+ *
+ * ⚠️ NO CLIENT-SIDE SORT. The server orders by last message descending and breaks ties on the
+ * message id; re-sorting here would be a second, drifting copy of that rule. What the live
+ * listener does is not a sort but the same rule applied to one new message (`bumpConversation`).
+ */
+export function useConversations() {
+  return useQuery({
+    queryKey: CONVERSATIONS_KEY,
+    queryFn: () => apiFetch<ConversationsResponse>('/messages/conversations'),
+    // Same reasoning as `useConversation`: the socket is the reconnection signal, and it is
+    // strictly wider than the browser's online manager. Keeping both meant two identical GETs.
+    refetchOnReconnect: false,
+  });
+}
+
+/**
+ * Moves the conversation a message belongs to back to the top of the list, with that message
+ * as its new preview. Pure, so the rule is readable without a component around it.
+ *
+ * Returns `null` when the counterpart is NOT in the list — a first ever message with a friend
+ * I had never written to. The event carries ids only, never the `friend` summary a row needs
+ * (avatar, display name), so there is nothing to insert: the caller refetches instead.
+ */
+export function bumpConversation(
+  conversations: Conversation[],
+  message: Message,
+  meId: string,
+): Conversation[] | null {
+  const otherId = message.senderId === meId ? message.receiverId : message.senderId;
+  const index = conversations.findIndex((conversation) => conversation.friend.id === otherId);
+  if (index === -1) return null;
+
+  const existing = conversations[index];
+  // Already first, and already showing this very message: return the SAME array so TanStack
+  // keeps the reference and no row re-renders. The socket can deliver a duplicate frame, and
+  // a refetch landing right after a live event replays it too.
+  if (index === 0 && existing.lastMessage.id === message.id) return conversations;
+
+  return [
+    { ...existing, lastMessage: message },
+    ...conversations.slice(0, index),
+    ...conversations.slice(index + 1),
+  ];
 }
 
 /**
@@ -141,6 +217,14 @@ export function conversationErrorMessage(error: unknown) {
 }
 
 /**
+ * `GET /messages/conversations`. Unlike the history route, this one has no 403/404 of its own:
+ * it answers with whatever is left of my conversations, so only the shared failures apply.
+ */
+export function conversationsErrorMessage(error: unknown) {
+  return sharedApiErrorMessage(error) ?? 'Could not load your conversations.';
+}
+
+/**
  * The three refusals the WebSocket can answer to a send (`routes/chat.ts`). They arrive as a
  * bare `code`, with no echo of what was refused — the caller is the one that knows which draft
  * was in flight.
@@ -167,6 +251,8 @@ const dayFormat = new Intl.DateTimeFormat('en-GB', {
   month: 'short',
   year: 'numeric',
 });
+/** Same date without the year — a conversation row has one line and a 312 px rail to fit in. */
+const shortDayFormat = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' });
 
 /** `14:32` — all a bubble shows. WHICH DAY it belongs to is carried by the day separators. */
 export function formatMessageTime(isoDate: string) {
@@ -203,4 +289,30 @@ export function formatMessageDayLabel(isoDate: string) {
   if (dayKey(date) === dayKey(yesterday)) return 'Yesterday';
 
   return dayFormat.format(date);
+}
+
+/**
+ * `14:32` / `Yesterday` / `28 Jul` / `28 Jul 2025` — the age of a conversation, in the width
+ * of a list row.
+ *
+ * 🔑 NOT a relative "2 min ago". That reads well for a minute and then lies quietly: it needs
+ * a timer to stay true, and a rail that is mounted on every page would run that timer forever.
+ * A clock time is exact, needs nothing, and is the same information the bubbles already show.
+ *
+ * The year only appears when it is NOT the current one — inside the current year it is noise,
+ * outside it, dropping it would make a message from last July indistinguishable from today's.
+ */
+export function formatConversationTime(isoDate: string) {
+  const date = new Date(isoDate);
+  const today = new Date();
+
+  if (dayKey(date) === dayKey(today)) return clockFormat.format(date);
+
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dayKey(date) === dayKey(yesterday)) return 'Yesterday';
+
+  return date.getFullYear() === today.getFullYear()
+    ? shortDayFormat.format(date)
+    : dayFormat.format(date);
 }

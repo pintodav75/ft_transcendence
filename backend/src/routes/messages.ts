@@ -15,7 +15,14 @@ type ConversationRow = {
   content: string;
   sender_id: string;
   receiver_id: string;
-  created_at: Date;
+  // 🚨 `string`, PAS `Date` — et ce mensonge de type est CE QUI A PERMIS AU BUG D'EXISTER.
+  // La ligne vient de `db.execute(sql`…`)`, donc du pilote `postgres-js` brut : il rend
+  // `2026-07-31 18:35:02.376+00`, une CHAÎNE sans `T` ni `Z`. Le double cast plus bas
+  // (`as unknown as ConversationRow[]`) empêchait le compilateur de le dire, et la route a
+  // servi du non-ISO pendant des semaines sous un contrat qui promettait `date-time`.
+  // Typé honnêtement, `new Date(...)` à la sérialisation devient visiblement nécessaire —
+  // et un futur `row.created_at.getTime()` ne compile plus au lieu de planter à l'exécution.
+  created_at: string;
   friend_id: string;
   friend_pseudo: string;
   friend_display_name: string | null;
@@ -83,7 +90,17 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
           senderId: row.sender_id,
           receiverId: row.receiver_id,
           content: row.content,
-          createdAt: row.created_at,
+          // 🚨 `new Date(...)` OBLIGATOIRE ICI, ET NULLE PART AILLEURS DANS CE FICHIER.
+          // Cette route est la seule du domaine social écrite en SQL brut : la valeur remonte
+          // telle quelle du pilote `postgres-js`, soit `2026-07-31 18:35:02.376+00` — un espace au lieu
+          // du `T`, pas de `Z`, donc PAS de l'ISO 8601. Partout ailleurs c'est Drizzle qui
+          // construit une `Date` et Fastify qui la sérialise en ISO. Le contrat annonce
+          // `format: date-time`, et le front valide les dates de messages en ISO strict : sans
+          // cette conversion il rejette la donnée, ou trie la liste des conversations sur une
+          // chaîne dont l'ordre ne tient que par chance.
+          // 🔑 Règle générale : toute route en `db.execute(sql`…`)` perd la conversion de types
+          // de l'ORM — vérifier au `curl` le format de chaque colonne temporelle exposée.
+          createdAt: new Date(row.created_at),
         },
       }));
       return reply.code(200).send({ conversations });

@@ -872,6 +872,37 @@ donc **imputé à un ticket innocent**. `login()` fait maintenant suivre un
 `waitForLoadState('networkidle')` (sous `catch`, et **dans** la phase « login », donc hors
 périmètre). Concerne les 7 appels de `match-result`, `match-detail`, `teams-detail` et
 `teams-manage`.
+## `fs4-messages` (FS-4) — un check vu FAUX VERT, puis rouge, puis vert
+
+`scenarios/fs4-messages.mjs`, **8 checks**. La liste des conversations et les fenêtres multiples.
+
+🚨 **`M5` garde un clic qui ne faisait rien**, atteignable par un simple `Ctrl +` : au-delà du
+maximum de fenêtres, une conversation reste **ouverte dans l'état** mais n'est plus **affichée**,
+et la garde « déjà ouverte » renvoyait l'état inchangé — aucune fenêtre, aucun focus, aucune
+explication.
+
+🔑 **ET IL A ÉTÉ VU FAUX VERT AVANT DE MARCHER — c'est la leçon de ce fichier.** Première
+version : ouvrir un 3ᵉ interlocuteur pour faire céder le plus ancien, puis le recliquer. Ça ne
+reproduit **rien** : l'éviction retire l'entrée de l'état lui-même, donc la garde est fausse et
+le clic rouvre normalement. Vérifié en **réintroduisant le défaut dans le code** — le check
+restait vert. Le seul chemin réel est un **changement de largeur** : l'état garde N
+conversations, la largeur n'en affiche plus que M < N. Le check ouvre donc 3 fenêtres à
+1600 px, rétrécit à 1280, et reclique la masquée. Il est désormais **rouge avec le défaut,
+vert sans** — mesuré dans les deux sens.
+
+⚠️ **La méthode vaut plus que le check** : quand un scénario garde un défaut de review, le
+seul moyen de savoir qu'il le garde vraiment est de **remettre le défaut** et de le regarder
+rougir. Trois faux verts ont été trouvés comme ça sur ce projet (`D15` de `dispute`, `S8` de
+`fs0-social`, `C7` de `fs3-chat`) — celui-ci est le quatrième.
+
+⚠️ **`M7` garde une contrainte, pas une préférence** : aucune fenêtre flottante sous 1024 px.
+Le panneau mobile est une fenêtre modale faite main dont le gestionnaire d'`Escape` vit sur
+`document` ; empiler une fenêtre par-dessus rejouerait ce piège. Le check compte les fenêtres
+**au chargement et après ouverture** — 0 dans les deux cas.
+
+⚠️ **Le harnais tourne à 1280 px par défaut**, donc `M4` (plafond de 2, la plus ancienne cède)
+est la largeur nominale, et `M5` est le seul check du repo à changer de viewport **deux fois**.
+
 ## `fs3-chat` (FS-3) — compter les occurrences, pas constater une présence
 
 `scenarios/fs3-chat.mjs`, **9 checks**.
