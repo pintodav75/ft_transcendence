@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SiteLogo } from '@/components/layout/SiteLogo';
 import { SocialPanel } from '@/components/social/SocialPanel';
 import { Avatar } from '@/components/ui/avatar';
+import { useUnreadNotificationCount } from '@/lib/notifications';
 import { useAuthStore } from '@/stores/auth-store';
 
 const FOCUSABLE_SELECTOR = [
@@ -21,6 +22,18 @@ export function MobileHeader() {
   const dialogRef = useRef<HTMLElement>(null);
   const user = useAuthStore((state) => state.user);
   const fallback = (user?.pseudo ?? '?').slice(0, 2).toUpperCase();
+  /**
+   * 🚨 SOUS 1024 px, CE BOUTON EST LE SEUL ENDROIT OÙ UNE NOTIFICATION PEUT SE VOIR. La pastille
+   * de la cloche vit dans le panneau social, dont le rail est masqué à cette largeur et dont
+   * l'overlay n'est monté qu'à l'ouverture : sans ce point, un téléphone n'annonce rien tant
+   * qu'on n'a pas ouvert le panneau — donc au hasard.
+   *
+   * ⚠️ `useUnreadNotificationCount`, JAMAIS `useNotificationBell` : ce dernier porte l'abonnement
+   * qui incrémente le compteur et doit rester monté une seule fois (`SocialPanel`), sans quoi
+   * chaque notification serait comptée deux fois. Ici on ne fait que LIRE le même cache — le
+   * rail permanent est `hidden lg:block`, donc monté à toute largeur, et la requête existe déjà.
+   */
+  const unreadCount = useUnreadNotificationCount();
 
   useEffect(() => {
     if (!socialOpen) return;
@@ -75,8 +88,15 @@ export function MobileHeader() {
           ref={triggerRef}
           type="button"
           onClick={() => setSocialOpen(true)}
-          className="focus-ring rounded-full transition hover:opacity-90"
-          aria-label="Open social panel"
+          className="focus-ring relative rounded-full transition hover:opacity-90"
+          // 🔑 LE NOMBRE EST DANS LE NOM, pas seulement dans la pastille : celle-ci est
+          // `aria-hidden` (un point coloré ne dit rien), donc c'est cette phrase qui porte
+          // l'information pour un lecteur d'écran comme pour le pilotage à la voix.
+          aria-label={
+            unreadCount > 0
+              ? `Open social panel, ${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`
+              : 'Open social panel'
+          }
           aria-haspopup="dialog"
           aria-expanded={socialOpen}
           aria-controls={socialOpen ? 'mobile-social-panel' : undefined}
@@ -87,6 +107,15 @@ export function MobileHeader() {
             fallback={fallback}
             className="size-11"
           />
+          {unreadCount > 0 && (
+            // Un point, pas un compteur : la cloche du panneau porte le chiffre exact, ce
+            // déclencheur n'a qu'à dire « il y a quelque chose ». La bordure reprend le fond
+            // de l'en-tête pour détacher la pastille de l'avatar sous elle.
+            <span
+              aria-hidden="true"
+              className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-surface-header bg-arena-red"
+            />
+          )}
         </button>
       </header>
 
