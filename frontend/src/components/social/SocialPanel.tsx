@@ -9,6 +9,7 @@ import { NotificationsSlot } from '@/components/social/NotificationsSlot'
 import { Avatar } from '@/components/ui/avatar'
 import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { panelId, tabId } from '@/components/ui/tab-ids'
+import { useAnnouncement } from '@/lib/use-announcement'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 import {
@@ -57,6 +58,7 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
   const tabsId = useId()
   const user = useAuthStore((state) => state.user)
   const connectionState = useRealtimeStore((state) => state.connectionState)
+  const outcome = useAnnouncement()
   const connectionDetails = CONNECTION_DETAILS[connectionState]
   const displayName = user?.displayName || user?.pseudo || 'Player'
   const fallback = (user?.pseudo ?? '?').slice(0, 2).toUpperCase()
@@ -95,6 +97,27 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/**
+       * 🚨 THE live region of the WHOLE social rail — ONE for the four tabs, and NO SLOT MAY
+       * ADD ANOTHER. This panel is mounted by `AuthenticatedLayout` on every authenticated
+       * page, so a region declared inside a slot would be permanent AND concurrent with the
+       * one the visited page already declares as "the only one of this screen". Four slots
+       * (friends, notifications, chat, requests) each declaring their own would make four
+       * regions racing in a 312 px column, and a screen reader gives no guarantee about
+       * which one it reads first.
+       *
+       * A slot that has something to announce takes `announce` as a prop (see `FriendsSlot`)
+       * and calls it — it never mounts a `role="status"` / `aria-live` of its own.
+       *
+       * It sits HERE, at the root and outside the tab panel: a region has to be watched by
+       * the screen reader BEFORE its text lands (one inserted with its content is not
+       * reliably read), and an action that empties a tab — removing my last friend — would
+       * otherwise unmount the announcement before it is spoken.
+       */}
+      <p role="status" className="sr-only">
+        {outcome.message}
+      </p>
+
       <div className="relative flex items-center gap-3 border-b border-border-subtle p-3">
         <Link
           to="/profile"
@@ -208,7 +231,12 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
         tabIndex={0}
         className="min-h-0 flex-1 overflow-y-auto focus:outline-none"
       >
-        {activeTab === 'friends' && <FriendsSlot />}
+        {/* `onClose` travels down for the same reason the profile link above uses it: under
+            1024 px this panel is an `aria-modal` overlay, so a link that navigates without
+            closing it leaves the visitor behind the overlay. `undefined` on desktop. */}
+        {activeTab === 'friends' && (
+          <FriendsSlot onNavigate={onClose} announce={outcome.announce} />
+        )}
         {activeTab === 'chat' && <ChatSlot />}
         {activeTab === 'addFriend' && <AddFriendSlot />}
       </div>

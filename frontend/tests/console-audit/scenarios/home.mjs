@@ -171,7 +171,20 @@ export async function run({
   // On IGNORE le bootstrap de session (`/auth/refresh`, `/users/me`) : il appartient au shell
   // authentifié, pas à la page — il partirait sur n'importe quelle route.
   const BOOTSTRAP = ['/api/auth/refresh', '/api/users/me'];
-  const pageCalls = seen.filter((path) => !BOOTSTRAP.includes(path));
+  // 🔑 MÊME RAISONNEMENT POUR LE RAIL SOCIAL, et il faut le tenir explicitement.
+  // Depuis [FS-1], `AuthenticatedLayout` monte un rail qui charge sa propre donnée sur TOUTES
+  // les pages authentifiées. Ces appels ne sont pas le budget de `/home` : les compter ici
+  // ferait rougir ce check à chaque carte du rail — FS-2 (notifications) et FS-4 (conversations)
+  // en ajouteront chacune un, et on éditerait le budget trois fois en croyant à une régression
+  // de `/home`.
+  // ⚠️ Cette liste est un ENGAGEMENT, pas une échappatoire : y ajouter une ligne doit être un
+  // acte délibéré, justifié par « le rail en a besoin sur toutes les pages ». Tout ce qui n'est
+  // pas ici reste imputé à la page, y compris `GET /ladders` — c'est ce qui maintient `N5` de
+  // `f-nav` en vie (voir l'en-tête).
+  const SOCIAL_RAIL = ['/api/friends'];
+  const pageCalls = seen.filter(
+    (path) => !BOOTSTRAP.includes(path) && !SOCIAL_RAIL.includes(path),
+  );
   const EXPECTED = [
     '/api/games',
     '/api/users/me/external-accounts',
