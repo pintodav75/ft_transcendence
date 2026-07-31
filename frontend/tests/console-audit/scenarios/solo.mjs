@@ -488,8 +488,14 @@ export async function run({
     // soit : compter tout de suite lit 0 des deux côtés, et le comptage du repli générique
     // serait vert par construction (il attend justement 0). `appears` rend `false` au lieu de
     // lever, pour qu'une vraie disparition sorte ROUGE et non en `exit 2`.
+    // ⚠️ REPÈRE MIS À JOUR PAR [F-PLAYER] : le `<h1>` valait `@pseudo` sur le PLACEHOLDER de
+    // FT-2A ; la vraie page met le nom d'affichage dans le titre et relègue le `@pseudo` en
+    // sous-titre mono (un identifiant doit se relire exactement comme il a été tapé, une
+    // capitale comprise). Un compte d'audit n'a pas de nom d'affichage, donc le titre EST son
+    // pseudo. On garde le `level: 1` : c'est lui qui vérifie au passage que la page a bien un
+    // titre de niveau 1, pas seulement du texte quelque part.
     const playerPageRendered = await appears(
-      main.getByRole('heading', { level: 1, name: `@${foe.pseudo}` }),
+      main.getByRole('heading', { level: 1, name: foe.pseudo }),
     );
     const backCount = playerPageRendered ? await backButton.count() : 0;
     const genericBack = playerPageRendered

@@ -3,15 +3,27 @@
 // aria-label is for screen readers
 
 import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 
 export function IconMenuItem({
+  className = '',
   children,
   label,
   onClick,
+  disabled = false,
 }: {
+  className?: string;
   children: ReactNode;
   label: string;
   onClick?: () => void;
+  /**
+   * Greys the button out and takes it out of reach — for an action already in flight.
+   *
+   * `cursor-not-allowed` rather than `pointer-events-none` (the `MenuItem` choice) so the
+   * wrapper keeps receiving hover: the tooltip is the only place the label is written, and
+   * it must stay readable precisely when the button has stopped responding.
+   */
+  disabled?: boolean;
 }) {
   return (
     <div className="group relative flex items-center">
@@ -19,7 +31,11 @@ export function IconMenuItem({
         type="button"
         aria-label={label}
         onClick={onClick}
-        className="flex size-11 items-center justify-center rounded-control text-text-secondary focus-ring focus-visible:outline-offset-2"
+        disabled={disabled}
+        className={cn(
+          'flex size-11 items-center justify-center rounded-control text-text-secondary focus-ring focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+          className,
+        )}
       >
         {children}
       </button>

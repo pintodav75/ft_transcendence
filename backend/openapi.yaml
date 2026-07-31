@@ -212,15 +212,78 @@ components:
         isAdmin:
           type: boolean
           description: >
-            Vrai si le compte arbitre les litiges. **Volontairement conservé sur le profil
-            public** : le handler ne le retire pas, et la qualité d'arbitre n'est pas un
-            secret (elle se lit déjà sur toute dispute qu'il a tranchée). Documenté ici parce
-            qu'il est bel et bien servi — un champ rendu et tu par le contrat est pire que le
-            champ lui-même.
+            Badge d'AFFICHAGE uniquement. L'autorisation n'est jamais dérivée de ce champ :
+            les routes d'arbitrage relisent `users.is_admin` en base à chaque appel
+            (`routes/disputes.ts`), donc un client qui forcerait ce booléen à `true` ne
+            gagnerait rien d'autre qu'une pastille — et un 403 au premier appel réel.
         createdAt:
           type: string
           format: date-time
       required: [id, pseudo, isAdmin, createdAt]
+
+    PlayerRanking:
+      type: object
+      description: >
+        Une ligne de classement du profil consulté (GET /users/{pseudo}) : un ladder où il a
+        une entrée `rankings`.
+
+
+        ⚠️ Aucune ligne ne naît d'une inscription — elle apparaît au PREMIER RÉSULTAT DE
+        MATCH. Un tableau vide est donc l'état normal d'un compte neuf, pas une anomalie ni
+        une erreur, et le front doit le dire comme tel.
+
+
+        `rank` est la position dans le tri de `GET /ladders/{id}/rankings`
+        (`elo desc, wins desc, losses asc, id asc`), départages compris : les deux pages sont
+        reliées par un lien, elles doivent annoncer le même numéro. `ladderSize` en est le
+        dénominateur — « #1 / 2 » et « #1 / 200 » ne racontent pas la même chose.
+      properties:
+        ladderId: { type: string, format: uuid }
+        ladderName:
+          type: string
+          description: Nom du ladder — il porte déjà le format ("Chess 1v1").
+        gameId: { type: string }
+        elo: { type: integer }
+        wins: { type: integer }
+        losses: { type: integer }
+        rank:
+          type: integer
+          description: Position sur ce ladder, 1-based.
+        ladderSize:
+          type: integer
+          description: Nombre total de compétiteurs classés sur ce ladder.
+      required: [ladderId, ladderName, gameId, elo, wins, losses, rank, ladderSize]
+
+    PlayerTeam:
+      type: object
+      description: >
+        Une équipe du profil consulté (GET /users/{pseudo}).
+
+
+        🚨 `isCaptain` DÉCRIT LE PROFIL CONSULTÉ, PAS L'APPELANT — l'inverse exact du champ
+        homonyme de `TeamListItem`. C'est toute la raison d'être de ce schéma distinct : les
+        deux payloads ont la même forme, et servir l'un à la place de l'autre poserait la
+        couronne sur la mauvaise tête sans qu'aucun type ne bronche.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        logoUrl:
+          type: string
+          nullable: true
+          description: >
+            Chemin relatif `/media/avatars/…` (upload) **ou** URL absolue `https://…`
+            (saisie) — cf. `Team.logoUrl`.
+        gameId: { type: string }
+        ladder:
+          type: string
+          description: Nom du ladder sur lequel l'équipe concourt.
+        isCaptain:
+          type: boolean
+          description: Le PROFIL CONSULTÉ est capitaine de cette équipe.
+        elo:
+          type: integer
+          nullable: true
+      required: [id, name, logoUrl, gameId, ladder, isCaptain, elo]
 
     FriendSummary:
       type: object
@@ -287,6 +350,7 @@ components:
         updatedAt:
           type: string
           format: date-time
+      required: [id, requesterId, addresseeId, status, createdAt, updatedAt]
 
     # ---------- Message ----------
     Message:
@@ -506,7 +570,12 @@ components:
           description: Nom du ladder
         format: { type: string, enum: [1v1, 2v2, 3v3, 5v5] }
         gameId: { type: string }
-        isCaptain: { type: boolean }
+        isCaptain:
+          type: boolean
+          description: >
+            L'APPELANT est capitaine de cette équipe. ⚠️ Le champ homonyme de `PlayerTeam`
+            (GET /users/{pseudo}) décrit le PROFIL CONSULTÉ : même nom, même forme, référent
+            différent.
         logoUrl:
           type: string
           nullable: true
@@ -1510,6 +1579,36 @@ paths:
                 properties:
                   user:
                     $ref: '#/components/schemas/PublicUser'
+                  friendship:
+                    nullable: true
+                    description: >
+                      Relation d'amitié entre le VISITEUR et ce profil, `null` s'il n'y en a
+                      aucune (et toujours `null` sur son propre profil). Sans elle le front
+                      ne peut que proposer « ajouter en ami » à tout le monde, y compris à
+                      un ami déjà accepté — que l'API refuse alors en 400.
+
+
+                      Le SENS de la relation (qui a demandé) se lit en comparant
+                      `requesterId` à son propre id : c'est `friendCta()` côté front.
+                    allOf:
+                      - $ref: '#/components/schemas/Friendship'
+                  rankings:
+                    type: array
+                    description: >
+                      Son niveau, ladder par ladder. Toujours présent, souvent VIDE : une
+                      ligne de classement naît du premier résultat de match, jamais d'une
+                      inscription (cf. `PlayerRanking`).
+                    items:
+                      $ref: '#/components/schemas/PlayerRanking'
+                  teams:
+                    type: array
+                    description: >
+                      Ses équipes, triées par nom. Toujours présent, vide pour un joueur qui
+                      n'en a aucune. ⚠️ `isCaptain` y désigne le PROFIL CONSULTÉ, pas
+                      l'appelant (cf. `PlayerTeam`).
+                    items:
+                      $ref: '#/components/schemas/PlayerTeam'
+                required: [user, friendship, rankings, teams]
         '404':
           description: Profil introuvable
           content:
@@ -2779,7 +2878,18 @@ paths:
                           # vaut `[]` sur un slot sans adversaire — jamais absent.
                           required: [self, opponent]
                       required:
-                        [id, status, scheduledAt, completedAt, opponent, score, eloDelta, result, disputeId, disputeStatus]
+                        [
+                          id,
+                          status,
+                          scheduledAt,
+                          completedAt,
+                          opponent,
+                          score,
+                          eloDelta,
+                          result,
+                          disputeId,
+                          disputeStatus,
+                        ]
                 required: [isMember, matches]
         '400':
           description: Param :id non-uuid (ValidationError)
@@ -3025,7 +3135,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: 'Cette invitation est adressée à quelqu''un d''autre (`not_your_invitation`)'
+          description: "Cette invitation est adressée à quelqu'un d'autre (`not_your_invitation`)"
           content:
             application/json:
               schema:
@@ -3078,7 +3188,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: 'Cette invitation est adressée à quelqu''un d''autre (`not_your_invitation`)'
+          description: "Cette invitation est adressée à quelqu'un d'autre (`not_your_invitation`)"
           content:
             application/json:
               schema:
@@ -4176,7 +4286,7 @@ paths:
                   type: integer
                   minimum: 0
                   maximum: 2
-                  description: "Manches que JE (le soumetteur) me suis attribuées (best-of-3, 0 à 2)."
+                  description: 'Manches que JE (le soumetteur) me suis attribuées (best-of-3, 0 à 2).'
                 scoreOpponent:
                   type: integer
                   minimum: 0
@@ -4608,7 +4718,7 @@ paths:
                         submittedAt: { type: string, format: date-time }
                         author:
                           nullable: true
-                          description: '`null` si l''auteur a supprimé son compte.'
+                          description: "`null` si l'auteur a supprimé son compte."
                           type: object
                           properties:
                             id: { type: string, format: uuid }
@@ -5003,7 +5113,7 @@ paths:
             text/plain:
               schema:
                 type: string
-                example: "pong-from-docker"
+                example: 'pong-from-docker'
 
 # =======================================================================
 # WebSocket (hors OpenAPI — documenté pour mémoire)

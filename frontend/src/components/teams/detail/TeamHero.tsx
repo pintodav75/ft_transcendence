@@ -2,7 +2,7 @@ import { useId } from 'react';
 
 import { GameImage } from '@/components/games/GameImage';
 import { Avatar } from '@/components/ui/avatar';
-import { StatStrip } from '@/components/ui/stat-strip';
+import { Stat, StatStrip } from '@/components/ui/stat';
 import { formatRecord } from '@/lib/ladders';
 import { ROSTER_LIMIT, ladderSubtitle } from '@/lib/team-detail';
 import { EM_DASH } from '@/lib/utils';
@@ -86,31 +86,33 @@ export function TeamHero({
       </div>
 
       <StatStrip
-        stats={[
-          { label: 'Elo', value: standing ? String(standing.elo) : EM_DASH },
-          {
-            label: 'Record',
-            value: standing ? formatRecord(standing.wins, standing.losses) : EM_DASH,
-          },
-          {
-            label: 'Rank',
-            value: standing ? `#${standing.rank}` : EM_DASH,
-            extra: standing ? `/ ${ladderSize}` : undefined,
-          },
-          { label: 'Roster', value: String(memberCount), extra: `/ ${ROSTER_LIMIT}` },
-        ]}
         note={
-          // "No line yet" and "the request failed" must not look alike — hence the two flags.
-          rankingsError
-            ? 'Ladder standings could not be loaded.'
-            : !rankingsPending && !standing
-              ? // ⚠️ A PLAIN apostrophe (U+0027): the JSX this replaced wrote `&apos;`, which
-                // the JSX parser decodes to U+0027 — a curly ’ here would silently change the
-                // rendered text of a screen this ticket is not supposed to touch.
-                "Not ranked yet — a ladder line is created by this team's first match result."
-              : undefined
+          <>
+            {!rankingsPending && !rankingsError && !standing && (
+              <p className="px-6 py-3 text-xs text-text-secondary">
+                Not ranked yet — a ladder line is created by this team&apos;s first match result.
+              </p>
+            )}
+            {rankingsError && (
+              <p className="px-6 py-3 text-xs text-text-secondary">
+                Ladder standings could not be loaded.
+              </p>
+            )}
+          </>
         }
-      />
+      >
+        <Stat label="Elo" value={standing ? String(standing.elo) : EM_DASH} />
+        <Stat
+          label="Record"
+          value={standing ? formatRecord(standing.wins, standing.losses) : EM_DASH}
+        />
+        <Stat
+          label="Rank"
+          value={standing ? `#${standing.rank}` : EM_DASH}
+          extra={standing ? `/ ${ladderSize}` : undefined}
+        />
+        <Stat label="Roster" value={String(memberCount)} extra={`/ ${ROSTER_LIMIT}`} />
+      </StatStrip>
     </section>
   );
 }

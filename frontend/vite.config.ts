@@ -87,11 +87,7 @@ export default defineConfig(({ command }) => {
       : undefined;
 
   return {
-    plugins: [
-      tanstackRouter({ target: 'react', autoCodeSplitting: true }),
-      react(),
-      tailwindcss(),
-    ],
+    plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react(), tailwindcss()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -105,6 +101,12 @@ export default defineConfig(({ command }) => {
       watch: {
         usePolling: true,
         // idk alternative way of hot reload that works on Windows too
+        ignored: [
+          // `frontend/tests/` est du code Node (Playwright), jamais servi au navigateur.
+          '**/tests/**',
+          // Aucun `.md` n'est importé par `src/` (vérifié) — ce sont les READMEs.
+          '**/*.md',
+        ],
       },
       proxy,
     },
