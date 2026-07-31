@@ -44,7 +44,11 @@ export function MatchSideCard({ side, isWinner, solo }: MatchSideCardProps) {
         fallback={sideInitials(side, solo)}
         className="size-16 shrink-0"
       />
-      <span className="min-w-0 text-lg font-bold text-text-primary sm:text-xl">
+      {/* 🚨 THE UNDERLINE IS CARRIED BY THE NAME, NOT BY THE LINK. `hover:underline` on the
+          wrapper decorates every descendant — including the INITIALS drawn inside the avatar when
+          a team has no logo, which then reads as a rendering fault. `group`/`group-hover` keeps
+          the whole card clickable while only the name reacts. */}
+      <span className="min-w-0 text-lg font-bold text-text-primary group-hover:underline sm:text-xl">
         <span className="line-clamp-2 break-words">{name}</span>
       </span>
     </>
@@ -56,7 +60,7 @@ export function MatchSideCard({ side, isWinner, solo }: MatchSideCardProps) {
         <Link
           to="/teams/$teamId"
           params={{ teamId: side.team.id }}
-          className="focus-ring flex min-w-0 flex-col items-center gap-3 rounded-card underline-offset-4 hover:underline"
+          className="group focus-ring flex min-w-0 flex-col items-center gap-3 rounded-card underline-offset-4"
         >
           {identity}
         </Link>
@@ -66,7 +70,7 @@ export function MatchSideCard({ side, isWinner, solo }: MatchSideCardProps) {
           params={{ pseudo: player.pseudo }}
           // Names what the player page goes back to (this match sheet).
           state={backFrom}
-          className="focus-ring flex min-w-0 flex-col items-center gap-3 rounded-card underline-offset-4 hover:underline"
+          className="group focus-ring flex min-w-0 flex-col items-center gap-3 rounded-card underline-offset-4"
         >
           {identity}
         </Link>

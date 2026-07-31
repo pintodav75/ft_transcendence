@@ -654,6 +654,85 @@ exactement la situation que le check veut éprouver.
 runner l'annule seul avant `DELETE /users/me`. Contrairement à `history` ou `match-result`, ce
 scénario ne produit aucun match **engageant**, donc rien à forcer en SQL.
 
+## `admin-disputes` (F-ADMIN) — le scénario qui peut faire rougir un AUTRE fichier
+
+`scenarios/admin-disputes.mjs` audite l'onglet **Arbitration** du rail, la file `/admin/disputes`
+et le panneau d'arbitrage du dossier de litige. **15 checks**, et il ne **dépend pas du seed** :
+il fabrique **ses deux** disputes chess 1v1 jetables (deux comptes, `chess_com` liés par API,
+recette de `match-result`). Seul le ladder chess 1v1 est attendu, il vient des migrations.
+
+### 🚨🚨 `is_admin = false` DANS LE `finally`, ET C'EST LE PIÈGE N°1
+
+Ce scénario **PROMEUT le compte du run en admin** par `sql()` : les comptes admin sont créés à la
+main en base, il n'existe **aucun** écran de promotion et il n'y en aura pas — c'est l'usage
+sanctionné du SQL (forcer un état que l'API interdit d'atteindre).
+
+Un flag laissé en base fait **7 liens** dans le rail. Or `f-nav.mjs:51` assert qu'il y en a
+**exactement 6**, avec une liste de libellés figée : le scénario suivant sort donc ROUGE, sur une
+surface qui n'a **rien à voir** avec ce ticket — et le diagnostic coûte cher, parce que le rapport
+accuse `f-nav`. Le `finally` retire donc le flag **avant toute autre opération de nettoyage**, et
+son échec est un check ROUGE explicite (`A13`) plutôt qu'une exception avalée. ⚠️ On ne peut pas
+compter sur la suppression du compte par le runner : `DELETE /users/me` refuse un compte engagé
+dans un match.
+
+### 🚨 Il ne touche jamais la dispute semée
+
+`match-detail` exige les 7 états cs2 et `dispute` exige que la dispute de démo reste **ouverte** :
+la résoudre casserait les deux. D'où deux disputes jetables — **une arbitrée**, l'autre **laissée
+ouverte**. Ce n'est pas du confort : le négatif « un participant non-admin ne voit aucun contrôle »
+(`A12`) rejoué sur le dossier déjà arbitré aurait été vert pour la **mauvaise** raison (« le
+dossier est clos ») au lieu de la bonne (« ce compte n'arbitre pas »), et serait resté vert le jour
+où la garde `isAdmin` sauterait.
+
+### Chaque négatif a son positif DANS LE MÊME RUN
+
+C'est la discipline `G6`/`G7` et `S8`/`S9` : un check qui ne garde qu'une ABSENCE est vert sur une
+page qu'on n'a pas regardée.
+
+| Négatif | Son jumeau positif |
+| --- | --- |
+| `A1` — un joueur ordinaire n'a pas l'onglet (6 liens) | `A3` — un admin l'a, en 7ᵉ position, sous History |
+| `A2` — un non-admin sur `/admin/disputes` : **0 requête** `/api/disputes` | `A2b` — même filtre côté admin : > 0 |
+| `A12` — un participant non-admin : 0 contrôle d'arbitrage | `A8` — l'admin en a 3, sur un dossier **ouvert** |
+| `A7` — file vide : aucune liste, aucun badge | `A5` — file pleine : autant de lignes que l'API |
+
+⚠️ **`A3b` compare la couleur au TOKEN RÉSOLU PAR LA PAGE**, jamais à un `rgb(...)` en dur : on
+insère une sonde `color: var(--color-arena-red)`, on lit sa couleur calculée, et on la compare à
+celle de l'onglet. Une valeur figée dans le scénario se périmerait au premier retouche du design
+system, et le check deviendrait faux **sans devenir rouge**.
+
+⚠️ **`A5` garde l'ORDRE, qui est celui du serveur** : `GET /disputes` trie de la plus ANCIENNE à la
+plus récente, c'est-à-dire par proximité de l'annulation automatique — l'ordre de traitement d'un
+arbitre. Le href de la 1ʳᵉ ligne est comparé au 1ᵉʳ id que l'API rend au même instant, jamais à un
+uuid en dur.
+
+⚠️ **`A10` mesure l'invalidation CROISÉE**, le point technique du ticket : arbitrer doit rafraîchir
+le dossier **et** la file. Le badge du rail et la page lisent la même clé, donc le badge décroît —
+sans ça un arbitre relirait une file qui liste du travail déjà fait.
+
+### Deux rouges vécus à l'écriture, tous deux dans le CHECK et pas dans le code
+
+1. **`innerText` contre `textContent`.** `label-caps` met le RENDU en capitales : `innerText`
+   rendait « 3\nOPEN DISPUTES » là où le DOM porte « 3 open disputes ». Un `=== '3'` était un check
+   faux, pas un défaut du rail. ⚠️ Au passage, un **vrai** correctif en est sorti : deux nœuds de
+   texte adjacents se concatènent **sans séparateur**, donc le badge valait littéralement
+   « 3open disputes ». L'espace est désormais **dans la chaîne** du `sr-only` — la spec laisse à
+   l'implémentation le soin d'en insérer une au calcul du nom accessible, on ne le suppose pas.
+2. **`form textarea` a résolu 2 éléments -> exit 2.** Le compte du run est à la fois **admin ET
+   partie prenante** (c'est lui qui a ouvert le créneau) : la page porte donc le formulaire de
+   dépôt de preuve **et** celui d'arbitrage. État parfaitement légitime — un admin reste un joueur
+   ordinaire — mais les sélecteurs doivent viser le `name` du champ, jamais sa forme. `A8` assert
+   désormais que le formulaire de preuve est **toujours offert** : le panneau d'arbitrage AJOUTE,
+   il ne remplace rien.
+
+### L'état vide est fabriqué par `page.route`, pas en vidant la base
+
+Idiome `H18` de `home`. La table des disputes porte la dispute de démo dont `dispute` et
+`match-detail` dépendent : on stube la réponse (200, `{disputes: []}`), donc **rien à déclarer en
+`expectHttp`**. ⚠️ Le prédicat vise le **chemin exact** (`url.pathname === '/api/disputes'`) :
+`/api/disputes/{id}` commence par la même chaîne, un `startsWith` détournerait aussi les dossiers
+individuels.
+
 ## `dispute` (F-DISPUTE) — et le check qui était vert par construction
 
 `scenarios/dispute.mjs` audite `/disputes/$disputeId` : id malformé (écran d'erreur, **zéro
@@ -668,11 +747,18 @@ supporté, > 5 Mo) **sans aucune requête**, un dépôt réel **image** puis **P
 d'entrée (fiche de match, `ActionRequired` de `/history`), le **non-changement de « Next up »**,
 375 px, et l'**échéance de 24 h qui retire le formulaire toute seule**. **26 checks.**
 
-### 🚨 `D6b` garde le SEUL état résolu que le produit sache produire
+### 🚨 `D6b` garde le CAS COURANT, celui que le job produit tout seul
 
-**[F-ADMIN] n'existe pas**, donc `POST /disputes/{id}/resolve` n'est appelable par aucun écran :
-le **timeout du job B7 est aujourd'hui le seul chemin vers `resolved`**, et la dispute de démo
-l'emprunte toute seule 24 h après un `seed:dev`. Or le job écrit les **mêmes colonnes** qu'un
+⚠️ **CETTE SECTION DISAIT « [F-ADMIN] n'existe pas ».** Elle a été écrite quand aucun écran
+n'appelait `POST /disputes/{id}/resolve` ; **[F-ADMIN] a livré cet écran** (voir plus haut,
+`admin-disputes`), donc `resolved` a désormais **deux** chemins et non plus un. ⚠️ Les mêmes
+phrases périmées subsistent dans les commentaires de `scenarios/dispute.mjs` (l. 52 et 410) : elles
+appartiennent au ticket F-DISPUTE et n'ont pas été touchées ici, mais elles **mentent** au prochain
+lecteur. Ce qui suit reste vrai et reste la raison d'être de `D6b`.
+
+Le **timeout du job B7 est le chemin le plus COURANT vers `resolved`** — c'est le seul qu'une
+dispute prenne sans que personne n'intervienne, et la dispute de démo l'emprunte toute seule 24 h
+après un `seed:dev`. Or le job écrit les **mêmes colonnes** qu'un
 arbitre (`status`, `resolution`, `resolvedAt`) plus une `resolutionNotes` qui est une **ligne de
 log interne en français**. La page annonçait donc « Settled by an admin », « the admin could not
 separate the two camps », et servait cette ligne sous le libellé « Admin's note ».

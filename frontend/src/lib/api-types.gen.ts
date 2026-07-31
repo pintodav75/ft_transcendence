@@ -3354,7 +3354,18 @@ export interface paths {
         };
         /**
          * Détail enrichi d'un match (participants only)
-         * @description Détail complet, prêt à afficher : l'**objet ladder** (nom, format, jeu — B16) ; pour chaque side, son **id**, son **état de soumission** (`submittedAt`, `submittedWinnerSideId` et les **deux scores soumis** — B6/B16), l'**objet team** (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar), plus les maps. Sides **triés** (0 = créateur, 1 = accepteur). Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**) **OU joueur du match** (1v1) — **SAUF si le match est `completed`** : un match terminé devient lisible par n'importe quel compte authentifié (page match publique, B15). Tout autre statut (`pending`, `in_progress`, `awaiting_confirmation`, `disputed`, `cancelled`) reste 403 pour un tiers — préserve l'anonymat des slots ouverts et des matchs en cours.
+         * @description Détail complet, prêt à afficher : l'**objet ladder** (nom, format, jeu — B16) ; pour chaque side, son **id**, son **état de soumission** (`submittedAt`, `submittedWinnerSideId` et les **deux scores soumis** — B6/B16), l'**objet team** (nom, logo, capitaine — `null` en 1v1) et les **joueurs** (pseudo, avatar), plus les maps. Sides **triés** (0 = créateur, 1 = accepteur). **Qui peut lire, et dans quel état.** Réservé aux participants — **membre d'une team engagée** (2v2+, **banc compris**) **OU joueur du match** (1v1) — avec **deux** élargissements :
+         *       * **match `completed`** : lisible par n'importe quel compte authentifié (page match
+         *         publique, B15) ;
+         *       * **admin** (`is_admin`) : lit un match `disputed` **ou** `cancelled` sans être
+         *         participant. L'en-tête du dossier de litige renvoie vers cette feuille de match,
+         *         et un arbitre a besoin des maps, des compos et des scores soumis pour trancher —
+         *         sur un match `disputed`, précisément l'état où il n'est pas participant. `cancelled`
+         *         est inclus parce que le dossier reste consultable **après** arbitrage : `resolve`
+         *         produit soit `completed` (déjà couvert), soit `cancelled`. **Volontairement PAS
+         *         tous les statuts** — un admin est aussi un compétiteur, et l'ouvrir sur `pending`
+         *         lui livrerait la composition nominative de chaque créneau ouvert.
+         *     Pour tout autre tiers — et pour un admin sur `pending`, `in_progress` ou `awaiting_confirmation` — ces statuts restent 403 : l'anonymat des slots ouverts et des matchs en cours est préservé.
          */
         get: {
             parameters: {
@@ -3474,7 +3485,7 @@ export interface paths {
                     };
                 };
                 401: components["responses"]["Unauthorized"];
-                /** @description Non-participant du match, et le match n'est pas (encore) `completed` */
+                /** @description Non-participant du match **et** non-admin, alors que le match n'est pas (encore) `completed` */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -3784,7 +3795,7 @@ export interface paths {
         };
         /**
          * File d'arbitrage — disputes ouvertes (admin)
-         * @description **Admin only** (`is_admin`) — liste les disputes encore `open`, **triées de la plus ancienne à la plus récente** (ordre de traitement). Chaque entrée porte le match, son ladder, l'heure prévue, la date d'ouverture et le **nombre de preuves déjà déposées**. C'est le point d'entrée de l'arbitre : sans lui, impossible de **découvrir** les litiges en attente sans connaître leur UUID.
+         * @description **Admin only** (`is_admin`) — liste les disputes encore `open`, **triées de la plus ancienne à la plus récente** (ordre de traitement). Chaque entrée porte le match, son **jeu et son ladder nommés**, le **format**, l'heure prévue, la date d'ouverture, le **nombre de preuves déjà déposées** et les **deux camps** (nom + logo d'équipe, ou pseudo + avatar en 1v1). C'est le point d'entrée de l'arbitre : sans lui, impossible de **découvrir** les litiges en attente sans connaître leur UUID — et sans les camps ni le jeu, la file n'est qu'une colonne d'UUID et d'horaires, sur laquelle aucun arbitre ne peut décider quel dossier ouvrir en premier. Coût constant : le handler enrichit en `inArray` + `Map` (aucun N+1, le nombre de requêtes ne dépend pas du nombre de litiges).
          */
         get: {
             parameters: {
@@ -3804,17 +3815,52 @@ export interface paths {
                         "application/json": {
                             disputes: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** Format: uuid */
-                                matchId?: string;
+                                matchId: string;
                                 /** Format: uuid */
-                                ladderId?: string;
+                                ladderId: string;
+                                /** @example Counter-Strike 2 5v5 */
+                                ladderName: string;
+                                /**
+                                 * @description Format du LADDER — la **seule** autorité pour dire « 1v1 ». Un `team: null` dans `sides` ne signifie pas solo : `match_sides.team_id` est en `set null`, une équipe dissoute laisse son camp sans team.
+                                 * @enum {string}
+                                 */
+                                format: "1v1" | "2v2" | "3v3" | "5v5";
+                                /** @example cs2 */
+                                gameId: string;
+                                /** @example Counter-Strike 2 */
+                                gameName: string;
                                 /** Format: date-time */
-                                scheduledAt?: string | null;
+                                scheduledAt: string | null;
                                 /** Format: date-time */
-                                createdAt?: string;
+                                createdAt: string;
                                 /** @example 2 */
-                                evidenceCount?: number;
+                                evidenceCount: number;
+                                /** @description Les deux camps, triés par `sideIndex` (0 = créateur, 1 = accepteur). **Même forme** que les `sides` de `GET /disputes/{id}` et de `GET /matches/{id}` (sans les champs de score/soumission, inutiles dans une file) : le front les nomme avec les mêmes helpers. */
+                                sides: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** @enum {integer} */
+                                    sideIndex: 0 | 1;
+                                    /** @description `null` en 1v1 (pas de team) **ou** si l'équipe a été dissoute depuis — voir `format`. */
+                                    team: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        name: string;
+                                        logoUrl: string | null;
+                                        /** Format: uuid */
+                                        captainId: string;
+                                    } | null;
+                                    players: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        /** @example alice */
+                                        pseudo: string;
+                                        displayName: string | null;
+                                        avatarUrl: string | null;
+                                    }[];
+                                }[];
                             }[];
                         };
                     };
@@ -4562,6 +4608,8 @@ export interface components {
             oauthProvider?: string | null;
             oauthId?: string | null;
             totpEnabled: boolean;
+            /** @description Vrai si le compte arbitre les litiges — pilote l'onglet **Arbitration** du rail et l'accès à `GET /disputes`. Un admin reste un joueur ordinaire par ailleurs. */
+            isAdmin: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4577,6 +4625,8 @@ export interface components {
             avatarUrl?: string | null;
             oauthProvider?: string | null;
             oauthId?: string | null;
+            /** @description Vrai si le compte arbitre les litiges. **Volontairement conservé sur le profil public** : le handler ne le retire pas, et la qualité d'arbitre n'est pas un secret (elle se lit déjà sur toute dispute qu'il a tranchée). Documenté ici parce qu'il est bel et bien servi — un champ rendu et tu par le contrat est pire que le champ lui-même. */
+            isAdmin: boolean;
             /** Format: date-time */
             createdAt: string;
         };
