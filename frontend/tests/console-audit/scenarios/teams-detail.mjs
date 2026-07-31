@@ -59,6 +59,8 @@ export async function run({
   user,
   ORIGIN,
 }) {
+  const main = page.getByRole('main');
+
   setPhase('1. teamId malformé -> écran d’erreur, zéro requête');
   // Le back valide ses params par Zod : un id non-uuid ne peut répondre que 400. Le front
   // applique la même règle et ne tape donc pas l'API du tout.
@@ -105,7 +107,7 @@ export async function run({
   // ⚠️ Scopé au panneau VISIBLE depuis FT-2B : le capitaine voit le roster DEUX fois (onglet
   // Overview et onglet Manage), les deux panneaux restant montés. Un locator nu résout donc
   // 2 éléments et Playwright refuse d'agir (strict mode).
-  const rosterChip = page.locator(
+  const rosterChip = main.locator(
     `[role="tabpanel"]:not([hidden]) a[href$="/players/${user.pseudo}"]`,
   );
   await rosterChip.waitFor({ timeout: 15000 });
@@ -160,16 +162,16 @@ export async function run({
   );
 
   setPhase('4. onglet Matches au clavier -> état vide');
-  const overviewTab = page.locator('[role="tab"]', { hasText: 'Overview' });
+  const overviewTab = main.locator('[role="tab"]', { hasText: 'Overview' });
   await overviewTab.focus();
   await page.keyboard.press('ArrowRight');
-  const matchesTab = page.locator('[role="tab"]', { hasText: 'Matches' });
+  const matchesTab = main.locator('[role="tab"]', { hasText: 'Matches' });
   // `getAttribute` n'est pas ré-essayé par Playwright : on attend la condition, sinon on
   // lirait l'attribut avant que React ait re-rendu (faux rouge).
   const arrowWorked = await page
     .waitForFunction(
       () =>
-        [...document.querySelectorAll('[role="tab"]')].some(
+        [...document.querySelectorAll('main [role="tab"]')].some(
           (t) => t.textContent.trim() === 'Matches' && t.getAttribute('aria-selected') === 'true',
         ),
       { timeout: 5000 },
@@ -267,7 +269,7 @@ export async function run({
     `état de compte lié exposé au visiteur : ${accountState} (0 attendu)`,
   );
 
-  await page.locator('[role="tab"]', { hasText: 'Matches' }).click();
+  await main.locator('[role="tab"]', { hasText: 'Matches' }).click();
   await page.locator('text=No public match yet').waitFor({ timeout: 10000 });
   const lineupHeader = await page.locator('th', { hasText: 'Line-up' }).count();
   step('A13', lineupHeader === 0, 'aucune colonne Line-up pour un non-membre');

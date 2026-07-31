@@ -3,11 +3,12 @@ import { useRef } from 'react';
 import { panelId, tabId } from '@/components/ui/tab-ids';
 import { cn } from '@/lib/utils';
 
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 
 export type TabItem = {
   id: string;
   label: string;
+  icon?: ReactNode;
 };
 
 type TabsProps = {
@@ -17,12 +18,13 @@ type TabsProps = {
   /** Prefix of the tab/panel ids, so tabs and panels can reference each other. */
   idPrefix: string;
   label: string;
+  variant?: 'default' | 'icon';
 };
 
 // Generic WAI-ARIA tab strip: it knows nothing of teams or matches, it renders whatever
 // `tabs` holds. Adding a tab is appending one entry — no change here (FT-2B does exactly
 // that for its captain-only "Manage" tab).
-export function Tabs({ tabs, active, onSelect, idPrefix, label }: TabsProps) {
+export function Tabs({ tabs, active, onSelect, idPrefix, label, variant = 'default' }: TabsProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
   // Roving tabindex + arrow keys: the WAI-ARIA tabs pattern. Without it Tab would stop on
@@ -46,7 +48,7 @@ export function Tabs({ tabs, active, onSelect, idPrefix, label }: TabsProps) {
   }
 
   return (
-    <div className="border-b border-border-subtle">
+    <div className={cn('border-b border-border-subtle', variant === 'icon' && 'p-2')}>
       <div
         ref={listRef}
         role="tablist"
@@ -60,6 +62,42 @@ export function Tabs({ tabs, active, onSelect, idPrefix, label }: TabsProps) {
       >
         {tabs.map((tab) => {
           const selected = tab.id === active;
+
+          if (variant === 'icon') {
+            return (
+              <div key={tab.id} className="group relative flex flex-1 justify-center">
+                <button
+                  type="button"
+                  role="tab"
+                  id={tabId(idPrefix, tab.id)}
+                  aria-label={tab.label}
+                  aria-selected={selected}
+                  aria-controls={panelId(idPrefix, tab.id)}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => onSelect(tab.id)}
+                  className={cn(
+                    'peer focus-ring relative flex min-h-11 w-full items-center justify-center rounded-control px-2 py-2 text-text-secondary transition hover:bg-surface-card-strong hover:text-text-primary',
+                    selected && 'bg-surface-card-strong text-text-primary',
+                  )}
+                >
+                  {tab.icon}
+                  {selected && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-x-4 -bottom-2 h-0.5 bg-arena-red"
+                    />
+                  )}
+                </button>
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 whitespace-nowrap rounded-control border border-border-subtle bg-surface-card-strong px-2 py-1 text-sm font-medium text-text-primary opacity-0 shadow-card transition-opacity group-hover:opacity-100 peer-focus-visible:opacity-100"
+                >
+                  {tab.label}
+                </span>
+              </div>
+            );
+          }
+
           return (
             <button
               key={tab.id}

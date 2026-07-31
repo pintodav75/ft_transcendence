@@ -13,7 +13,7 @@
 - ✅ **FR1 Register implémenté et testé** : formulaire RHF + Zod, inscription classique, session Zustand, erreurs API, Google OAuth complet et redirection `/home`
 - Libs front : **TanStack Router branché** + TanStack Query (installé), Zustand, React Hook Form, Zod + `@hookform/resolvers`, `@fontsource/geist`, `lucide-react`, `clsx`, `tailwind-merge`
 - ⚠️ **Pages restantes** : `/`, `/register`, `/login`, `/teams`, `/teams/$teamId` et `/ladders/$ladderId` ont une vraie UI (`/ranking` supprimée par FT-3) ; **FR2 Login + 2FA est mergé**. `/home`, `/games`, `/profile`, `/privacy` et `/terms` restent à compléter. `App.tsx` supprimé (renommé `pages/login.tsx`)
-- ⚠️ **Client temps réel** : le backend utilise `@fastify/websocket` (lib `ws`), donc côté front ce sera **WebSocket natif** (ou un wrapper compatible `ws`), **PAS socket.io-client**
+- ✅ **Client temps réel FS0** : `lib/realtime-client.ts` utilise une **WebSocket native** unique par session vers `/api/ws/chat` (reconnexion avec backoff/jitter, resynchronisation de présence, purge au changement de compte). `useRealtimeConnection()` synchronise la session avec ce singleton ; une rotation de l'access token met à jour le JWT de la prochaine reconnexion **sans recycler la socket active**. **PAS de socket.io-client** et jamais une socket par composant.
 
 **Backend** : Fastify v5 sur Node 24 LTS (TypeScript strict, ESM) — _en place et bien avancé_
 
@@ -94,15 +94,16 @@
 │       ├── index.css         # source de vérité visuelle : tokens Tailwind + @utility (panel/label-caps/focus-ring) + utilitaires arène
 │       ├── routes/           # wrappers file-based : routes publiques + layout pathless `_authenticated` et ses enfants protégés
 │       ├── pages/            # index/login/register, home/games/profile, privacy/terms, pages teams et ladders
-│       ├── stores/           # auth-store.ts (Zustand session — F0-A)
-│       ├── lib/              # api.ts, api-config.ts, schémas Zod register/login, utils.ts (cn())
+│       ├── stores/           # auth-store.ts + realtime-store.ts (session, connexion WS, présence)
+│       ├── lib/              # api/config, realtime-client/schema, schémas Zod, utils.ts (cn())
 │       ├── types/            # auth.ts
 │       ├── data/             # games.ts : maps assets (images/logos/icons) + gameOrder + gameHref, clés = id back
 │       ├── assets/           # images/ (bg.webp hero, google-g.png, <jeu>.webp), logos/, icons/
 │       └── components/
 │           ├── ui/           # button, button-variants (buttonClasses), input, label, card, form-message, password-input, avatar, menu-item, icon-menu-item
 │           ├── auth/         # composants partagés Register/Login : layout, carte, formulaire, divider, options, langue, Google
-│           ├── layout/       # RootLayout, AuthenticatedLayout, rails F0-C, navs F-Nav, SiteFooter, Logo/SiteLogo
+│           ├── layout/       # RootLayout, AuthenticatedLayout, rails, MobileHeader, navs F-Nav, SiteLogo/SiteFooter
+│           ├── social/       # SocialPanel/Rail + slots FS1→FS5 (fondation FS0)
 │           ├── landing/      # vitrine publique : HeroBanner, LandingNav
 │           ├── games/        # GameAsset + coquilles GameLogo/GameIcon/GameImage, GamesCards, GameInfo, GamesFallback (+ previews non montées)
 │           └── home/         # ⚠️ MAL NOMMÉ : contient du teams (LadderSelect, TeamCreation, SearchBar, LinkAccountBanner ; RankingTable supprimé par FT-3)
@@ -111,4 +112,3 @@
 ```
 
 ---
-

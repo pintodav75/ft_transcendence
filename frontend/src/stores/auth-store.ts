@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import { API_BASE_URL } from '@/lib/api-config'
+import { realtimeClient } from '@/lib/realtime-client'
 import type {
   AuthSessionResponse,
   AuthUser,
@@ -125,6 +126,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
     } catch {
       // Local logout must still complete when the backend is unreachable.
     } finally {
+      // Do not depend on AuthenticatedLayout rendering once more before redirection: the
+      // transport and its presence state belong to the session and close deterministically.
+      realtimeClient.disconnect()
       set({ accessToken: null, user: null, ready: true })
     }
   },
