@@ -31,7 +31,11 @@
  *     un `Callout` explique, et **aucune** requête ne part ;
  *   - **375 px**, deux fois : le panneau ouvert ne déborde pas (le `<select>` se dimensionne
  *     sur sa plus large option, c'est le vrai piège de la colonne étroite), et sur l'onglet
- *     Matches c'est le **conteneur du tableau** qui défile, jamais le document ;
+ *     Matches la table est REMPLACÉE par des cartes ([FX-TABLE]) — un seul arbre monté, jamais
+ *     deux, le bouton « Cancel the slot » reste joignable au doigt, et le focus atterrit sur la
+ *     LISTE après une annulation ;
+ *   - le `position` non-`static` de la boîte de scroll du tableau (M11), qui est ce qui clippe
+ *     le `sr-only` de l'en-tête Actions — asserté sur la propriété, plus sur son symptôme ;
  *   - **aucun 404** et **aucune boîte native** sur tout le parcours.
  *
  * ⚠️ CE QUE CE SCÉNARIO NE PROUVE PAS.
@@ -501,23 +505,103 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
   setPhase('11. largeur étroite et filets transverses');
   await page.getByRole('button', { name: 'Close' }).click();
   await page.getByRole('tab', { name: 'Matches' }).click();
+  // Les deux moitiés de l'historique depuis [FX-TABLE] : le TABLEAU à partir de `sm`, les
+  // CARTES en dessous. Les deux largeurs se mesurent, parce qu'elles gardent deux pièges
+  // différents.
+  const historyBox = page.locator('[role="region"][aria-label^="Match history"]');
+  const wideRows = await historyBox.locator('tbody tr').count();
+  const wideCancels = await historyBox.locator('button[aria-label^="Cancel the slot of"]').count();
+
+  // 🔑 LE PIÈGE DU `relative`, ASSERTÉ SUR SA CAUSE ET NON SUR SON EFFET DE BORD. Le
+  // `<span class="sr-only">` de l'en-tête Actions est en `position:absolute` : il n'est ramené
+  // sous l'`overflow` de la boîte que si celle-ci est un BLOC CONTENEUR, donc positionnée.
+  // Sinon il se résout contre le bloc conteneur initial et élargit le DOCUMENT.
+  //
+  // ⚠️ Ce filet se mesurait jusqu'ici par son symptôme — le débordement du document à 375 px —
+  // et [FX-TABLE] l'a fait disparaître (à 375 px il n'y a plus de table du tout). Le déplacer à
+  // 640 px l'aurait tué EN SILENCE : mesuré, le `sr-only` échappé atterrit à x=626 quelle que
+  // soit la largeur, donc à 640 px il tombe DANS le viewport (débordement -13, check vert) là
+  // où il donnait +252 à 375 px. On assert donc la propriété portante elle-même : elle ne peut
+  // pas mourir sans que la ligne rougisse.
+  const boxPosition = await historyBox
+    .evaluate((el) => getComputedStyle(el).position)
+    .catch(() => '—introuvable—');
+  const scroller = await historyBox
+    .evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+    .catch(() => ({ scroll: -1, client: -1 }));
+  step(
+    'M11',
+    boxPosition !== 'static' && boxPosition !== '—introuvable—' && scroller.scroll > scroller.client,
+    `position calculée de la boîte du tableau : « ${boxPosition} » (autre que « static » attendu — c'est ce qui clippe le <span class="sr-only"> de l'en-tête Actions et garde le DOCUMENT de déborder) ; la boîte défile bien elle-même (scrollWidth=${scroller.scroll} > clientWidth=${scroller.client})`,
+  );
+
+  // 375 px : la table est REMPLACÉE par des cartes — un seul arbre monté, jamais deux. Et
+  // l'action d'annulation, qui n'existe que sur cet écran, doit rester joignable au doigt :
+  // c'est elle qui disparaissait derrière le défilement horizontal.
   await page.setViewportSize({ width: 375, height: 900 });
-  await page.waitForTimeout(400);
+  const cardList = page.getByRole('list', { name: /Match history/ });
+  const cardsShown = await cardList
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  const cards = cardsShown ? await cardList.locator('> li').count() : 0;
+  const cardCancels = cardsShown
+    ? await cardList.locator('button[aria-label^="Cancel the slot of"]').count()
+    : 0;
+  const regionsAt375 = await historyBox.count();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
-  // La colonne d'actions s'ajoute à un tableau déjà en `min-w-[36rem]` : c'est bien SON
-  // conteneur qui doit défiler, jamais le document.
-  const scroller = await page
-    .locator('[role="region"][aria-label^="Match history"]')
-    .evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
   step(
-    'M11',
-    overflow <= 0 && scroller.scroll > scroller.client,
-    `débordement horizontal du document à 375 px : ${overflow}px (≤ 0 attendu — le <span class="sr-only"> de l’en-tête Actions est en position:absolute et n’est clippé que si son conteneur est positionné) ; le conteneur du tableau défile bien lui-même (scrollWidth=${scroller.scroll} > clientWidth=${scroller.client})`,
+    'M11b',
+    overflow <= 0 &&
+      cards === wideRows &&
+      cards > 0 &&
+      regionsAt375 === 0 &&
+      cardCancels === wideCancels &&
+      wideCancels > 0,
+    `débordement horizontal du document à 375 px : ${overflow}px (≤ 0 attendu) ; cartes rendues : ${cards} (${wideRows} attendues — autant que de lignes à 1280 px), région défilante résiduelle : ${regionsAt375} (0 attendue — la table est démontée, pas masquée), boutons « Cancel the slot » dans les cartes : ${cardCancels} (${wideCancels} attendus)`,
   );
+
+  // 🔑 LE FOCUS APRÈS ANNULATION, À 375 PX. M8-bis ne garde que la version 1280 px, où le point
+  // d'atterrissage est la région défilante. Sous `sm` cette région n'existe plus : c'est la
+  // LISTE (`<ul tabIndex={-1}>`) qui reçoit le focus, et le bouton qui l'avait vient d'être
+  // démonté — sans ce check, le seul mobile serait garanti par la lecture du code.
+  //
+  // ⚠️ On attend le focus SUR LA BALISE VISÉE, pas « autre chose que BODY » : juste après
+  // l'Entrée, `activeElement` est encore le bouton de la boîte de dialogue, donc déjà différent
+  // de BODY — une attente générique rendrait la main trop tôt et lirait le mauvais élément.
+  // Et rien n'est lu dans la région live ici : l'annonce de l'annulation du §8 y est toujours
+  // écrite, `awaitAnnouncement` matcherait la PRÉCÉDENTE (invariant #11).
+  await pressEnterOn(cardList.locator('button[aria-label^="Cancel the slot of"]').first());
+  await pressEnterOn(page.getByRole('button', { name: 'Cancel the slot', exact: true }));
+  const landedOnList = await page
+    .waitForFunction(() => document.activeElement?.tagName === 'UL', null, { timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  const narrowLanding = await focusLanding();
+  step(
+    'M11c',
+    landedOnList && narrowLanding.label.startsWith('Match history'),
+    `focus après annulation à 375 px : <${narrowLanding.tag ?? '—'}> « ${narrowLanding.label} » (le <ul> nommé « Match history… » attendu ; ni BODY, ni un bouton démonté)`,
+  );
+
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.waitForTimeout(300);
+
+  // 🔑 LE RETOUR EN GRAND. Cette largeur n'était gardée par rien alors que c'est celle du
+  // correcteur : le tableau doit revenir, les cartes disparaître (un seul arbre monté), et le
+  // DOCUMENT ne pas déborder — la table, elle, défile dans sa propre boîte.
+  const backToTable = await historyBox.count();
+  const wideCards = await page.getByRole('list', { name: /Match history/ }).count();
+  const wideOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  step(
+    'M11d',
+    backToTable === 1 && wideCards === 0 && wideOverflow <= 0,
+    `débordement horizontal du document à 1280 px : ${wideOverflow}px (≤ 0 attendu) ; région du tableau revenue : ${backToTable} (1 attendue), liste de cartes résiduelle : ${wideCards} (0 attendue)`,
+  );
 
   step(
     'M12',

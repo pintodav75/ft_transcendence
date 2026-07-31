@@ -85,7 +85,9 @@ export function SoloLadder() {
   // that is the history region; in Overview the whole "Next match" block goes away, so we
   // fall back on the panel, which its tab names.
   const overviewPanelRef = useRef<HTMLDivElement>(null);
-  const matchHistoryRef = useRef<HTMLDivElement>(null);
+  // `HTMLElement` since [FX-TABLE]: the history lands the focus on its scrolling region from
+  // `sm` up, and on the `<ul>` of its cards below — two tags, one job (`.focus()`).
+  const matchHistoryRef = useRef<HTMLElement>(null);
   // ⚠️ ONE live region for the page, therefore ONE message. Two competing states ("opened"
   // and "cancelled") let the older one win and the region ends up contradicting the banner.
   const slotAnnouncement = useAnnouncement();
