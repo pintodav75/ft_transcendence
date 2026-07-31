@@ -124,7 +124,7 @@ export function TeamManage({ team, members, invitations }: TeamManageProps) {
         }
         confirmLabel="Remove player"
         pending={kick.isPending}
-        error={kick.isError ? removeTeamMemberErrorMessage(kick.error) : null}
+        error={kick.isError ? removeTeamMemberErrorMessage(kick.error, 'kick') : null}
         onConfirm={confirmKick}
         onCancel={cancelKick}
         returnFocusRef={rosterHeadingRef}

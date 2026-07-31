@@ -36,6 +36,9 @@
  *     LISTE après une annulation ;
  *   - le `position` non-`static` de la boîte de scroll du tableau (M11), qui est ce qui clippe
  *     le `sr-only` de l'en-tête Actions — asserté sur la propriété, plus sur son symptôme ;
+ *   - **dissolution REFUSÉE** (409 `team_engaged_in_match`, déclaré) : les créneaux ouverts du
+ *     §10 rendent l'état gratuit, et le message est comparé en **exact** — c'est ce check qui
+ *     garde la traduction par `code` et la présence du REMÈDE dans la phrase ;
  *   - **aucun 404** et **aucune boîte native** sur tout le parcours.
  *
  * ⚠️ CE QUE CE SCÉNARIO NE PROUVE PAS.
@@ -46,6 +49,12 @@
  *   - **403 (capitaine destitué), 429, et le 400 `unlinkedPlayers`** : mappés dans
  *     `team-mutations.ts`, jamais déclenchés — le joueur non lié est `disabled`, il faudrait
  *     qu'il délie son compte pendant que le panneau est ouvert.
+ *   - **Le 409 `engaged_in_match` de l'EXCLUSION / du DÉPART** (`DELETE .../members/{userId}`).
+ *     Il ne se déclenche que sur un match ACTIF (`in_progress` et au-delà) : un créneau
+ *     `pending` laisse partir le joueur et s'annule tout seul. L'atteindre demanderait une
+ *     ÉQUIPE ADVERSE complète (roster + comptes liés) qui accepte le créneau — un montage
+ *     bien plus lourd que le refus qu'il garderait. Le mapping est donc couvert par la
+ *     lecture du code, pas par ce scénario.
  *   - **Le 400 « ce créneau vient de passer »** : il demanderait de tenir le panneau ouvert
  *     ~5 minutes (la marge de sécurité du sélecteur), ce qui ferait exploser la durée du run.
  *   - **Un ladder 5v5** (lockout 60) : la règle stricte est vérifiée sur un 2v2 (lockout 30).
@@ -602,6 +611,54 @@ export async function run({ page, setPhase, step, countRequests, expectHttp, cre
     backToTable === 1 && wideCards === 0 && wideOverflow <= 0,
     `débordement horizontal du document à 1280 px : ${wideOverflow}px (≤ 0 attendu) ; région du tableau revenue : ${backToTable} (1 attendue), liste de cartes résiduelle : ${wideCards} (0 attendue)`,
   );
+
+  // ------------------------------------------ §12 dissolution refusée : le 409 par `code`
+  // L'état coûteux est DÉJÀ construit : l'équipe porte les créneaux `pending` du §10, donc
+  // le back refuse la dissolution en 409 `team_engaged_in_match`. C'est le seul endroit de
+  // la campagne où ce refus est atteignable À LA SOURIS, et un refus doit porter son remède.
+  setPhase('12. dissolution refusée : l’équipe a des créneaux ouverts');
+  await page.getByRole('tab', { name: 'Manage' }).click();
+  await page.getByLabel('Team name').waitFor({ timeout: 10000 });
+  // Le dialogue est monté en permanence mais fermé (`<dialog>` = display:none), donc hors
+  // arbre d'accessibilité : `.first()` ne peut désigner que le bouton de la Danger zone.
+  await page.getByRole('button', { name: 'Dissolve team' }).first().click();
+  const dissolveDialog = page.locator('dialog[open]');
+  await dissolveDialog.waitFor({ timeout: 5000 });
+
+  // ⚠️ Le motif est confronté à « <url> <texte> » ; le `(:\d+)?` couvre la variante
+  // « /api/teams/<id>:0 » du flux console. Ancré sur l'id de CETTE équipe, et la
+  // déclaration ne vaut que dans CETTE phase (garde-fou du runner).
+  expectHttp(
+    new RegExp(`/api/teams/${teamId}(:\\d+)?(\\s|$)`),
+    'DELETE 409 : dissolution refusée, l’équipe a des créneaux ouverts',
+  );
+  const refusalPromise = page.waitForResponse(
+    (res) => res.url().endsWith(`/api/teams/${teamId}`) && res.request().method() === 'DELETE',
+    { timeout: 20000 },
+  );
+  await dissolveDialog.getByRole('button', { name: 'Dissolve team' }).click();
+  const refusal = await refusalPromise;
+  // Comparaison EXACTE, comme le 409 du §9 : c'est elle qui garde la traduction du `code`
+  // `team_engaged_in_match`. La prose du back est autre (« cancel or finish the team
+  // matches before dissolving it ») — la réafficher telle quelle ferait rougir ce check, et
+  // le message générique « Could not dissolve the team. » aussi.
+  const refusalShown = await dissolveDialog
+    .getByText(
+      'You cannot dissolve this team while it has an open or ongoing match — cancel it or finish it first.',
+      { exact: true },
+    )
+    .first()
+    .waitFor({ timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  // Un refus ne navigue pas : `leaveTeamPage()` n'est appelé que par `onSuccess`.
+  const stillOnTeamPage = page.url().includes(teamId);
+  step(
+    'M14',
+    refusal.status() === 409 && refusalShown && stillOnTeamPage,
+    `DELETE /api/teams/{id} -> HTTP ${refusal.status()} (409 attendu), message dérivé du \`code\` affiché en exact = ${refusalShown}, page de l’équipe conservée = ${stillOnTeamPage}`,
+  );
+  await page.keyboard.press('Escape');
 
   step(
     'M12',
