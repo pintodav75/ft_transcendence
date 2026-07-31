@@ -169,6 +169,13 @@
       "when": 1785217074344,
       "tag": "0023_typical_maria_hill",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785517119109,
+      "tag": "0024_glorious_zarda",
+      "breakpoints": true
     }
   ]
 }

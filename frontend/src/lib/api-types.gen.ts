@@ -2938,6 +2938,12 @@ export interface paths {
         /**
          * Retirer un membre (kick ou quit)
          * @description Retire un membre : autorisé au capitaine (kick) ou au membre lui-même (quit). Le capitaine ne peut pas se retirer (400 → dissoudre). Idempotent.
+         *
+         *     ⚠️ **BX-LEAVE — un départ ne laisse plus de joueur aligné derrière lui.** Un membre retiré restait dans la composition des créneaux de son ancienne équipe : il pouvait rejoindre une autre équipe du même ladder et **accepter le créneau de son ancienne équipe** (la garde anti-auto-acceptation compare les équipes des deux camps, pas les joueurs), donc figurer dans les **deux camps** du même match. Deux traitements, selon l'état du match :
+         *     • **Match actif** (`in_progress`, `awaiting_confirmation`, `disputed`) qui aligne ce joueur **avec cette équipe** → **409 `engaged_in_match`**, le même code que `DELETE /users/me`. Rien n'est écrit : il faut jouer ou annuler le match d'abord.
+         *     • **Créneau `pending`** → le départ est **autorisé**, mais le créneau passe `cancelled` et les lignes de composition du partant sont retirées. On ne refuse pas ici : seul le capitaine peut annuler un créneau, un simple membre serait bloqué sans remède. Le reste de la composition **et** le capitaine reçoivent une notification `match_cancelled_member_left` — **jamais l'acteur, jamais le partant**.
+         *
+         *     Un membre **hors composition** part normalement, même si son équipe a un match en cours. Un match `completed` ou `cancelled` ne bloque rien et n'est pas modifié. L'idempotence prime sur le refus : retirer quelqu'un qui **n'est pas membre** rend **200**, jamais 409.
          */
         delete: {
             parameters: {
@@ -2986,6 +2992,19 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ce joueur est aligné dans un match **actif** de cette équipe. Le client doit tester `code`, **pas** parser `error`. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            /** @enum {string} */
+                            code: "engaged_in_match";
+                        };
                     };
                 };
                 500: components["responses"]["InternalError"];
@@ -3167,13 +3186,13 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Body invalide (ValidationError) — dont **scheduledAt hors quart fixe** (ex. 21h07) ou **à moins de 15 min** ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors team (Error) ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple. */
+                /** @description Body invalide (ValidationError) — dont **scheduledAt hors quart fixe** (ex. 21h07) ou **à moins de 15 min** ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors team (Error) ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple. **BX-LEAVE** : « joueur hors team » peut aussi être perdu **en course** — un sélectionné quitte l'équipe pendant la requête —, la composition étant revérifiée **sous verrou** juste avant l'écriture. Même `error`, avec `offRoster` en plus (OffRosterError). */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["UnlinkedPlayersError"] | components["schemas"]["Error"];
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["UnlinkedPlayersError"] | components["schemas"]["OffRosterError"] | components["schemas"]["Error"];
                     };
                 };
                 401: components["responses"]["Unauthorized"];
@@ -3639,13 +3658,13 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Body/param invalide (ValidationError) ; **on ne peut pas accepter son propre slot** (vérifié **par team** en 2v2+, **par user_id** en 1v1 — les deux sides y ont `team_id = NULL`) ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors roster ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple. */
+                /** @description Body/param invalide (ValidationError) ; **on ne peut pas accepter son propre slot** (vérifié **par team** en 2v2+, **par user_id** en 1v1 — les deux sides y ont `team_id = NULL`) ; en 2v2+ : lineup manquante/mauvaise taille, pas de team sur ce ladder, joueur hors roster ; **§5.1 compte non lié** → en 2v2+ la réponse porte en plus `unlinkedPlayers` (UnlinkedPlayersError) ; en 1v1 c'est un Error simple. **BX-LEAVE** : « joueur hors roster » peut aussi être perdu **en course** (un sélectionné quitte l'équipe pendant l'acceptation), la composition étant revérifiée **sous le même verrou** que le §5.2 juste avant de démarrer le match. Même `error`, avec `offRoster` en plus (OffRosterError). */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["UnlinkedPlayersError"] | components["schemas"]["Error"];
+                        "application/json": components["schemas"]["ValidationError"] | components["schemas"]["UnlinkedPlayersError"] | components["schemas"]["OffRosterError"] | components["schemas"]["Error"];
                     };
                 };
                 401: components["responses"]["Unauthorized"];
@@ -4274,7 +4293,9 @@ export interface paths {
         };
         /**
          * Mes notifications (paginées) + compteur non-lu
-         * @description Les notifications de l'utilisateur courant, **plus récentes d'abord**, paginées par **curseur** (keyset sur `(createdAt, id)` — un offset sauterait des lignes, la liste bouge en permanence). `unreadCount` compte TOUTES mes non-lues (pas seulement la page) : c'est le badge de la cloche. `nextCursor` = l'id à repasser en `cursor` pour la page suivante ; `null` quand on est au bout. Les 13 types possibles : `match_accepted`, `result_submitted`, `result_confirmed`, `dispute_opened`, `dispute_resolved`, `dispute_auto_cancelled`, `match_ghost_cancelled`, `dispute_needs_admin` (admins seulement), `friend_request_received`, `friend_request_accepted` (social), `team_member_added`, `team_member_removed`, `team_disbanded` (équipe). `data` est un payload **display-safe** (ids, heure, pseudo — jamais d'email/hash) : pour les types **match/dispute**, `matchId` + `ladderId` toujours, plus `disputeId` (types dispute), `winnerSideId` (result_confirmed), `scheduledAt` (match_accepted) et `resolution` (dispute_resolved) ; pour les types **social**, `friendshipId` + l'auteur (`fromUserId`/`fromPseudo` pour reçue, `byUserId`/`byPseudo` pour acceptée) ; pour les types **équipe**, `teamId` + `teamName` + `ladderId` + l'auteur (`byUserId`/`byPseudo`). ⚠️ `teamName` est un **instantané** : indispensable pour `team_disbanded`, puisque l'équipe n'existe plus quand le destinataire lit la notification. Il n'existe volontairement **pas** de type pour la création ni pour l'édition d'une équipe : personne d'autre que l'acteur n'est concerné.
+         * @description Les notifications de l'utilisateur courant, **plus récentes d'abord**, paginées par **curseur** (keyset sur `(createdAt, id)` — un offset sauterait des lignes, la liste bouge en permanence). `unreadCount` compte TOUTES mes non-lues (pas seulement la page) : c'est le badge de la cloche. `nextCursor` = l'id à repasser en `cursor` pour la page suivante ; `null` quand on est au bout. Les 17 types possibles : `match_accepted`, `result_submitted`, `result_confirmed`, `dispute_opened`, `dispute_resolved`, `dispute_auto_cancelled`, `match_ghost_cancelled`, `dispute_needs_admin` (admins seulement), `friend_request_received`, `friend_request_accepted` (social), `team_member_added`, `team_member_removed`, `team_disbanded`, `team_invitation_received`, `team_invitation_accepted`, `team_invitation_declined` (équipe), `match_cancelled_member_left`. `data` est un payload **display-safe** (ids, heure, pseudo — jamais d'email/hash) : pour les types **match/dispute**, `matchId` + `ladderId` toujours, plus `disputeId` (types dispute), `winnerSideId` (result_confirmed), `scheduledAt` (match_accepted) et `resolution` (dispute_resolved) ; pour les types **social**, `friendshipId` + l'auteur (`fromUserId`/`fromPseudo` pour reçue, `byUserId`/`byPseudo` pour acceptée) ; pour les types **équipe**, `teamId` + `teamName` + `ladderId` + l'auteur (`byUserId`/`byPseudo`), plus `invitationId` sur les 3 types d'invitation (le front peut répondre depuis la cloche). ⚠️ `teamName` est un **instantané** : indispensable pour `team_disbanded`, puisque l'équipe n'existe plus quand le destinataire lit la notification. Il n'existe volontairement **pas** de type pour la création ni pour l'édition d'une équipe : personne d'autre que l'acteur n'est concerné.
+         *
+         *     ⚠️ **`match_cancelled_member_left` (BX-LEAVE)** — « votre créneau est tombé parce qu'un joueur aligné a quitté l'équipe ». Payload : `matchId`, `ladderId`, `scheduledAt` (**nullable** — la colonne l'est en base, contrairement à `match_accepted` où l'heure est celle du coup d'envoi qu'on vient de valider), `teamId`, `teamName`, et **`playerId`/`playerPseudo`** — et **non** `byUserId`, qui désigne l'ACTEUR partout ailleurs : sur une exclusion, l'acteur est le capitaine et le joueur qui casse la composition est l'exclu, ce ne sont pas les mêmes personnes.
          */
         get: {
             parameters: {
@@ -4300,7 +4321,7 @@ export interface paths {
                                 /** Format: uuid */
                                 id?: string;
                                 /** @enum {string} */
-                                type?: "match_accepted" | "result_submitted" | "result_confirmed" | "dispute_opened" | "dispute_resolved" | "dispute_auto_cancelled" | "match_ghost_cancelled" | "dispute_needs_admin" | "friend_request_received" | "friend_request_accepted" | "team_member_added" | "team_member_removed" | "team_disbanded";
+                                type?: "match_accepted" | "result_submitted" | "result_confirmed" | "dispute_opened" | "dispute_resolved" | "dispute_auto_cancelled" | "match_ghost_cancelled" | "dispute_needs_admin" | "friend_request_received" | "friend_request_accepted" | "team_member_added" | "team_member_removed" | "team_disbanded" | "team_invitation_received" | "team_invitation_accepted" | "team_invitation_declined" | "match_cancelled_member_left";
                                 /** @description Payload display-safe (matchId, ladderId, …selon le type). */
                                 data?: Record<string, never>;
                                 /** Format: date-time */
@@ -4905,6 +4926,12 @@ export interface components {
             /** @example every selected player must have a linked riot account */
             error: string;
             unlinkedPlayers: string[];
+        };
+        /** @description 400 « lineup ⊆ roster » perdu **en course** (BX-LEAVE). Le roster est validé une première fois hors transaction : entre cette lecture et l'écriture de la composition, un joueur sélectionné a pu **quitter l'équipe** (ou en être exclu). La composition est donc revérifiée **sous verrou**, et ce refus est le même que le refus « à froid » — même `error` — avec `offRoster` qui dit **lesquels**, sur le modèle d'`unlinkedPlayers`. Rare par nature : il faut que les deux requêtes se croisent. */
+        OffRosterError: {
+            /** @example every selected player must be on the team */
+            error: string;
+            offRoster: string[];
         };
     };
     responses: {

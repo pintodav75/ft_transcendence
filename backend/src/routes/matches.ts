@@ -282,6 +282,44 @@ async function lockCompetitors(
   }
 }
 
+/**
+ * BX-LEAVE — LA COMPOSITION EST-ELLE ENCORE SUR LE ROSTER ? À rappeler SOUS LE VERROU.
+ *
+ * `validateSide()` valide le roster HORS transaction et hors verrou : son verdict a donc
+ * une date de péremption. Entre lui et l'INSERT des `match_participants`, un joueur peut
+ * avoir quitté l'équipe — `DELETE /teams/:id/members/:userId` s'y emploie précisément, et
+ * son propre nettoyage des créneaux `pending` ne voit pas un INSERT non commité :
+ *
+ *   1. `POST /matches` lit le roster : le joueur est encore membre (le DELETE n'est pas
+ *      commité) → il l'aligne ;
+ *   2. le départ prend le verrou `team:<id>`, ne trouve aucun créneau `pending` à annuler
+ *      (l'INSERT n'est pas commité non plus), retire l'adhésion, commite ;
+ *   3. la création prend le verrou à son tour et insère un créneau qui aligne un
+ *      NON-MEMBRE — le défaut même que BX-LEAVE corrige, réintroduit par la fenêtre.
+ *
+ * 🔑 Le verrou du départ est nécessaire mais NE SUFFIT PAS : il sérialise les deux
+ * transactions, il ne rafraîchit pas une lecture faite avant elles. Il fallait son
+ * pendant ici — la re-vérification sous verrou, la moitié qu'on oublie systématiquement
+ * (piège #14). Reproduit 3 fois sur 3 par la §8 de `test_teams_leave.py`, verrou en place.
+ *
+ * Rend les joueurs de la composition qui ne sont PLUS sur le roster (vide = tout va bien).
+ * Sans objet en 1v1 : il n'y a pas de roster, le joueur EST le camp.
+ */
+async function lineupOffRoster(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  teamId: string,
+  participantIds: string[],
+): Promise<string[]> {
+  const rows = await tx
+    .select({ userId: teamMembersTable.userId })
+    .from(teamMembersTable)
+    .where(
+      and(eq(teamMembersTable.teamId, teamId), inArray(teamMembersTable.userId, participantIds)),
+    );
+  const stillMembers = new Set(rows.map((r) => r.userId));
+  return participantIds.filter((id) => !stillMembers.has(id));
+}
+
 // Verdict du helper : soit le côté est valide et on sait à quoi il ressemble,
 // soit il est refusé et on sait quoi répondre. Le helper n'a pas accès à `reply` :
 // il rend un verdict, c'est la route qui le traduit en réponse HTTP.
@@ -578,6 +616,12 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           return { raced: 'conflict' } as const;
         if ((await countOpenSlots(tx, ladder, sideTeamId, me)) >= MAX_OPEN_SLOTS)
           return { raced: 'too_many' } as const;
+        // BX-LEAVE — le roster aussi est une lecture périmable : un joueur de la lineup a
+        // pu quitter l'équipe depuis `validateSide()`. Voir `lineupOffRoster()`.
+        if (sideTeamId) {
+          const gone = await lineupOffRoster(tx, sideTeamId, participantIds);
+          if (gone.length) return { raced: 'roster', gone } as const;
+        }
 
         const [createdMatch] = await tx
           .insert(matchesTable)
@@ -605,6 +649,13 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         return reply
           .code(409)
           .send({ error: `you cannot have more than ${MAX_OPEN_SLOTS} open slots on a ladder` });
+      // BX-LEAVE — MÊME 400 et MÊME `unlinkedPlayers`-like que le refus « à froid » de
+      // `validateSide` : que le joueur soit parti il y a une heure ou pendant la requête,
+      // le capitaine doit lire la même chose et savoir QUI retirer de sa sélection.
+      if (created.raced === 'roster')
+        return reply
+          .code(400)
+          .send({ error: 'every selected player must be on the team', offRoster: created.gone });
 
       return reply.code(201).send({ match: created.match });
     } catch (error) {
@@ -1298,6 +1349,22 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           )
             return { raced: 'conflict' } as const;
 
+          // 1-bis. BX-LEAVE — le roster de l'ACCEPTEUR, revérifié sous le même verrou.
+          //    Exactement la même course que côté création, avec la même conséquence : on
+          //    engagerait un camp dont la composition contient un joueur qui vient de
+          //    quitter l'équipe, et cette fois dans un match qui DÉMARRE.
+          //    🔑 SEUL LE CAMP ACCEPTEUR EST REVÉRIFIÉ ICI, et ce n'est pas un oubli : la
+          //    composition du camp CRÉATEUR est tenue par la route de départ, qui annule ses
+          //    créneaux `pending` sous LA MÊME clé de verrou `team:<id>`. Les seuls autres
+          //    chemins qui retirent une ligne `team_members` (dissolution, suppression de
+          //    compte) refusent déjà sur `ENGAGING_STATUSES`. ⚠️ Assouplir l'un de ces trois
+          //    chemins rouvre le trou EN SILENCE — c'est ici qu'il faudrait alors revérifier
+          //    les deux camps.
+          if (side.sideTeamId) {
+            const gone = await lineupOffRoster(tx, side.sideTeamId, side.participantIds);
+            if (gone.length) return { raced: 'roster', gone } as const;
+          }
+
           // 2. Update CONDITIONNEL : seul un match encore `pending` bascule. Si deux
           //    équipes acceptent LE MÊME match, la 2e ne touche aucune ligne → 409.
           //    started_at = maintenant : historique de l'acceptation seulement.
@@ -1398,6 +1465,11 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               ? 'your team already has a match around that time'
               : 'you already have a match around that time',
           });
+        // BX-LEAVE — un joueur de MA composition a quitté l'équipe pendant l'acceptation.
+        if (accepted.raced === 'roster')
+          return reply
+            .code(400)
+            .send({ error: 'every selected player must be on the team', offRoster: accepted.gone });
 
         // Push WS APRÈS le commit — best-effort, ne peut pas faire échouer l'accept.
         pushNotifications(accepted.notifs);

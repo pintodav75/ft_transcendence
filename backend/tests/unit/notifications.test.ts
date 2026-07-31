@@ -79,7 +79,7 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
     expect(typeof parsed.scheduledAt).toBe('string')
   })
 
-  it('les 16 types de notification ont bien un schéma', () => {
+  it('les 17 types de notification ont bien un schéma', () => {
     const expectedTypes = [
       'match_accepted',
       'result_submitted',
@@ -104,6 +104,10 @@ describe('notificationPayloadSchemas — display-safe garanti à l\'écriture', 
       'team_invitation_received',
       'team_invitation_accepted',
       'team_invitation_declined',
+      // BX-LEAVE — le créneau `pending` annulé parce qu'un joueur ALIGNÉ a quitté (ou a été
+      // exclu de) l'équipe. Destinataires : le reste de la lineup + le capitaine, jamais
+      // l'acteur ni le partant.
+      'match_cancelled_member_left',
     ]
     expect(Object.keys(notificationPayloadSchemas).sort()).toEqual(expectedTypes.sort())
   })
