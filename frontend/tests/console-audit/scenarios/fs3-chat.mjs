@@ -106,9 +106,13 @@ export async function run({
   const callsBeforeOpening = historyCalls.length;
   // On visite aussi l'onglet Messages SANS conversation ouverte : c'est le cas qui aurait pu
   // déclencher une requête « au cas où ».
+  // ⚠️ La phrase a changé avec [FS-4] : cet onglet n'est plus « la conversation ouverte ou
+  // rien », c'est la LISTE des conversations. Le compte du run n'a jamais écrit à personne,
+  // sa liste est donc vide. Ce qui compte ici reste identique : zéro lecture d'HISTORIQUE
+  // tant qu'aucune conversation n'est ouverte — la liste, elle, a le droit de se charger.
   await messagesTab.click();
   const emptyState = await page
-    .getByText('No conversation open.')
+    .getByText('No conversations yet.')
     .waitFor({ timeout: 5000 })
     .then(() => true)
     .catch(() => false);

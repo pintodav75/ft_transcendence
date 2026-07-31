@@ -60,6 +60,13 @@
   --color-rank-silver: #c7d0d4;
   --color-rank-bronze: #bf7145;
 
+  /* Largeur du rail social (312 px). C'est un TOKEN et pas un `w-78` recopié parce que deux
+     éléments qui ne se voient pas doivent s'accorder dessus : le rail lui-même, et la bande
+     de fenêtres de conversation flottantes (`ChatWindowStack`), ancrée juste à sa gauche via
+     `calc(var(--spacing-social-rail) + …)`. Élargir le rail sans ce lien faisait passer les
+     fenêtres SOUS lui, en silence. */
+  --spacing-social-rail: 19.5rem;
+
   --radius-card: 8px;
   --radius-control: 6px;
   --shadow-card: 0 28px 90px rgba(0, 0, 0, 0.48), 0 0 60px rgba(52, 53, 121, 0.12);

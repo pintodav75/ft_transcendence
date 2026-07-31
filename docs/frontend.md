@@ -491,6 +491,35 @@ Validation finale après **second rebase, sur le `master` du 31/07 au soir** (au
 
 **Audit** : `fs3-chat.mjs`, **9 checks**. 🔑 **Le check central compte les occurrences, il ne constate pas une présence** — un message arrive par trois chemins, « il est affiché » serait vert même sur un doublon. ⚠️ **`C7` a été vu VERT PAR CONSTRUCTION et réécrit** : il rouvrait la conversation en croyant provoquer un rechargement, alors que les panneaux restent montés et que le cache répond. Il passe désormais par **coupure → reconnexion → rechargement**, seul moment où un message existe dans les deux sources à la fois. Détail → `frontend/tests/console-audit/README.md`.
 
+---
+
+## [FS-4] — liste des conversations et fenêtres multiples
+
+**Livré** : `components/social/ConversationList.tsx` (chargement / erreur+réessai / vide / remplie, présence depuis le magasin partagé, réordonnancement en direct), `components/social/ChatWindowStack.tsx` (la bande de fenêtres flottantes), `lib/messages.ts` enrichi (`useConversations`, `bumpConversation`, formats), et `SocialPanel` qui possède désormais **l'ensemble des conversations ouvertes** + les brouillons.
+
+🔑 **`ChatConversation.tsx` n'a pas été touché d'une ligne.** C'était la consigne, et FS-3 l'avait écrit pour ça (autonome, `h-full`). Le même composant sert la fenêtre flottante et le panneau mobile.
+
+**Le plafond de fenêtres est de l'arithmétique, pas un goût** : fenêtre 268 px + gouttière 12, bande ancrée à 340 px du bord droit (rail social 312 + padding 16 + gouttière 12), rail gauche 264 px. Place disponible = largeur − 620. Donne **1 fenêtre sous 1280, 2 à 1280, 3 à partir de 1600**, plafonné à 3. 🔑 **C'est ce plafond SEUL qui garantit qu'aucune fenêtre ne sort de l'écran** — il n'y a aucun recalage de position ; marge la plus serrée mesurée : 112 px à 1280.
+
+🚨 **Sous 1024 px : aucune fenêtre flottante, et la garde est un vrai `matchMedia`, pas un masquage CSS.** Un masquage laisserait les fenêtres **montées** sur téléphone — donc en train de recharger leur historique — ce qui est pire que le défaut évité. Motif : le panneau mobile est une modale faite main dont l'`Escape` vit sur `document`.
+
+**Défauts de review à ne pas rouvrir** :
+
+1. 🚨 **Un clic mort, atteignable par un simple `Ctrl +`.** Au-delà du plafond, une conversation reste **ouverte dans l'état** mais n'est plus **affichée**. La garde « déjà ouverte » renvoyait alors l'état inchangé : aucune fenêtre, aucun focus, aucune explication — le seul point d'entrée de l'onglet devenait muet. La garde teste désormais « ouverte **et visible** ».
+2. **Rétrécir démontait la fenêtre, donc tuait le brouillon** — le commentaire promettait pourtant que réélargir « ramenait tout ». Même défaut que celui corrigé en FS-3 pour le changement d'onglet, revenu par une autre porte. **Les brouillons sont maintenant hissés dans `SocialPanel`, une entrée par interlocuteur, et seule la croix en efface un.**
+3. **La veille « envoi orphelin » était unique pour tout le panneau** alors qu'il y a jusqu'à 3 fenêtres : un refus serveur pouvait être consommé deux fois (affiché par une fenêtre **et** annoncé par le panneau). Chaque conversation s'enregistre désormais tant qu'un envoi est en vol ; le panneau ne se saisit d'un refus que si aucune ne peut le revendiquer.
+
+**Décisions produit** :
+
+- **Ouvrir depuis « Friends » ne bascule pas sur l'onglet Messages** sur desktop : la fenêtre est hors des onglets, basculer ne ferait que retirer la liste d'amis à quelqu'un qui va probablement en ouvrir une seconde.
+- **Rouvrir une conversation visible ne la déplace pas** — elle prend le focus. La remonter ferait sauter les autres fenêtres latéralement à chaque clic.
+- **Heure absolue, pas « il y a 2 min »** : un relatif exige un timer, sur un rail monté sur toutes les pages.
+- **La ligne de conversation est un `<button>` entier**, donc pas de lien vers le profil dedans (pas de lien dans un lien) — le profil reste à un clic dans l'en-tête de la conversation.
+
+⚠️ **Le nombre `340` (position de la bande) était recopié**, et son commentaire portait déjà **deux chiffres faux**. Il est désormais dérivé du token `--spacing-social-rail` d'`index.css`, que `SocialRail` utilise aussi.
+
+**Audit** : `fs4-messages.mjs`, **8 checks**. 🚨 **`M5` a été vu FAUX VERT, puis rouge, puis vert** : sa première version reproduisait une **éviction** (qui retire l'entrée de l'état, donc l'app se comporte correctement) au lieu d'un **changement de largeur** (qui la garde en état sans l'afficher). Vérifié en **réintroduisant le défaut dans le code** — le check restait vert. Réécrit, il est rouge avec le défaut et vert sans, mesuré dans les deux sens. **C'est le 4ᵉ faux vert trouvé de cette façon sur ce projet.** → `frontend/tests/console-audit/README.md`.
+
 ## Détail par ticket — bloc déporté de `CLAUDE.md` (refacto du 31/07)
 
 > Ce paragraphe vivait sur **une seule ligne de 17,5 Ko** dans `CLAUDE.md` — à lui seul 20 % du fichier chargé à chaque session. Rapatrié ici verbatim.

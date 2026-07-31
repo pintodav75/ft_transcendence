@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useRealtimeStore } from '@/stores/realtime-store';
 
-import type { FormEvent, Ref, UIEvent } from 'react';
+import type { FormEvent, Ref, SetStateAction, UIEvent } from 'react';
 import type { ChatPartner, Message } from '@/lib/messages';
 
 /**
@@ -64,8 +64,32 @@ type ChatConversationProps = {
   /** Handle on the composer, so the panel can focus it when the conversation is (re)opened. */
   inputRef?: Ref<HTMLInputElement>;
   /**
+   * 🚨 THE DRAFT IS NOT HELD HERE, and that is deliberate. This component is UNMOUNTED whenever
+   * its window leaves the strip — narrowing the viewport, zooming in, dropping under 1024 px —
+   * and a draft held in local state would die with it, in the middle of a sentence. So the
+   * panel, which outlives every window, keeps one draft per partner and hands it back on the
+   * way in. Same fix [FS-3] applied for tab switches, at the one door it did not close.
+   */
+  draft: string;
+  /**
+   * Writes this conversation's draft in the panel. It takes the partner id BACK from us on
+   * purpose: the panel can then expose one callback with a stable identity for all three
+   * windows, and `resolvePendingSend` / `failPendingSend` — which the socket subscription below
+   * depends on — keep theirs. A per-partner closure rebuilt each render would re-subscribe to
+   * the socket on every keystroke.
+   */
+  onDraftChange: (partnerId: string, value: SetStateAction<string>) => void;
+  /**
+   * Tells the panel whether a send of ours is waiting for the server. The panel watches for
+   * refusals aimed at a conversation that was CLOSED mid-send, and the server's `error` frame
+   * carries no reference to what it refused — so the only way for the panel to know a refusal
+   * is not ours to speak is to know that a mounted conversation is still expecting one.
+   */
+  onSendInFlightChange?: (partnerId: string, inFlight: boolean) => void;
+  /**
    * `false` while the rail is showing another tab. The conversation is KEPT MOUNTED behind it
-   * (that is what saves the draft and the realtime buffer), so it has to know it is off screen:
+   * (that is what saves the realtime buffer; the draft is the panel's), so it has to know it is
+   * off screen:
    * it then announces nothing, and re-scrolls to the bottom when it comes back.
    */
   isVisible?: boolean;
@@ -96,8 +120,11 @@ export function ChatConversation({
   announce,
   onNavigate,
   inputRef,
+  draft,
+  onDraftChange,
   isVisible = true,
   onSendAbandoned,
+  onSendInFlightChange,
 }: ChatConversationProps) {
   const meId = useAuthStore((state) => state.user?.id);
   const connectionState = useRealtimeStore((state) => state.connectionState);
@@ -107,7 +134,6 @@ export function ChatConversation({
 
   /** Everything the socket delivered for THIS conversation while the component was mounted. */
   const [liveMessages, setLiveMessages] = useState<Message[]>([]);
-  const [draft, setDraft] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -146,6 +172,16 @@ export function ChatConversation({
   const offlineNoticeId = useId();
   const sendErrorId = useId();
   const backFrom = useBackFrom();
+
+  /**
+   * Local face of the panel's draft store — same signature as a `useState` setter, so every
+   * call site below reads exactly as it did when the state lived here. Stable as long as the
+   * panel's callback is, which is what keeps the socket subscription from being rebuilt.
+   */
+  const setDraft = useCallback(
+    (value: SetStateAction<string>) => onDraftChange(partner.id, value),
+    [onDraftChange, partner.id],
+  );
 
   /**
    * 🚨 A CONVERSATION BEHIND ANOTHER TAB SAYS NOTHING. It stays mounted there, so it keeps
@@ -199,7 +235,7 @@ export function ChatConversation({
       setSendError(null);
       setDraft((current) => (current === acknowledgedContent ? '' : current));
     },
-    [clearSendTimer],
+    [clearSendTimer, setDraft],
   );
 
   /**
@@ -219,7 +255,7 @@ export function ChatConversation({
       setSendError(message);
       setDraft((current) => (current.length === 0 ? refusedContent : current));
     },
-    [clearSendTimer],
+    [clearSendTimer, setDraft],
   );
 
   // ------------------------------------------------------------- live events
@@ -306,6 +342,26 @@ export function ChatConversation({
     },
     [],
   );
+
+  /**
+   * 🚨 AND WHILE WE ARE STILL HERE, THE REFUSAL IS OURS. The panel keeps watching for the
+   * answer to a send whose window was closed, but a refusal can only ever be about ONE send —
+   * so as long as this conversation is mounted with one in flight, it is the one that will
+   * display it, and the panel must stay quiet or the user gets it twice: once in red under the
+   * composer, once more read out in the rail's live region.
+   *
+   * `isSending` mirrors `pendingSendRef` exactly (they are set and cleared together), and it is
+   * state rather than a ref, so it is what can drive an effect. The cleanup covers BOTH the
+   * flip back to idle and the unmount — after which the panel is on its own again, which is
+   * precisely what `onSendAbandoned` above just told it.
+   */
+  useEffect(() => {
+    if (!onSendInFlightChange) return;
+
+    onSendInFlightChange(partner.id, isSending);
+
+    return () => onSendInFlightChange(partner.id, false);
+  }, [isSending, onSendInFlightChange, partner.id]);
 
   const messages = mergeMessages(data?.messages ?? [], liveMessages);
   const lastMessageId = messages.at(-1)?.id;

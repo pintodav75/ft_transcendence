@@ -4,12 +4,14 @@ import { Link } from '@tanstack/react-router'
 
 import { AddFriendSlot } from '@/components/social/AddFriendSlot'
 import { ChatSlot } from '@/components/social/ChatSlot'
+import { ChatWindowStack, type ChatFocusRequest } from '@/components/social/ChatWindowStack'
 import { FriendsSlot } from '@/components/social/FriendsSlot'
 import { NotificationsSlot } from '@/components/social/NotificationsSlot'
 import { Avatar } from '@/components/ui/avatar'
 import { IconButton } from '@/components/ui/icon-button'
 import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { panelId, tabId } from '@/components/ui/tab-ids'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { sendErrorMessage } from '@/lib/messages'
 import { realtimeClient } from '@/lib/realtime-client'
 import { useAnnouncement } from '@/lib/use-announcement'
@@ -20,6 +22,7 @@ import {
   type RealtimeConnectionState,
 } from '@/stores/realtime-store'
 
+import type { SetStateAction } from 'react'
 import type { ChatPartner } from '@/lib/messages'
 
 type SocialTabId = 'friends' | 'chat' | 'addFriend'
@@ -58,6 +61,35 @@ const CONNECTION_DETAILS: Record<
  */
 const ABANDONED_SEND_WATCH_MS = 10_000
 
+/**
+ * 🔑 HOW MANY CONVERSATIONS CAN BE OPEN AT ONCE, and why these numbers.
+ *
+ * It is not a taste call, it is what fits. A window is 268 px wide with a 12 px gap between
+ * two, the strip starts 340 px from the right edge (312 px social rail + 16 px page padding +
+ * 12 px gutter) and the left rail — 264 px wide behind the same 16 px of padding — ends 280 px
+ * from the left edge, so the room left for windows is `viewport − 620` px:
+ *
+ *   1024 px →  404 px of room → 1 window  (2 would need 2×268 + 12 = 548)
+ *   1280 px →  660 px         → 2 windows (3 would need 3×268 + 2×12 = 828)
+ *   1600 px →  980 px         → 3 windows
+ *
+ * The tightest of the three is 1280 px, and it still leaves 112 px of daylight between the
+ * leftmost window and the left rail.
+ *
+ * Capped at 3 even on a very wide screen: past that they stop being windows you read and
+ * become a wall you close. Under 1024 px the count is 1 and the conversation is not a window
+ * at all — it takes over the panel (see `ChatWindowStack` for why).
+ *
+ * ⚠️ These breakpoints are the ONLY thing keeping a window from running off the left edge, so
+ * they must be read back to `ChatWindowStack`'s geometry if either one changes.
+ *
+ * Written out one by one rather than mapped over a table: `useMediaQuery` is a hook, and a hook
+ * called from inside a `.map()` is exactly what the rules of hooks forbid.
+ */
+const FLOATING_QUERY = '(min-width: 1024px)'
+const TWO_WINDOWS_QUERY = '(min-width: 1280px)'
+const THREE_WINDOWS_QUERY = '(min-width: 1600px)'
+
 type SocialPanelProps = {
   onClose?: () => void
 }
@@ -66,33 +98,68 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
   const [activeTab, setActiveTab] = useState<SocialTabId>('friends')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   /**
-   * The ONE open conversation ([FS-3]; the list and the several windows belong to [FS-4]).
+   * THE open conversations, oldest first — one source of truth for both layouts.
    *
-   * It is held HERE and not inside `ChatSlot` because the friends list is what opens it, and
-   * that list lives in another tab. Re-opening the same friend re-uses the very same
-   * conversation instead of stacking a duplicate.
+   * It is held HERE and not inside `ChatSlot` because two different tabs open a conversation
+   * (the friends list and the Messages list) and, on desktop, the windows are rendered outside
+   * the tab panels entirely. Everything that follows from that lives in `openConversation`
+   * below: no duplicate, a deterministic order, and an eviction rule.
    *
    * ⚠️ This alone did NOT make a conversation survive a tab switch — the slot was unmounted
    * under it, taking the draft and the realtime buffer with it. What saves those is the panel
-   * keeping all three tabs mounted (see the panels below); this state is only the "which one".
+   * keeping all three tabs mounted (see the panels below); this state is only the "which ones".
    */
-  const [conversation, setConversation] = useState<ChatPartner | null>(null)
+  const [openConversations, setOpenConversations] = useState<ChatPartner[]>([])
   /**
-   * Bumped on every EXPLICIT open request, and nothing else. Opening from the friends list
-   * destroys the button that had focus (the row unmounts with the tab), so the focus has to be
-   * moved by hand — and it must move ONLY then: keying this on the conversation itself would
-   * steal the focus from the tab strip every time someone simply comes back to this tab.
+   * WHAT IS BEING TYPED, per partner — held here rather than in the conversation itself.
+   *
+   * 🚨 A WINDOW THAT LEAVES THE STRIP IS UNMOUNTED, NOT HIDDEN. Narrowing the browser, zooming
+   * in one notch, or dropping under 1024 px lowers `maxWindows`, and React destroys whatever no
+   * longer renders — with a draft held in the window's own state, a half-typed sentence would
+   * simply vanish. This is the same fix [FS-3] made for tab switches, applied to the other door
+   * into the same failure.
+   *
+   * Cleared one entry at a time by `forgetDraft` below — see there for what does and does not
+   * count as "done with this conversation".
    */
-  const [openRequests, setOpenRequests] = useState(0)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  /**
+   * WHICH conversation should take the focus, and a counter so asking twice fires twice.
+   * Set on every EXPLICIT open, and when closing a window hands the focus to the next one —
+   * never on a re-render, a tab switch or a resize, all of which would steal the caret from
+   * someone typing somewhere else entirely.
+   */
+  const [focusRequest, setFocusRequest] = useState<ChatFocusRequest | null>(null)
+  /** Bumped when the LAST window is closed: the focus has to land on something that remains. */
+  const [tabFocusRequests, setTabFocusRequests] = useState(0)
   const notificationsRef = useRef<HTMLDivElement>(null)
-  const composerRef = useRef<HTMLInputElement>(null)
   const tabsId = useId()
+  const isFloating = useMediaQuery(FLOATING_QUERY)
+  const fitsTwoWindows = useMediaQuery(TWO_WINDOWS_QUERY)
+  const fitsThreeWindows = useMediaQuery(THREE_WINDOWS_QUERY)
+  const maxWindows = !isFloating ? 1 : fitsThreeWindows ? 3 : fitsTwoWindows ? 2 : 1
   const user = useAuthStore((state) => state.user)
   const connectionState = useRealtimeStore((state) => state.connectionState)
   // Destructured: the effect below depends on `announce` alone, and `useAnnouncement` returns
   // a fresh object every render — depending on that object would re-subscribe on every render.
   const { message: announcement, announce } = useAnnouncement()
   const connectionDetails = CONNECTION_DETAILS[connectionState]
+  /**
+   * Inline mode (under 1024 px) shows exactly ONE conversation: the most recently opened, which
+   * is also the only one `openConversation` can have left there, since `maxWindows` is 1.
+   *
+   * ⚠️ It can hold more than one after a resize DOWN from a wide screen, and that is deliberate
+   * rather than tidied away: the others are still open, they are simply not all on screen at
+   * once. Closing this one reveals the next, and widening brings the others back on screen.
+   *
+   * 🔑 WHAT "COMES BACK" IS NOT EVERYTHING, and it is worth being exact. A window that left the
+   * strip was UNMOUNTED, so what returns is the conversation and the draft (held above, one per
+   * partner) — while its history is re-fetched from the server on the way back, and a send that
+   * was still in flight is abandoned, its refusal then reported by the watch further down. The
+   * history costs one request and loses nothing; the send is the one thing that is really cut
+   * short, which is exactly why it is announced rather than swallowed.
+   */
+  const inlineConversation = openConversations.at(-1)
   const displayName = user?.displayName || user?.pseudo || 'Player'
   const fallback = (user?.pseudo ?? '?').slice(0, 2).toUpperCase()
   useEffect(() => {
@@ -119,19 +186,66 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
     }
   }, [notificationsOpen])
 
-  // Runs after the Messages tab has rendered its composer, which is why it is an effect and
-  // not a line inside `openConversation`: the field does not exist yet when the click happens.
+  /**
+   * Where the focus goes when the LAST conversation is closed. Its window is gone, so there is
+   * no composer left to hand it to, and the platform would drop it on `<body>` — a keyboard
+   * user back at the top of the page.
+   *
+   * The Messages TAB is the landing point: it is the one control that is always there, it is
+   * where these windows are opened and listed, and it names itself on arrival. It is focused
+   * WITHOUT being selected — closing a window is not a request to change tab.
+   */
   useEffect(() => {
-    if (openRequests === 0) return
+    if (tabFocusRequests === 0) return
 
-    composerRef.current?.focus()
-  }, [openRequests])
+    document.getElementById(tabId(tabsId, 'chat'))?.focus()
+  }, [tabFocusRequests, tabsId])
 
   /**
-   * 🚨 A SEND CAN OUTLIVE ITS CONVERSATION. Closing the window (or opening another friend's)
-   * while a message is still in flight destroys the only listener there was, and the server's
-   * refusal — "you are not friends any more", "you are blocked" — then arrives with nobody to
-   * show it: the text is gone and the user is never told why.
+   * Writes one conversation's draft. Given to every window, hence the partner id as first
+   * argument: ONE callback with a stable identity serves all three, where a closure built per
+   * partner would be a new function on every render — and the conversation depends on this one
+   * inside the effect that subscribes to the socket.
+   */
+  const handleDraftChange = useCallback(
+    (partnerId: string, value: SetStateAction<string>) => {
+      setDrafts((current) => {
+        const previous = current[partnerId] ?? ''
+        const next = typeof value === 'function' ? value(previous) : value
+
+        // Same text = same object: the composers of the other windows must not re-render
+        // because one of them re-applied the value it already had.
+        return next === previous ? current : { ...current, [partnerId]: next }
+      })
+    },
+    [],
+  )
+
+  /**
+   * 🔑 WHAT CLEARS A DRAFT: the user closing the conversation, and nothing else.
+   *
+   * Everything else that makes a window disappear is the app's own doing — narrowing the
+   * viewport, zooming, or the oldest window giving way when a fourth is opened — and taking
+   * somebody's half-typed sentence away as a side effect of any of those is exactly the bug
+   * this store exists to kill. The cross is the one gesture that means "I am done with this
+   * conversation", so it is the one that starts the next visit on a blank composer.
+   *
+   * The store therefore holds at most one short string per friend addressed in this session,
+   * which is nothing, and never a draft for a conversation the user chose to end.
+   */
+  const forgetDraft = useCallback((partnerId: string) => {
+    setDrafts((current) => {
+      if (!(partnerId in current)) return current
+
+      return Object.fromEntries(Object.entries(current).filter(([id]) => id !== partnerId))
+    })
+  }, [])
+
+  /**
+   * 🚨 A SEND CAN OUTLIVE ITS CONVERSATION. Closing the window (or letting it drop out of the
+   * strip on a resize) while a message is still in flight destroys the only listener there was,
+   * and the server's refusal — "you are not friends any more", "you are blocked" — then arrives
+   * with nobody to show it: the text is gone and the user is never told why.
    *
    * This panel survives all of that, so the conversation hands it the watch on the way out
    * (`onSendAbandoned`) and the refusal is spoken in the rail's own live region.
@@ -142,14 +256,39 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
     abandonedSendWatchRef.current = Date.now() + ABANDONED_SEND_WATCH_MS
   }, [])
 
+  /**
+   * 🚨 WHO ELSE COULD THIS REFUSAL BE FOR. The `error` frame names nothing — not the message,
+   * not the friend — so "there is an orphan waiting" is NOT enough to claim it: with up to
+   * three windows on screen, the refusal of a send made from a window that is still open would
+   * be shown there in red AND read out here, twice for one failure, while the real orphan went
+   * on waiting.
+   *
+   * So the panel only speaks for refusals NOBODY MOUNTED can account for. Each conversation
+   * registers itself here while it has a send in flight; as long as that set is not empty, one
+   * of them will display this refusal in place and the panel keeps quiet.
+   *
+   * A `Set` of ids rather than a counter: mount and unmount are not guaranteed to pair up once
+   * (React 19 runs effects twice in development), and adding an id twice is harmless where
+   * incrementing twice would leave the panel mute for good.
+   */
+  const sendsInFlightRef = useRef(new Set<string>())
+
+  const handleSendInFlightChange = useCallback((partnerId: string, inFlight: boolean) => {
+    if (inFlight) sendsInFlightRef.current.add(partnerId)
+    else sendsInFlightRef.current.delete(partnerId)
+  }, [])
+
   useEffect(
     () =>
       realtimeClient.subscribe((event) => {
         if (event.type !== 'error') return
 
+        // A mounted conversation is waiting for an answer: it owns this one and displays it in
+        // place. The orphan's watch stays armed — a later refusal may still be its own.
+        if (sendsInFlightRef.current.size > 0) return
+
         const watchUntil = abandonedSendWatchRef.current
-        // No orphan, or too late to be its answer: a mounted conversation owns this refusal and
-        // displays it in place, and saying it here as well would state it twice.
+        // No orphan, or too late to be its answer.
         if (watchUntil === null || Date.now() > watchUntil) return
 
         abandonedSendWatchRef.current = null
@@ -163,18 +302,74 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
     setNotificationsOpen(false)
   }
 
+  function requestFocus(partnerId: string) {
+    setFocusRequest((current) => ({ id: partnerId, seq: (current?.seq ?? 0) + 1 }))
+  }
+
   /**
-   * Opens (or brings forward) the conversation with one friend. Called from the friends list.
+   * Opens — or brings forward — the conversation with one friend. Called by BOTH lists, which
+   * is the whole reason it lives up here.
    *
-   * Re-clicking the SAME friend keeps the same conversation — `ChatSlot` keys the component on
-   * the partner id — and only brings the tab forward with the focus in the composer. Clicking
-   * another friend replaces it.
+   * 🚨 NEVER TWICE THE SAME PERSON — but "already open" is not the test, "already ON SCREEN"
+   * is. A conversation can be open and out of sight: `maxWindows` drops when the viewport
+   * narrows, and a browser zoom is enough (three windows at 1600 px, one Ctrl + and the
+   * viewport is 1280 logical px, so only the last two are rendered). Clicking the third in the
+   * Messages tab used to do strictly nothing — the guard said "already open", the state came
+   * back unchanged, the focus was aimed at a window that is not rendered, and in floating mode
+   * the tab does not even change. The only way in became silently inert.
+   *
+   * So: on screen already → left exactly where it is, it only takes the focus. Moving a VISIBLE
+   * window to the front would make the others jump sideways every time somebody clicks a name,
+   * and that order has to be stable to be usable. Open but off screen → back to the end of the
+   * strip, which is the only thing that can actually show it.
+   *
+   * 🔑 THE OLDEST GIVES WAY. Past `maxWindows` the strip would run off the left edge of the
+   * screen, so the least recently opened conversation closes. Losing the oldest is the least
+   * surprising of the available answers: it is the one the user stopped looking at first, and
+   * it is one click away in the list, which now has it at the top.
    */
   function openConversation(partner: ChatPartner) {
-    setConversation(partner)
-    setOpenRequests((count) => count + 1)
-    setActiveTab('chat')
+    setOpenConversations((current) =>
+      current.slice(-maxWindows).some((visible) => visible.id === partner.id)
+        ? current
+        : [...current.filter((open) => open.id !== partner.id), partner].slice(-maxWindows),
+    )
+    requestFocus(partner.id)
+    // Under 1024 px the conversation IS this tab's content, so the tab has to come forward.
+    // On desktop it is a floating window: switching tab would only take the friends list away
+    // from someone who is probably about to open a second conversation.
+    if (!isFloating) setActiveTab('chat')
     setNotificationsOpen(false)
+  }
+
+  /**
+   * Closes ONE conversation, independently of the others, and hands the focus over rather than
+   * letting the platform drop it on `<body>` when the close button unmounts.
+   */
+  function closeConversation(partnerId: string) {
+    // Functional, like `openConversation`: two closes landing in the same batch would otherwise
+    // both start from the list this render captured, and the second would resurrect the first's
+    // window. The focus below is computed from that same captured list on purpose — it is an
+    // intent about what the user is looking at right now, not a piece of state.
+    setOpenConversations((current) => current.filter((open) => open.id !== partnerId))
+    forgetDraft(partnerId)
+
+    // Something is still on screen: the focus goes to it — the newest remaining window on
+    // desktop, the conversation that resurfaces in the panel inline.
+    const next = openConversations
+      .filter((open) => open.id !== partnerId)
+      .slice(-maxWindows)
+      .at(-1)
+    if (next) {
+      requestFocus(next.id)
+      return
+    }
+
+    // Nothing left. Inline (mobile): the list comes back in place and `ChatSlot` parks the
+    // focus on its heading — the same landing point it has used since [FS-3].
+    if (!isFloating) return
+
+    setTabFocusRequests((count) => count + 1)
   }
 
   function toggleNotifications() {
@@ -332,7 +527,10 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
        *
        * The two other tabs stay CONDITIONAL inside their own panel: mounting them would fire
        * their requests on every authenticated page, since this rail is on all of them. Chat
-       * asks for nothing until a conversation is actually opened.
+       * gets the same discipline one level down instead of here — `ChatSlot` is always
+       * mounted (that is the point), but the conversation LIST inside it is mounted only
+       * while the tab is visible, and a conversation's history only once one is opened. So
+       * this panel still asks the server for nothing until the user comes to it.
        *
        * ⚠️ A hidden panel is `display: none`, so its content is out of the accessibility tree
        * AND has no layout — `ChatConversation` is told with `isVisible` so it stays quiet in
@@ -353,17 +551,49 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
 
       <div {...panelProps('chat')}>
         <ChatSlot
-          partner={conversation}
-          onClose={() => setConversation(null)}
+          // 🔑 THE VIEWPORT DECIDES WHERE A CONVERSATION IS SHOWN, not a second piece of state:
+          // floating mode hands this tab nothing but the list, inline mode hands it the most
+          // recently opened conversation. `openConversations` stays the one model of "what is
+          // open" in both — so a window that is out of sight at a narrow width is still open,
+          // and comes back as the screen widens.
+          partner={isFloating ? null : (inlineConversation ?? null)}
+          onOpen={openConversation}
+          onClose={() => {
+            if (inlineConversation) closeConversation(inlineConversation.id)
+          }}
           announce={announce}
           onNavigate={onClose}
-          inputRef={composerRef}
           isVisible={activeTab === 'chat'}
+          focusToken={
+            !isFloating && inlineConversation && focusRequest?.id === inlineConversation.id
+              ? focusRequest.seq
+              : 0
+          }
+          draft={inlineConversation ? (drafts[inlineConversation.id] ?? '') : ''}
+          onDraftChange={handleDraftChange}
           onSendAbandoned={handleSendAbandoned}
+          onSendInFlightChange={handleSendInFlightChange}
         />
       </div>
 
       <div {...panelProps('addFriend')}>{activeTab === 'addFriend' && <AddFriendSlot />}</div>
+
+      {/* OUTSIDE the tab panels on purpose: a floating window belongs to the screen, not to a
+          tab, so it stays readable while the user is on "Friends" or "Add friend" — and it is
+          never inside a `hidden` panel, which is what would silently give it a zero-height
+          layout. Rendered only in floating mode; see `ChatWindowStack` for why not CSS. */}
+      {isFloating && (
+        <ChatWindowStack
+          conversations={openConversations.slice(-maxWindows)}
+          onClose={closeConversation}
+          announce={announce}
+          focusRequest={focusRequest}
+          drafts={drafts}
+          onDraftChange={handleDraftChange}
+          onSendAbandoned={handleSendAbandoned}
+          onSendInFlightChange={handleSendInFlightChange}
+        />
+      )}
     </div>
   )
 }
