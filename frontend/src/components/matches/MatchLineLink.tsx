@@ -4,8 +4,20 @@ import { cn } from '@/lib/utils';
 
 import type { ReactNode } from 'react';
 
+/**
+ * Where the row leads.
+ *
+ * 🔑 A DISCRIMINATED UNION, NOT AN OPTIONAL `disputeId`. The rule — "a row in dispute opens its
+ * dispute file, everything else opens the match sheet" — is a PRODUCT decision, and it belongs at
+ * the call site where the payload is read, not hidden inside a shared component that would then
+ * quietly decide for every caller. [F-DISPUTE].
+ */
+export type MatchLineTarget =
+  | { kind: 'match'; matchId: string }
+  | { kind: 'dispute'; disputeId: string };
+
 type MatchLineLinkProps = {
-  matchId: string;
+  target: MatchLineTarget;
   /**
    * Coloured left edge, from `matchAccentClass(tone)` — so a line reads the same wherever it is
    * shown. `undefined` leaves the edge neutral.
@@ -21,7 +33,7 @@ type MatchLineLinkProps = {
 };
 
 /**
- * One match, as a single full-width link to its sheet.
+ * One match, as a single full-width link — to its sheet, or to its dispute file.
  *
  * Extracted at its SECOND use (repo rule): written inside `ActionRequired` for the « on the
  * clock » cards of `/history`, and needed verbatim by `/home` for the « Next up » lines. The
@@ -34,18 +46,43 @@ type MatchLineLinkProps = {
  * line whose two halves lead to different places, and nesting an `<a>` in an `<a>` is invalid
  * HTML that browsers repair by silently splitting the DOM. Callers that need a second
  * destination (an opponent's team page, say) put it OUTSIDE this component — that is exactly
- * what [FX-ROW] had to do for the history table.
+ * what [FX-ROW] had to do for the history table. It is also why [F-DISPUTE] generalised the
+ * DESTINATION rather than nesting a "see the dispute" link inside the card: the way back to the
+ * match sheet is carried by the header of the dispute file itself.
+ *
+ * ⚠️ THE TWO BRANCHES BELOW RENDER THE SAME ELEMENT WITH THE SAME CLASS STRING. The « Next up »
+ * cards of `/home` must be byte-identical to what they were before the union existed, and a check
+ * guards it (`D18`) — the whole point of routing the difference through `to`/`params` and nothing
+ * else.
  */
-export function MatchLineLink({ matchId, accentClass, ariaLabel, children }: MatchLineLinkProps) {
+export function MatchLineLink({ target, accentClass, ariaLabel, children }: MatchLineLinkProps) {
+  const className = cn(
+    'focus-ring flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-control border border-l-2 border-border-subtle bg-surface-card-strong/60 px-4 py-3 transition hover:bg-surface-card',
+    accentClass,
+  );
+
+  // Two `<Link>`s rather than one with a computed `to`: TanStack ties `params` to the literal
+  // route path, so a union there is not type-checkable — and losing that check is exactly how a
+  // route rename ends up producing a link to nowhere at runtime.
+  if (target.kind === 'dispute') {
+    return (
+      <Link
+        to="/disputes/$disputeId"
+        params={{ disputeId: target.disputeId }}
+        aria-label={ariaLabel}
+        className={className}
+      >
+        {children}
+      </Link>
+    );
+  }
+
   return (
     <Link
       to="/matches/$matchId"
-      params={{ matchId }}
+      params={{ matchId: target.matchId }}
       aria-label={ariaLabel}
-      className={cn(
-        'focus-ring flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-control border border-l-2 border-border-subtle bg-surface-card-strong/60 px-4 py-3 transition hover:bg-surface-card',
-        accentClass,
-      )}
+      className={className}
     >
       {children}
     </Link>

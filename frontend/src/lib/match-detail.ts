@@ -47,6 +47,29 @@ export function useMatch(matchId: string, enabled: boolean) {
 // ---------------------------------------------------------------- sides
 
 /**
+ * The strict minimum needed to NAME a camp, described structurally rather than by one API
+ * type — same discipline as `MatchStatusSource` in `components/matches/match-status.ts`.
+ *
+ * ⚠️ TWO SEPARATE TYPES, not one that carries every field. `sideName` never reads a logo and
+ * `sideAvatarUrl` never reads a pseudo: a type must promise no more than the function uses, or
+ * a payload that legitimately lacks the extra field becomes unassignable for nothing.
+ *
+ * 🔑 WIDENED BY [F-DISPUTE], and that is the whole point: `GET /disputes/{id}` serves a side
+ * that is a strict SUBSET of `GET /matches/{id}`'s (no score, no Elo, no `submittedAt`), so the
+ * dispute file reads THESE functions instead of restating the "no team ≠ 1v1" rule — the rule
+ * that has already been got wrong twice (FT-4A, F-SOLO). Nothing here changed behaviour.
+ */
+export type NamedSide = {
+  team: { name: string } | null;
+  players: { pseudo: string; displayName: string | null }[];
+};
+
+export type PicturedSide = {
+  team: { logoUrl: string | null } | null;
+  players: { avatarUrl: string | null }[];
+};
+
+/**
  * Is this the 1v1 shape — the one where the PLAYER is the camp, so the sheet swaps the team
  * block for his avatar and pseudo?
  *
@@ -58,13 +81,18 @@ export function useMatch(matchId: string, enabled: boolean) {
  * linked to his profile, and DROPPED the five-player line-up — on the page whose whole point is
  * to show it. `format` is a closed enum in `openapi.yaml`, so the codegen hands us a literal
  * union: it is a contract, not a label.
+ *
+ * ⚠️ The parameter is STRUCTURAL since [F-DISPUTE] (`GET /disputes/{id}` serves its own `match`
+ * block, deliberately, because `GET /matches/{id}` answers 403 to an admin on a `disputed`
+ * match). `format` stays typed as `string` here on purpose: both payloads narrow it to the same
+ * closed union, and demanding that union would buy nothing this comparison does not already do.
  */
-export function isSoloMatch(match: MatchSheet) {
+export function isSoloMatch(match: { ladder: { format: string } }) {
   return match.ladder.format === '1v1';
 }
 
 /** Display name of a side: the team's name, the lone player's in 1v1, else a dissolved team. */
-export function sideName(side: MatchSide, solo: boolean) {
+export function sideName(side: NamedSide, solo: boolean) {
   if (side.team) return side.team.name;
   // Not solo and no team = the team was dissolved after the match. Naming the camp after a
   // player would claim he played alone; he did not, and his team-mates are right below.
@@ -76,13 +104,13 @@ export function sideName(side: MatchSide, solo: boolean) {
 }
 
 /** Team logo, or the lone player's avatar in 1v1. `undefined` when there is none. */
-export function sideAvatarUrl(side: MatchSide, solo: boolean) {
+export function sideAvatarUrl(side: PicturedSide, solo: boolean) {
   if (side.team) return side.team.logoUrl ?? undefined;
   return solo ? (side.players[0]?.avatarUrl ?? undefined) : undefined;
 }
 
 /** Two-letter fallback shown by `Avatar` when no image is available. */
-export function sideInitials(side: MatchSide, solo: boolean) {
+export function sideInitials(side: NamedSide, solo: boolean) {
   return sideName(side, solo).slice(0, 2).toUpperCase();
 }
 

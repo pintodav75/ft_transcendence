@@ -75,7 +75,13 @@ export function UpcomingMatches({ rows, ladderOf, nowMs }: UpcomingMatchesProps)
                     date on the left, countdown pushed right. The first version had the countdown
                     on the LEFT here and on the RIGHT on the card, so the eye zigzagged down the
                     section. Found by looking at the page, not by a check. */}
-                <MatchLineLink matchId={row.match.id} accentClass={matchAccentClass(status.tone)}>
+                {/* ⚠️ ALWAYS the match sheet here. This section lists what is COMING UP
+                    (`pending`/`in_progress`), never a match in dispute — those live one section
+                    below, in `ActionRequired`, which is where [F-DISPUTE] routes to a file. */}
+                <MatchLineLink
+                  target={{ kind: 'match', matchId: row.match.id }}
+                  accentClass={matchAccentClass(status.tone)}
+                >
                   {/* 🚨 THE STATUS BELONGS ON EVERY LINE, not just on the card. Without it, an
                       accepted match and an open slot were told apart only by the presence of an
                       opponent and the absence of a withdrawal note — far too implicit, and on a
@@ -136,7 +142,7 @@ function FeaturedMatch({
 
   return (
     <MatchLineLink
-      matchId={row.match.id}
+      target={{ kind: 'match', matchId: row.match.id }}
       accentClass={matchAccentClass(status.tone)}
       // Fifty links called "Counter-Strike 2 5v5" tell a screen-reader user nothing about which
       // one he is on, and this one is the page's headline: it names what it is.

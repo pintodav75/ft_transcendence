@@ -654,6 +654,128 @@ exactement la situation que le check veut éprouver.
 runner l'annule seul avant `DELETE /users/me`. Contrairement à `history` ou `match-result`, ce
 scénario ne produit aucun match **engageant**, donc rien à forcer en SQL.
 
+## `dispute` (F-DISPUTE) — et le check qui était vert par construction
+
+`scenarios/dispute.mjs` audite `/disputes/$disputeId` : id malformé (écran d'erreur, **zéro
+requête** + témoin positif), uuid inconnu (404 déclaré par `expectHttp`), **non-participant**
+(403 déclaré), une dispute **résolue par un admin** en lecture seule (verdict **nommé**, jamais
+l'enum brut ; note d'arbitre, puis son repli quand `resolutionNotes` est `null` ; **zéro
+contrôle**), une dispute **close par le job** (aucune attribution à un arbitre, aucune ligne de
+log servie), le dossier
+**ouvert** (pastille, les deux déclarations contradictoires, échéance des 24 h, fil **vide
+lisible**), la paire **capitaine / non-capitaine aligné**, les deux refus **clients** (type non
+supporté, > 5 Mo) **sans aucune requête**, un dépôt réel **image** puis **PDF**, les portes
+d'entrée (fiche de match, `ActionRequired` de `/history`), le **non-changement de « Next up »**,
+375 px, et l'**échéance de 24 h qui retire le formulaire toute seule**. **26 checks.**
+
+### 🚨 `D6b` garde le SEUL état résolu que le produit sache produire
+
+**[F-ADMIN] n'existe pas**, donc `POST /disputes/{id}/resolve` n'est appelable par aucun écran :
+le **timeout du job B7 est aujourd'hui le seul chemin vers `resolved`**, et la dispute de démo
+l'emprunte toute seule 24 h après un `seed:dev`. Or le job écrit les **mêmes colonnes** qu'un
+arbitre (`status`, `resolution`, `resolvedAt`) plus une `resolutionNotes` qui est une **ligne de
+log interne en français**. La page annonçait donc « Settled by an admin », « the admin could not
+separate the two camps », et servait cette ligne sous le libellé « Admin's note ».
+
+La 1ʳᵉ version du scénario **ne pouvait pas le voir** : elle forgeait la résolution avec sa propre
+note anglaise et sans `resolved_by_user_id`, donc `D4`/`D6` étaient verts sur un état que le
+produit ne fabrique jamais. `D6b` forge l'état **exactement comme `timeoutDisputes()` l'écrit** et
+exige que le bloc de verdict n'attribue rien à un admin, que le bloc « Admin's note » **n'existe
+pas**, et que la chaîne française n'apparaisse nulle part. ⚠️ **Il vise le bloc de verdict, pas
+`<main>` entier** : le pied de page dit légitimement « Only an admin can settle a dispute », donc
+un balayage global du mot « admin » rougirait sur une copie irréprochable.
+
+🔑 Côté front la distinction passe par **`settledByTimeout()`**, et son test est
+`resolution === 'cancelled' && settledBy !== 'admin'` — **pas** `settledBy !== 'admin'` seul : le
+job n'écrit jamais autre chose que `cancelled`, donc un **vainqueur** désigné vient toujours d'un
+humain, y compris quand `settledBy` dit `timeout` parce que cet admin a depuis supprimé son compte
+(`resolved_by_user_id` est en `set null`).
+
+🔑 **`D23` est le dernier chemin vers un 4xx offert par un bouton, et il n'a besoin d'aucune
+course** : le job B7 annule la dispute 24 h après son ouverture, un onglet resté ouvert traverse
+l'échéance avec un `status: 'open'` **périmé en cache**, et le clic répond **409**. C'est
+`Math.max(useSlotClock(), dataUpdatedAt)` qui le ferme — `dataUpdatedAt` seul en serait incapable
+(c'est l'instant où le serveur a appliqué la même règle, il ne peut pas contredire sa propre
+réponse). Le check **pilote l'horloge du CLIENT** (`clock.install()` + `setSystemTime(+25 h)` +
+`runFor(31 s)`, un tick de `useSlotClock`), donc le serveur ne voit rien et la donnée de démo n'est
+pas touchée. ⚠️ **Reculer `created_at` en SQL aurait été le mauvais réflexe** : le job (`TICK_MS`
+= 60 s) aurait annulé la dispute semée en moins d'une minute — donc cassé `match-detail` **et**
+rendu le check flaky. ⚠️ **Il est en TOUTE DERNIÈRE phase à dessein** : une horloge factice ne se
+désinstalle pas, et `resume()` repartirait de « +25 h ». Sous `try/catch` (idiome `MM16`) : une
+panne du pilotage rougit CE check, elle ne sort pas le harnais en exit 2. **Vu rouge** en retirant
+la garde `window_closed`.
+
+⚠️ **Il EXIGE la base semée** (`docker compose exec backend npm run seed:dev`). La dispute de démo
+cs2 5v5 est le seul état qui donne un camp de **5 joueurs**, donc un **non-capitaine aligné** —
+qu'un ladder 1v1 ne peut pas produire par construction. Sans seed le scénario **lève** (exit 2),
+plutôt que de sortir des checks verts par accident.
+
+⚠️ **Et le seed se périme tout seul, ici plus vite qu'ailleurs** : le job B7 annule la dispute
+**24 h après son ouverture**, semée à `kick-off − 8 h + 82 min`, soit ~**17 h** de marge. Reséminer
+avant toute campagne.
+
+### Deux usages sanctionnés de `sql()`, tous deux réversibles
+
+1. **Le mot de passe de `dave`.** Le seed ne donne un hash qu'à `alice`/`bob`/`carol` et le
+   **retire activement** aux figurants : le seul non-capitaine aligné de la dispute est donc
+   **inconnectable**. On lui recopie le hash d'alice, remis à `NULL` au teardown **même si un check
+   échoue**. (Vérifié dans la fixture : `dave` est bien aligné côté Team Alpha et capitaine
+   **d'aucun** des deux camps de ce match.)
+2. **La résolution.** `POST /disputes/:id/resolve` est **admin only** et il n'existe **aucun compte
+   admin dans les fixtures** : aucune séquence HTTP ne mène à `resolved`. Le scénario fabrique donc
+   sa **propre** dispute chess 1v1 (2 comptes jetables, recette de `match-result`) et force la
+   ligne — **en repassant le match en `completed` dans le même geste**, parce qu'une dispute
+   `resolved` sur un match resté `disputed` est un état que le domaine ne produit jamais.
+
+🚨 **Il ne résout JAMAIS la dispute semée** : `match-detail` exige les 7 états cs2, la résoudre
+ferait tomber un autre scénario. Les preuves déposées sur elle sont en revanche nettoyées par
+**delta** (les ids préexistants sont relevés avant, et préservés) — un coéquipier qui travaillerait
+sur le même dossier ne perd rien.
+
+### 🔑 `D15` a été vu **VERT PAR CONSTRUCTION**, et c'est la 4ᵉ fois que ce piège tombe ici
+
+Le check garde la règle asymétrique du rendu : un PDF ne doit **jamais** être rendu dans un
+`<img>`. Sa première version comptait les `<img>` de la ligne PDF — et sur un build volontairement
+cassé (`isImage = true` pour tout), elle est **restée verte** : `EvidenceAttachment` porte un
+`onError` qui **retire l'image** dès qu'elle échoue à se décoder, donc le check lisait le DOM
+**après** la bascule. Il serait resté vert le jour où la règle aurait sauté.
+
+Il compte désormais la **requête** vers l'objet `.pdf`, qu'aucun gestionnaire d'erreur ne peut
+reprendre : le lien n'est pas suivi, le fichier ne doit donc jamais être demandé au chargement.
+**Vu rouge** sur le même sabotage, vert après restauration. `D15b` est son témoin positif (la
+vignette PNG, elle, **doit** être demandée) — sans lui, « 0 requête » ne serait que la mesure d'un
+filtre qui ne matche rien.
+
+⚠️ **Au passage, une croyance corrigée** : un PDF dans un `<img>` **n'écrit AUCUNE ligne console**.
+MinIO répond 200, la requête réussit, seul le **décodage** échoue — Chrome le signale silencieusement
+par l'événement `error` de l'élément. Ce que ça coûte reste réel (une image cassée et le
+téléchargement inutile du fichier), mais **le vrai risque console de cet écran est ailleurs** : une
+URL présignée **périmée** répond 403, et celle-là est bien rouge. Elle est fermée par le
+`gcTime: 0` de `useDispute`, pas par le rendu.
+
+### ⚠️ `D1` a rougi sur un filtre trop large, pas sur le code
+
+« L'id malformé ne coûte aucune requête » comptait **2** sur un front pourtant correct : un
+`page.goto` recharge toute la SPA, qui rejoue son bootstrap de session (`POST /auth/refresh` +
+`GET /users/me`). Le filtre doit viser **`/api/disputes`**, pas `/api/`. Même famille que `MM10`
+(l'uuid porté par la navigation du document), et il porte le même témoin positif.
+
+⚠️ **`D19` garde un NON-changement, et il a fallu deux versions.** [F-DISPUTE] a généralisé la
+destination de `MatchLineLink` (union discriminée `match` / `dispute`) ; « Next up » de `/home` ne
+doit **rien** en voir. `D19` l'exige, et `D18` exige à l'inverse — sur `/history`, pas sur la même
+page — qu'une ligne en litige de `ActionRequired` pointe sur `/disputes/…`. Les deux ensemble
+prouvent que la généralisation a été appliquée là où il fallait et **seulement** là.
+
+🔑 **Sa 1ʳᵉ version portait un sélecteur MORT** : `h2:has-text("Next up") ~ a` résout **0 élément**,
+parce que `SectionTitle` enferme son `<h2>` dans un `<div>` — la carte vedette est sœur de ce
+`<div>`, jamais du `<h2>`. Conséquence : **la carte vedette n'était jamais inspectée**, alors
+qu'elle est le premier des deux sites d'appel modifiés et **le seul qui porte un `ariaLabel`**. Elle
+est désormais ciblée par une relation réelle — son **nom accessible**, qui commence par
+« Next match: ». ⚠️ Et la liste « Later matches » est devenue **facultative** : l'ancienne version
+exigeait au moins un lien, donc elle serait sortie rouge le jour où alice n'a qu'un seul match à
+venir. Le run qui la voyait verte ne tenait que grâce à des créneaux de démo posés **à la main par
+un coéquipier** — exactement la dépendance que [FX-AUDIT] interdit.
+
 ## ⚠️ `login()` attend désormais la quiescence réseau (F-HOME)
 
 `login()` rendait la main sur `waitForURL('**/home')`. C'était sûr tant que `/home` était un stub

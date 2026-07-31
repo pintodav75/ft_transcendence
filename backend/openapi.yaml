@@ -4245,6 +4245,10 @@ paths:
         que `GET /matches/:id`) **OU à un admin**. Projection explicite — aucun champ privé.
         Chaque `evidenceUrl` est une **URL présignée courte durée** (bucket privé), générée
         seulement après la garde. Reste consultable après résolution (historique).
+        Sert aussi le bloc **`match`** (statut, coup d'envoi, ladder + jeu) et le
+        **`dispute.createdAt`** dont dépend l'échéance de 24 h : la page de litige se rend
+        ainsi **en un seul appel**, sans dépendre de `GET /matches/{id}` — qui refuserait un
+        admin sur un match `disputed`.
       security:
         - bearerAuth: []
       parameters:
@@ -4272,7 +4276,75 @@ paths:
                         nullable: true
                         description: '`null` tant que la dispute est `open`.'
                       resolutionNotes: { type: string, nullable: true }
+                      createdAt:
+                        type: string
+                        format: date-time
+                        description: >
+                          Ouverture de la dispute — c'est CET instant qui arme le timeout de
+                          **24 h** du job B7 (ni le coup d'envoi, ni la soumission du score).
+                          Sans lui le front ne peut afficher aucune échéance, alors que c'est
+                          elle qui fait perdre un match par forfait de fait.
                       resolvedAt: { type: string, format: date-time, nullable: true }
+                      settledBy:
+                        type: string
+                        enum: [admin, timeout]
+                        nullable: true
+                        description: >
+                          **Qui** a clos le dossier : `admin` (arbitrage via
+                          `POST /disputes/{id}/resolve`) ou `timeout` (job B7 — la dispute est
+                          annulée 24 h après son ouverture faute d'arbitrage). `null` tant que
+                          la dispute est `open`. 🚨 Les deux chemins écrivent les **mêmes**
+                          colonnes, et la `resolutionNotes` posée par le job est une **ligne de
+                          log interne** — sans ce champ le front ne peut ni les distinguer ni
+                          éviter de la servir comme la prose d'un arbitre. Dérivé de
+                          `resolved_by_user_id`, que le job ne pose jamais — **plus** la
+                          `resolution` : le job n'écrit **que** `cancelled`, donc un vainqueur
+                          désigné implique un humain. Sans cette seconde branche, un arbitrage
+                          dont l'admin a supprimé son compte (`set null`) serait servi comme
+                          `timeout`, un état que le job ne sait pas produire. ⚠️ Reste lossy
+                          dans un seul cas, assumé : un admin qui règle `cancelled` **puis**
+                          supprime son compte est lu comme un timeout — on préfère taire une
+                          note vraie que présenter une ligne de log interne comme la prose d'un
+                          arbitre.
+                    required:
+                      [
+                        id,
+                        matchId,
+                        status,
+                        resolution,
+                        resolutionNotes,
+                        createdAt,
+                        resolvedAt,
+                        settledBy,
+                      ]
+                  match:
+                    type: object
+                    description: >
+                      Le match et l'identité de son ladder, servis AVEC la dispute (une requête
+                      jointe, après la garde). ⚠️ Le front ne peut PAS aller les chercher sur
+                      `GET /matches/{id}` : cette route refuse (403) un match `disputed` à qui
+                      n'est pas participant, or un **admin** lit légitimement cette dispute.
+                      Et `format` est la **seule autorité** pour dire « 1v1 » — un `team: null`
+                      dans `sides` ne signifie pas solo (une équipe peut être dissoute une fois
+                      le match terminé, et une dispute reste consultable après arbitrage).
+                    properties:
+                      id: { type: string, format: uuid }
+                      status:
+                        type: string
+                        description: >
+                          Statut du MATCH, pas de la dispute : `disputed` tant qu'elle est
+                          ouverte, `completed`/`cancelled` une fois arbitrée.
+                      scheduledAt: { type: string, format: date-time, nullable: true }
+                      ladder:
+                        type: object
+                        properties:
+                          id: { type: string, format: uuid }
+                          name: { type: string, example: Counter-Strike 2 5v5 }
+                          format: { type: string, enum: ['1v1', '2v2', '3v3', '5v5'] }
+                          gameId: { type: string, example: cs2 }
+                          gameName: { type: string, example: Counter-Strike 2 }
+                        required: [id, name, format, gameId, gameName]
+                    required: [id, status, scheduledAt, ladder]
                   sides:
                     type: array
                     description: >
@@ -4297,6 +4369,7 @@ paths:
                             name: { type: string }
                             logoUrl: { type: string, nullable: true }
                             captainId: { type: string, format: uuid }
+                          required: [id, name, logoUrl, captainId]
                         players:
                           type: array
                           items:
@@ -4306,6 +4379,8 @@ paths:
                               pseudo: { type: string, example: alice }
                               displayName: { type: string, nullable: true }
                               avatarUrl: { type: string, nullable: true }
+                            required: [id, pseudo, displayName, avatarUrl]
+                      required: [id, sideIndex, submittedWinnerSideId, team, players]
                   evidence:
                     type: array
                     description: Le fil, trié par `submittedAt` croissant.
@@ -4328,7 +4403,9 @@ paths:
                             pseudo: { type: string, example: alice }
                             displayName: { type: string, nullable: true }
                             avatarUrl: { type: string, nullable: true }
-                required: [dispute, sides, evidence]
+                          required: [id, pseudo, displayName, avatarUrl]
+                      required: [id, matchSideId, evidenceUrl, message, submittedAt, author]
+                required: [dispute, match, sides, evidence]
         '400':
           description: Param :id non-uuid (ValidationError)
           content:

@@ -7,6 +7,8 @@ import {
   matchesTable,
   matchSidesTable,
   matchParticipantsTable,
+  laddersTable,
+  gamesTable,
   teamsTable,
   teamMembersTable,
   usersTable,
@@ -309,7 +311,34 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
       }
       if (!allowed) return reply.code(403).send({ error: 'not a participant of this match' });
 
-      // 4. Enrichissement des sides — DEUX requêtes pour tout le monde (pas de N+1), projection
+      // 4. Le match et son ladder, en UNE requête jointe — servis APRÈS la garde (rien ne fuit
+      //    à un inconnu). Trois besoins que le front ne peut satisfaire autrement :
+      //      • le FORMAT du ladder est la seule autorité pour dire « 1v1 » — `team: null` ne
+      //        veut PAS dire solo (une équipe peut être dissoute une fois le match terminé, et
+      //        une dispute reste consultable après arbitrage) ;
+      //      • un ADMIN lit cette dispute sans être participant : `GET /matches/:id` le
+      //        refuserait (403) sur un match `disputed`, donc la page ne peut pas aller y
+      //        chercher son contexte ;
+      //      • titrer le dossier (« Counter-Strike 2 5v5 », coup d'envoi) sans second appel.
+      const [context] = await db
+        .select({
+          status: matchesTable.status,
+          scheduledAt: matchesTable.scheduledAt,
+          ladderId: laddersTable.id,
+          ladderName: laddersTable.name,
+          format: laddersTable.format,
+          gameId: gamesTable.id,
+          gameName: gamesTable.name,
+        })
+        .from(matchesTable)
+        .innerJoin(laddersTable, eq(laddersTable.id, matchesTable.ladderId))
+        .innerJoin(gamesTable, eq(gamesTable.id, laddersTable.gameId))
+        .where(eq(matchesTable.id, dispute.matchId));
+      // Impossible en pratique (`disputes.match_id` et `matches.ladder_id` sont des FK) : un 500
+      // explicite plutôt qu'un `match: null` que le front devrait gérer pour rien.
+      if (!context) return reply.code(500).send({ error: 'Internal error' });
+
+      // 5. Enrichissement des sides — DEUX requêtes pour tout le monde (pas de N+1), projection
       //    EXPLICITE sur users (jamais de select() nu → fuite email/passwordHash).
       const userIds = participants.map((p) => p.userId);
       const teams = sideTeamIds.length
@@ -350,7 +379,7 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
             .filter((p): p is NonNullable<typeof p> => p !== undefined),
         }));
 
-      // 5. Le fil de preuves, trié chronologiquement.
+      // 6. Le fil de preuves, trié chronologiquement.
       const evidence = await db
         .select({
           id: disputeEvidenceTable.id,
@@ -401,7 +430,46 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
           status: dispute.status,
           resolution: dispute.resolution,
           resolutionNotes: dispute.resolutionNotes,
+          // C'est l'ouverture de la dispute qui arme le timeout de 24 h du job B7 — pas le
+          // coup d'envoi, pas la soumission. Sans elle le front ne peut afficher aucune
+          // échéance, alors que c'est ELLE qui fait perdre un match par forfait de fait.
+          createdAt: dispute.createdAt,
           resolvedAt: dispute.resolvedAt,
+          // 🚨 QUI a clos le dossier — un ARBITRE ou l'HORLOGE. Les deux écrivent exactement les
+          // mêmes colonnes (`status: 'resolved'` + une `resolution`), or ce ne sont pas les mêmes
+          // faits : le job B7 (`jobs/index.ts`) annule faute d'arbitrage, personne n'a tranché, et
+          // la `resolutionNotes` qu'il pose est une ligne de LOG INTERNE (en français) que rien ne
+          // doit servir à un joueur comme la prose d'un admin. Sans ce champ le front ne peut pas
+          // les distinguer — et tant que [F-ADMIN] n'existe pas, le timeout est le SEUL chemin
+          // vers `resolved` : c'est le cas courant, pas le cas limite.
+          // Dérivé de `resolved_by_user_id` (jamais posé par le job). ⚠️ La colonne est en
+          // `set null` : un admin qui supprime son compte fait basculer un ancien arbitrage vers
+          // `timeout`. Perte d'attribution acceptée — l'inverse (affirmer un arbitre inexistant)
+          // est le défaut qu'on corrige ici.
+          // ⚠️ `resolution !== 'cancelled'` fait partie du test, et ce n'est PAS une redondance :
+          // le job n'écrit JAMAIS de vainqueur (`jobs/index.ts` ne pose que `cancelled`), donc un
+          // `side_N_wins` vient forcément d'un humain. Sans cette branche, un arbitrage dont
+          // l'admin a supprimé son compte (`set null`) serait servi comme `timeout` — le champ
+          // affirmerait un état que le job ne sait pas produire, et tout consommateur qui lui
+          // fait confiance seul (à commencer par [F-ADMIN]) hériterait du défaut.
+          settledBy:
+            dispute.status !== 'resolved'
+              ? null
+              : dispute.resolvedByUserId || dispute.resolution !== 'cancelled'
+                ? ('admin' as const)
+                : ('timeout' as const),
+        },
+        match: {
+          id: dispute.matchId,
+          status: context.status,
+          scheduledAt: context.scheduledAt,
+          ladder: {
+            id: context.ladderId,
+            name: context.ladderName,
+            format: context.format,
+            gameId: context.gameId,
+            gameName: context.gameName,
+          },
         },
         sides: shapedSides,
         evidence: evidenceOut,
