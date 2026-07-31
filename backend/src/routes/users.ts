@@ -13,6 +13,7 @@ import { rlMax } from '../utils/rate-limit.js';
 import z from 'zod';
 import { minioClient, BUCKET_NAME, buildPublicUrl, removeHostedObject } from '../storage/minio.js';
 import { isBlocked } from '../utils/blocks.js';
+import { toAuthUser } from '../utils/user.js';
 import { randomUUID } from 'node:crypto';
 import { verifyPassword, hashPassword } from '../auth/password.js';
 import { clearRefreshCookie } from '../auth/cookies.js';
@@ -68,8 +69,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
       const userId = request.user.sub;
       const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
       if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return { user: userSafe };
+      return { user: toAuthUser(user) };
     } catch (error) {
       reply.code(500).send({ error: 'internal error' });
     }
@@ -86,8 +86,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         .where(eq(usersTable.id, userId))
         .returning();
       if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return { user: userSafe };
+      return { user: toAuthUser(user) };
     } catch (err) {
       if (err instanceof z.ZodError) reply.code(400).send({ errors: err.issues });
       else reply.code(500).send({ error: 'Internal error' });
@@ -223,8 +222,7 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         // APRÈS l'UPDATE : le supprimer avant aurait détruit l'avatar courant si l'UPDATE échouait.
         await removeHostedObject(request.log, before?.avatarUrl, 'avatar');
 
-        const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-        return { user: userSafe };
+        return { user: toAuthUser(user) };
       } catch (error) {
         await removeHostedObject(request.log, uploadedUrl, 'avatar');
         if (
@@ -255,12 +253,10 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
           .where(eq(usersTable.id, userId))
           .returning();
         if (!updated) return reply.code(401).send({ error: 'Unauthorized' });
-        const { passwordHash: _, totpSecret: _t, ...userSafe } = updated;
-        return { user: userSafe };
+        return { user: toAuthUser(updated) };
       }
 
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return { user: userSafe };
+      return { user: toAuthUser(user) };
     } catch (error) {
       reply.code(500).send({ error: 'Internal error' });
     }

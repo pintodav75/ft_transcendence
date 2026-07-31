@@ -284,7 +284,7 @@ export interface paths {
         };
         /**
          * Callback Google
-         * @description Échange le code, récupère le profil Google, applique le linking 3-cas (A: déjà lié / B: lié par email / C: nouveau compte), pose le cookie refresh et renvoie un access token.
+         * @description Échange le code, récupère le profil Google, applique le linking 3-cas (A: déjà lié / B: lié par email / C: nouveau compte), pose le cookie refresh et **redirige (302)** vers le front (`FRONTEND_URL` + `/home`). ⚠️ **Aucun corps JSON en cas de succès** : le navigateur suit la redirection, puis le front échange son cookie refresh contre un access token via `POST /auth/refresh`. ⚠️ Cas B (compte existant retrouvé par email) : le `passwordHash` n'est **pas** touché, le compte garde donc son mot de passe local — c'est `hasPassword` sur le schéma `User`, et non `oauthProvider`, qui dit si `PATCH /users/me/password` est utilisable.
          */
         get: {
             parameters: {
@@ -299,15 +299,16 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Connexion OAuth réussie */
-                200: {
+                /** @description Connexion OAuth réussie — redirection vers le front, sans corps de réponse. */
+                302: {
                     headers: {
+                        /** @description `FRONTEND_URL` + `/home` */
+                        Location?: string;
+                        /** @description Cookie refresh (`Path=/auth`, réécrit en `/api/auth` par le proxy Vite) */
                         "Set-Cookie"?: string;
                         [name: string]: unknown;
                     };
-                    content: {
-                        "application/json": components["schemas"]["AuthSuccess"];
-                    };
+                    content?: never;
                 };
                 /** @description Échec du login OAuth */
                 500: {
@@ -4608,6 +4609,8 @@ export interface components {
             oauthProvider?: string | null;
             oauthId?: string | null;
             totpEnabled: boolean;
+            /** @description Vrai si le compte possède un mot de passe local (`password_hash` non nul). ⚠️ **Ce n'est PAS la négation de `oauthProvider`** : le callback Google rattache un provider à un compte existant retrouvé par email **sans toucher à son mot de passe**, un tel compte a donc les deux. C'est ce champ — et lui seul — qui dit si `PATCH /users/me/password` est utilisable (il répond 400 quand il vaut `false`) et si `DELETE /users/me` exigera `password`. Dérivé, jamais stocké tel quel. */
+            hasPassword: boolean;
             /** @description Vrai si le compte arbitre les litiges — pilote l'onglet **Arbitration** du rail et l'accès à `GET /disputes`. Un admin reste un joueur ordinaire par ailleurs. */
             isAdmin: boolean;
             /** Format: date-time */

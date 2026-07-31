@@ -12,6 +12,7 @@ import {
   twoFactorVerifyRateLimitKey,
   rlMax,
 } from '../../utils/rate-limit.js';
+import { toAuthUser } from '../../utils/user.js';
 
 const codeSchema = z.object({
   code: z.string().regex(/^\d{6}$/),
@@ -171,8 +172,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (server) => {
       const accessToken = signAccessToken(request.server, { sub: user.id });
       const refreshToken = signRefreshToken(request.server, { sub: user.id });
       setRefreshCookie(reply, refreshToken);
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return reply.code(200).send({ accessToken, user: userSafe });
+      return reply.code(200).send({ accessToken, user: toAuthUser(user) });
     } catch (error) {
       if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });
       else return reply.code(401).send({ error: 'Invalid or expired tempToken' });
