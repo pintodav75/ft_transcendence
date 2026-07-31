@@ -7,6 +7,7 @@ import { signAccessToken, signRefreshToken, signTempToken } from '../../auth/tok
 import { setRefreshCookie, clearRefreshCookie } from '../../auth/cookies.js';
 import { eq } from 'drizzle-orm';
 import { rlMax } from '../../utils/rate-limit.js';
+import { toAuthUser } from '../../utils/user.js';
 
 const registerSchema = z.object({
   pseudo: z.string().trim().min(3).max(30),
@@ -46,8 +47,7 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
       const accessToken = signAccessToken(request.server, { sub: user.id });
       const refreshToken = signRefreshToken(request.server, { sub: user.id });
       setRefreshCookie(reply, refreshToken);
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return reply.code(201).send({ accessToken, user: userSafe });
+      return reply.code(201).send({ accessToken, user: toAuthUser(user) });
     } catch (err) {
       if (err instanceof z.ZodError) reply.code(400).send({ errors: err.issues });
       else if (
@@ -83,8 +83,7 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
       const accessToken = signAccessToken(request.server, { sub: user.id });
       const refreshToken = signRefreshToken(request.server, { sub: user.id });
       setRefreshCookie(reply, refreshToken);
-      const { passwordHash: _, totpSecret: _t, ...userSafe } = user;
-      return reply.code(200).send({ accessToken, user: userSafe });
+      return reply.code(200).send({ accessToken, user: toAuthUser(user) });
     } catch (err) {
       if (err instanceof z.ZodError) reply.code(400).send({ errors: err.issues });
       else reply.code(500).send({ error: 'Internal error' });

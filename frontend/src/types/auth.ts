@@ -8,6 +8,12 @@ export type AuthUser = {
   oauthProvider: string | null
   oauthId: string | null
   totpEnabled: boolean
+  /**
+   * Vrai si le compte a un mot de passe local. ⚠️ Ce n'est PAS `oauthProvider === null` :
+   * un compte inscrit par mot de passe puis relié à Google garde son mot de passe et a
+   * donc les deux. Seul ce champ dit si le changement de mot de passe est proposable.
+   */
+  hasPassword: boolean
   isAdmin: boolean
   createdAt: string
   updatedAt: string
