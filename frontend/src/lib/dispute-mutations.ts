@@ -1,21 +1,26 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ApiError, sharedApiErrorMessage } from '@/lib/api';
+import { ApiError, apiFetch, sharedApiErrorMessage } from '@/lib/api';
 import { EVIDENCE_MAX_MB, disputeKey } from '@/lib/dispute-detail';
+import { disputeQueueKey } from '@/lib/admin-disputes';
 import { uploadFile } from '@/lib/upload';
 
 import type { paths } from '@/lib/api-types.gen';
 
 /**
- * Write side of the dispute file: filing one piece of evidence.
+ * Write side of the dispute file: filing one piece of evidence, and — since [F-ADMIN] —
+ * SETTLING the dispute.
  *
  * The read side (`lib/dispute-detail.ts`) stays untouched — queries and mutations have opposite
  * lifecycles (cached vs. one-shot), and mixing them in one module makes it impossible to see at
  * a glance what invalidates what. Same split as `team-detail`/`team-mutations` and
  * `match-detail`/`match-mutations`.
  *
- * 🚨 ARBITRATION IS NOT HERE AND MUST NOT COME HERE. `POST /disputes/{id}/resolve` is admin-only
- * and belongs to [F-ADMIN]; this module knows one route.
+ * ⚠️ THIS DOCBLOCK USED TO SAY "ARBITRATION IS NOT HERE AND MUST NOT COME HERE". It was written
+ * while [F-ADMIN] did not exist, and that ticket has now landed: `POST /disputes/{id}/resolve`
+ * lives right below, next to the route it shares its 409 with. The read side of the queue —
+ * everything gated on `isAdmin` — is in `lib/admin-disputes.ts`, which is where the guard is
+ * stated. Leaving the old sentence standing would have cost the next reader a quarter of an hour.
  */
 type SubmitEvidenceResponse =
   paths['/disputes/{id}/evidence']['post']['responses'][201]['content']['application/json'];
@@ -76,9 +81,43 @@ export function submitEvidenceErrorMessage(error: unknown) {
  * the sentence above is, on its own, written never to be read. The caller routes the news to the
  * page's live region instead, the one element that survives the unmount. Same idiom as
  * `isSettledElsewhere` on the match sheet and `isSlotGone` on the board.
+ *
+ * 🔑 SHARED VERBATIM BY BOTH ROUTES OF THIS MODULE ([F-ADMIN]), and the two 409s mean exactly the
+ * same thing: somebody else closed this file first — the 24 h job, or another arbiter. Writing a
+ * second predicate for `resolve` would have been two names for one fact.
  */
 export function isDisputeSettledElsewhere(error: unknown) {
   return error instanceof ApiError && error.status === 409;
+}
+
+/**
+ * Turns the refusals of `POST /disputes/{id}/resolve` into something an arbiter can act on.
+ *
+ * ⚠️ 403 IS MAPPED THROUGH THE SHARED HELPER AND MUST STAY REACHABLE-BUT-UNSEEN: the panel is
+ * only ever rendered to an admin, so this can only fire on a page left open across a demotion.
+ * The same discipline as everywhere else in the repo — map it, never rely on it.
+ */
+export function resolveDisputeErrorMessage(error: unknown) {
+  // 403 (not, or no longer, an admin) and 429 (the shared quota).
+  const shared = sharedApiErrorMessage(error);
+  if (shared) return shared;
+
+  if (error instanceof ApiError) {
+    // The radio group can only ever produce one of the three enum values and the note is capped
+    // client-side, so this is the net for a contract change, not a reachable state.
+    if (error.status === 400) {
+      return 'This ruling was refused: pick one of the three outcomes, and keep the note under 1000 characters.';
+    }
+
+    if (error.status === 404) return 'This dispute no longer exists.';
+
+    // The 24 h job, or another arbiter, closed the file while this page sat open.
+    if (error.status === 409) {
+      return 'This dispute has just been settled, so it can no longer be arbitrated. The page is refreshing.';
+    }
+  }
+
+  return 'Could not settle this dispute.';
 }
 
 // ----------------------------------------------------------------------- hook
@@ -122,5 +161,68 @@ export function useSubmitEvidence(disputeId: string, onProgress?: (percent: numb
       isDisputeSettledElsewhere(error)
         ? queryClient.invalidateQueries({ queryKey: disputeKey(disputeId) })
         : undefined,
+  });
+}
+
+// ------------------------------------------------------------------ arbitration
+
+type ResolveDisputeBody =
+  paths['/disputes/{id}/resolve']['post']['requestBody']['content']['application/json'];
+type ResolveDisputeResponse =
+  paths['/disputes/{id}/resolve']['post']['responses'][200]['content']['application/json'];
+
+/** The three outcomes an arbiter may pick — a closed enum straight from the contract. */
+export type DisputeResolution = ResolveDisputeBody['resolution'];
+
+export type ResolveDisputeVariables = ResolveDisputeBody;
+
+/**
+ * What the note field accepts, mirrored on the server.
+ *
+ * ⚠️ MIRROR, NOT A STRICTER VERSION. The route trims the note and caps it at 1000 characters,
+ * and it is OPTIONAL — an arbitrage with no note is ordinary, and `DisputeVerdict` already has a
+ * sentence for that case. Refusing an empty note here would forbid something the API accepts.
+ */
+export const RESOLUTION_NOTES_MAX = 1000;
+
+/**
+ * Settles a dispute: the ONLY exit from the `disputed` state other than the 24 h job.
+ *
+ * 🚨 IT IS DEFINITIVE. Naming a camp closes the match as `completed` and APPLIES Elo to both
+ * sides; `cancelled` closes it as `cancelled` and leaves Elo untouched. Re-arbitrating a settled
+ * file answers **409** — which is why the caller puts a `ConfirmDialog` in front of it rather
+ * than a bare button.
+ *
+ * 🔑 TWO CACHE ENTRIES ARE INVALIDATED, AND BOTH ARE LOAD-BEARING: the FILE (so `DisputeVerdict`
+ * flips to its settled state on its own, without this ticket touching that component) and the
+ * QUEUE (so the row leaves `/admin/disputes` and the rail badge decrements). Refreshing only the
+ * file would leave the arbiter looking at a queue that still lists work he has just done.
+ *
+ * ⚠️ The invalidation promise is RETURNED from `onSuccess` (repo idiom): the mutation stays
+ * `isPending` until the screen really shows the verdict, instead of the panel clearing itself one
+ * frame before the file turns read-only.
+ *
+ * ⚠️ A 409 refetches too — and for the same reason as `useSubmitEvidence`: the screen is LYING
+ * (the job, or another arbiter, closed the file while this tab sat open), so the message alone
+ * would leave a dead form on display. Deliberately NOT on 404: refetching a dispute that no
+ * longer exists would replay the 404 and print "Failed to load resource" in the console.
+ */
+export function useResolveDispute(disputeId: string) {
+  const queryClient = useQueryClient();
+
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: disputeKey(disputeId) }),
+      queryClient.invalidateQueries({ queryKey: disputeQueueKey() }),
+    ]);
+
+  return useMutation({
+    mutationFn: (body: ResolveDisputeVariables) =>
+      apiFetch<ResolveDisputeResponse>(`/disputes/${encodeURIComponent(disputeId)}/resolve`, {
+        method: 'POST',
+        body,
+      }),
+    onSuccess: refresh,
+    onError: (error) => (isDisputeSettledElsewhere(error) ? refresh() : undefined),
   });
 }

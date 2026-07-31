@@ -45,16 +45,25 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
         .where(eq(usersTable.id, me));
       if (!user?.isAdmin) return reply.code(403).send({ error: 'admin only' });
 
+      // Le contexte du litige dans la MÊME requête jointe : jeu, ladder et format. `format`
+      // est la seule autorité pour dire « 1v1 » — un `team: null` plus bas ne veut PAS dire
+      // solo (une équipe dissoute laisse son side sans team), règle déjà ratée deux fois.
       const rows = await db
         .select({
           id: disputesTable.id,
           matchId: disputesTable.matchId,
           ladderId: matchesTable.ladderId,
+          ladderName: laddersTable.name,
+          format: laddersTable.format,
+          gameId: gamesTable.id,
+          gameName: gamesTable.name,
           scheduledAt: matchesTable.scheduledAt,
           createdAt: disputesTable.createdAt,
         })
         .from(disputesTable)
         .innerJoin(matchesTable, eq(matchesTable.id, disputesTable.matchId))
+        .innerJoin(laddersTable, eq(laddersTable.id, matchesTable.ladderId))
+        .innerJoin(gamesTable, eq(gamesTable.id, laddersTable.gameId))
         .where(eq(disputesTable.status, 'open'))
         .orderBy(disputesTable.createdAt); // asc = la plus ancienne d'abord
 
@@ -73,8 +82,104 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
         : [];
       const countById = new Map(counts.map((c) => [c.disputeId, c.n]));
 
+      // Les DEUX camps de chaque litige. Sans eux la file n'affiche que des UUID et des
+      // horaires : l'arbitre ne peut pas choisir quel dossier ouvrir. Même forme de `side`
+      // que `GET /disputes/{id}` et `GET /matches/{id}` — le front la nomme déjà avec
+      // `sideName`/`sideAvatarUrl`, on ne lui invente pas une variante.
+      //
+      // 🚨 QUATRE requêtes, toutes en `inArray` + `Map`, comme `evidenceCount` juste au-dessus :
+      //    le nombre de requêtes est CONSTANT, il ne dépend pas du nombre de disputes.
+      const matchIds = [...new Set(rows.map((r) => r.matchId))];
+      const sides = matchIds.length
+        ? await db
+            .select({
+              id: matchSidesTable.id,
+              matchId: matchSidesTable.matchId,
+              sideIndex: matchSidesTable.sideIndex,
+              teamId: matchSidesTable.teamId,
+            })
+            .from(matchSidesTable)
+            .where(inArray(matchSidesTable.matchId, matchIds))
+        : [];
+      const sideIds = sides.map((s) => s.id);
+      const participants = sideIds.length
+        ? await db
+            .select({
+              matchSideId: matchParticipantsTable.matchSideId,
+              userId: matchParticipantsTable.userId,
+            })
+            .from(matchParticipantsTable)
+            .where(inArray(matchParticipantsTable.matchSideId, sideIds))
+        : [];
+
+      const teamIds = [
+        ...new Set(sides.map((s) => s.teamId).filter((t): t is string => t !== null)),
+      ];
+      const userIds = [...new Set(participants.map((p) => p.userId))];
+      const teams = teamIds.length
+        ? await db
+            .select({
+              id: teamsTable.id,
+              name: teamsTable.name,
+              logoUrl: teamsTable.logoUrl,
+              captainId: teamsTable.captainId,
+            })
+            .from(teamsTable)
+            .where(inArray(teamsTable.id, teamIds))
+        : [];
+      // Projection EXPLICITE : surtout pas de select() nu, on enverrait email/passwordHash.
+      const players = userIds.length
+        ? await db
+            .select({
+              id: usersTable.id,
+              pseudo: usersTable.pseudo,
+              displayName: usersTable.displayName,
+              avatarUrl: usersTable.avatarUrl,
+            })
+            .from(usersTable)
+            .where(inArray(usersTable.id, userIds))
+        : [];
+      const teamById = new Map(teams.map((t) => [t.id, t]));
+      const playerById = new Map(players.map((p) => [p.id, p]));
+
+      // Joueurs indexés par side, puis sides indexés par match : l'assemblage final ne fait
+      // plus que des `.get()` en temps constant, jamais un balayage par dispute.
+      const playersBySide = new Map<string, typeof players>();
+      for (const p of participants) {
+        const player = playerById.get(p.userId);
+        if (!player) continue; // compte supprimé entre les deux requêtes — on l'omet, pas de trou
+        const list = playersBySide.get(p.matchSideId);
+        if (list) list.push(player);
+        else playersBySide.set(p.matchSideId, [player]);
+      }
+
+      type QueueSide = {
+        id: string;
+        sideIndex: number;
+        team: (typeof teams)[number] | null;
+        players: typeof players;
+      };
+      const sidesByMatch = new Map<string, QueueSide[]>();
+      // Tri global par sideIndex AVANT le groupage : chaque liste par match sort donc déjà
+      // dans l'ordre 0 (créateur) puis 1 (accepteur), sans re-trier par dispute.
+      for (const s of [...sides].sort((a, b) => a.sideIndex - b.sideIndex)) {
+        const shaped: QueueSide = {
+          id: s.id,
+          sideIndex: s.sideIndex,
+          team: s.teamId ? (teamById.get(s.teamId) ?? null) : null,
+          players: playersBySide.get(s.id) ?? [],
+        };
+        const list = sidesByMatch.get(s.matchId);
+        if (list) list.push(shaped);
+        else sidesByMatch.set(s.matchId, [shaped]);
+      }
+
       return {
-        disputes: rows.map((r) => ({ ...r, evidenceCount: countById.get(r.id) ?? 0 })),
+        disputes: rows.map((r) => ({
+          ...r,
+          evidenceCount: countById.get(r.id) ?? 0,
+          sides: sidesByMatch.get(r.matchId) ?? [],
+        })),
       };
     } catch (error) {
       if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });

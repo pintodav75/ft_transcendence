@@ -978,8 +978,32 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         // nominative des deux camps devient publique une fois le match `completed`. Tout
         // autre statut (pending/in_progress/awaiting_confirmation/disputed/cancelled) reste
         // réservé aux participants.
+        // …à une exception près : l'ADMIN, et UNIQUEMENT sur les deux statuts qu'un dossier de
+        // litige peut prendre. L'en-tête de `/disputes/$disputeId` renvoie vers cette feuille de
+        // match, et un arbitre a besoin des maps, des compos et des scores soumis pour trancher —
+        // or sur un match `disputed` il n'est justement pas participant. Le dossier reste
+        // consultable APRÈS arbitrage : `resolve` produit soit `completed` (déjà public juste
+        // au-dessus), soit `cancelled` — d'où les deux statuts, et pas un.
+        //
+        // 🚨 SURTOUT PAS « tous les statuts ». Un admin est AUSSI un joueur (décision produit) :
+        // l'ouvrir sur `pending` lui donnerait la composition nominative de chaque créneau ouvert,
+        // que `GET /matches?status=pending` cache justement à tout le monde — il scouterait les
+        // rosters avant d'accepter un défi. Le commentaire ci-dessus sur l'anonymat des slots
+        // ouverts doit rester vrai.
+        //
+        // La requête est faite ICI seulement, dans la branche qui refuserait déjà, et seulement
+        // sur ces deux statuts : le cas nominal ne la paie jamais.
         if (!allowed && match.status !== 'completed') {
-          return reply.code(403).send({ error: 'not a participant of this match' });
+          const arbitrable = match.status === 'disputed' || match.status === 'cancelled';
+          const [viewer] = arbitrable
+            ? await db
+                .select({ isAdmin: usersTable.isAdmin })
+                .from(usersTable)
+                .where(eq(usersTable.id, me))
+            : [];
+          if (!viewer?.isAdmin) {
+            return reply.code(403).send({ error: 'not a participant of this match' });
+          }
         }
 
         // DEUX requêtes pour tout le monde, pas une par joueur (N+1) : on a déjà les ids.

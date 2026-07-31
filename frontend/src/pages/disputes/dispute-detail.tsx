@@ -3,6 +3,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { useId, useRef } from 'react';
 
 import { ApiError } from '@/lib/api';
+import { DisputeArbitration } from '@/components/disputes/DisputeArbitration';
 import { DisputeClaims } from '@/components/disputes/DisputeClaims';
 import { DisputeVerdict } from '@/components/disputes/DisputeVerdict';
 import { ErrorPanel } from '@/components/ui/error-panel';
@@ -52,9 +53,13 @@ function disputeTitle(sides: DisputeSide[], solo: boolean) {
  * ladder itself, which is also what makes `match.ladder.format` — the ONLY authority for "1v1" —
  * available here. [F-ADMIN] reuses this page as is.
  *
- * 🚨 NO ARBITRATION CONTROL ANYWHERE ON THIS PAGE. Ruling is admin-only and belongs to [F-ADMIN];
- * the read (`useDispute` + the display components) and the right to act (`canSubmitEvidence`) are
- * kept apart so that ticket can add its three outcomes without unpicking anything.
+ * 🔑 ARBITRATION LIVES HERE SINCE [F-ADMIN], AND ON NO SECOND SCREEN. The three outcomes of
+ * `POST /disputes/{id}/resolve` are rendered by `DisputeArbitration` at the foot of the page, to
+ * an admin and to nobody else — because the claims, the evidence thread and the deadline he has
+ * to rule on are all already here. `/admin/disputes` only DISCOVERS the files; it never judges
+ * them. Keeping the read (`useDispute` + the display components) apart from the right to act
+ * (`canSubmitEvidence`, `useIsAdmin`) is what let that ticket bolt its controls on without
+ * unpicking a line of this page — `DisputeVerdict` was not touched.
  *
  * ⚠️ NO CHAT WITH THE ADMIN — there is no such route, and the copy never suggests one.
  *
@@ -170,9 +175,17 @@ export function DisputeDetail() {
   // same thing three times, so the ladder's own name is kept only when it adds something.
   const extraName = ladderSubtitle(ladder.name, ladder.gameName, ladder.format);
 
-  function settledElsewhere(text: string) {
+  /**
+   * Say it, and land the focus somewhere that still exists.
+   *
+   * ⚠️ RENAMED FROM `settledElsewhere` BY [F-ADMIN], because it now serves two paths that are not
+   * both "elsewhere": the evidence form losing its 409 race, AND the admin's own successful
+   * ruling. Both destroy the control that had focus, both need the page's one live region — the
+   * old name would have lied about half its callers.
+   */
+  function announceAndRefocus(text: string) {
     announcement.announce(text);
-    // The form is unmounting with the refetch; the `<h1>` names the file, so a screen reader
+    // The panel is unmounting with the refetch; the `<h1>` names the file, so a screen reader
     // reads something useful on arrival instead of restarting from `<body>`.
     headingRef.current?.focus();
   }
@@ -261,7 +274,20 @@ export function DisputeDetail() {
           file={file}
           nowMs={nowMs}
           onFiled={announcement.announce}
-          onSettledElsewhere={settledElsewhere}
+          onSettledElsewhere={announceAndRefocus}
+        />
+
+        {/* [F-ADMIN] — the controls this page was written to receive. Renders NOTHING for anyone
+            who is not an admin, and nothing once the file is settled: `DisputeVerdict` above
+            flips to its read-only state on its own, and this component never touches it.
+            ⚠️ It creates NO live region of its own (invariant #11): it hands its sentence to the
+            page's single `role="status"` through `announceAndRefocus`, which also lands the focus
+            on the `<h1>` when the panel disappears under the user. */}
+        <DisputeArbitration
+          file={file}
+          nowMs={nowMs}
+          returnFocusRef={headingRef}
+          onSettled={announceAndRefocus}
         />
 
         <p className="text-xs text-text-muted">

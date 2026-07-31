@@ -1,4 +1,5 @@
 import { ExternalLink, FileText } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import { Avatar } from '@/components/ui/avatar';
@@ -6,6 +7,7 @@ import { Callout } from '@/components/ui/callout';
 import { SectionTitle } from '@/components/ui/section-title';
 import { attachmentOf, sideById } from '@/lib/dispute-detail';
 import { formatMatchDate, sideName } from '@/lib/match-detail';
+import { useBackFrom } from '@/lib/back-navigation';
 
 import type { DisputeEvidence, DisputeSide } from '@/lib/dispute-detail';
 
@@ -102,6 +104,9 @@ type EvidenceThreadProps = {
  * at all. It gets a sentence that says so, never a spinner or a dash.
  */
 export function EvidenceThread({ evidence, sides, solo }: EvidenceThreadProps) {
+  // Read once at component level, never inside the map: it is a hook.
+  const { backFrom } = useBackFrom();
+
   return (
     <section className="flex min-w-0 flex-col gap-3.5">
       <SectionTitle>Evidence</SectionTitle>
@@ -139,8 +144,49 @@ export function EvidenceThread({ evidence, sides, solo }: EvidenceThreadProps) {
                     className="size-9 shrink-0"
                   />
                   <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
-                    <span className="break-words font-bold text-text-primary">{authorName}</span>
-                    <span className="break-words text-text-secondary">for {campName}</span>
+                    {/* 🚨 RÈGLE DU SITE (David) : tout nom de joueur et tout nom d'équipe ouvre sa
+                        page. Ici l'auteur n'est PAS cliquable dans un seul cas — son compte a été
+                        supprimé (`author` est `null`, la colonne est nullable pour ça) : il n'y a
+                        alors aucune page derrière, et un lien mort vaut moins que du texte. */}
+                    {post.author ? (
+                      <Link
+                        to="/players/$pseudo"
+                        params={{ pseudo: post.author.pseudo }}
+                        // Nomme ce vers quoi la page du joueur revient (ce dossier de litige).
+                        state={{ backFrom }}
+                        className="focus-ring break-words rounded-control font-bold text-text-primary underline-offset-4 hover:underline"
+                      >
+                        {authorName}
+                      </Link>
+                    ) : (
+                      <span className="break-words font-bold text-text-primary">{authorName}</span>
+                    )}
+                    {/* Le camp pour lequel il écrit. Même règle et mêmes exceptions que les cartes
+                        de déclarations : l'équipe d'abord, le joueur seulement en 1v1, et rien du
+                        tout pour une équipe dissoute (`team: null` sur un 5v5 n'est PAS du solo). */}
+                    <span className="break-words text-text-secondary">
+                      for{' '}
+                      {side?.team ? (
+                        <Link
+                          to="/teams/$teamId"
+                          params={{ teamId: side.team.id }}
+                          className="focus-ring rounded-control underline-offset-4 hover:underline"
+                        >
+                          {campName}
+                        </Link>
+                      ) : solo && side?.players[0] ? (
+                        <Link
+                          to="/players/$pseudo"
+                          params={{ pseudo: side.players[0].pseudo }}
+                          state={{ backFrom }}
+                          className="focus-ring rounded-control underline-offset-4 hover:underline"
+                        >
+                          {campName}
+                        </Link>
+                      ) : (
+                        campName
+                      )}
+                    </span>
                     {/* `dateTime` carries the machine-readable instant next to the formatted one,
                         which is the whole reason `<time>` exists.
                         ⚠️ `text-text-secondary` (7.81:1) and NOT `text-text-muted` (4.23:1, under

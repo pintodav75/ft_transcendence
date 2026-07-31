@@ -101,6 +101,24 @@ export const DISPUTE_WINDOW_HOURS = 24;
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
+ * Milliseconds left before the job cancels a dispute OPENED at `createdAt` — negative once the
+ * window is past, `null` on an unparsable instant.
+ *
+ * 🔑 EXTRACTED BY [F-ADMIN] AT ITS SECOND READER, and the split is the whole point: the
+ * arbitration queue (`GET /disputes`) serves rows that carry `createdAt` but **no `status`** —
+ * they are `open` by construction, the route lists nothing else. It needs the arithmetic without
+ * the status guard, and a queue counting down differently from the file it links to would be
+ * worse than no countdown at all. `disputeMsLeft` keeps its signature and its guard; nothing on
+ * the dispute file changed.
+ */
+export function disputeWindowMsLeft(createdAt: string, nowMs: number): number | null {
+  const opened = new Date(createdAt).getTime();
+  if (Number.isNaN(opened)) return null;
+
+  return opened + DISPUTE_WINDOW_HOURS * HOUR_MS - nowMs;
+}
+
+/**
  * Milliseconds left before the job cancels this dispute — negative once it is past, `null` on a
  * dispute that is already settled (there is no countdown on a closed file) or on an unparsable
  * instant.
@@ -108,10 +126,7 @@ const HOUR_MS = 60 * 60 * 1000;
 export function disputeMsLeft(dispute: Dispute, nowMs: number): number | null {
   if (dispute.status !== 'open') return null;
 
-  const opened = new Date(dispute.createdAt).getTime();
-  if (Number.isNaN(opened)) return null;
-
-  return opened + DISPUTE_WINDOW_HOURS * HOUR_MS - nowMs;
+  return disputeWindowMsLeft(dispute.createdAt, nowMs);
 }
 
 // ---------------------------------------------------------------- reading the file
