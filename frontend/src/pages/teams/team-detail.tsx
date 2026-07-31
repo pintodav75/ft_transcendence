@@ -397,7 +397,7 @@ export function TeamDetail() {
         }
         confirmLabel="Leave team"
         pending={leaveTeam.isPending}
-        error={leaveTeam.isError ? removeTeamMemberErrorMessage(leaveTeam.error) : null}
+        error={leaveTeam.isError ? removeTeamMemberErrorMessage(leaveTeam.error, 'leave') : null}
         onConfirm={confirmLeave}
         onCancel={() => {
           leaveTeam.reset();

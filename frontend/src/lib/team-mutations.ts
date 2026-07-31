@@ -31,6 +31,14 @@ type AcceptInvitationResponse =
 type DeclineInvitationResponse =
   paths['/teams/invitations/{invitationId}/decline']['post']['responses'][200]['content']['application/json'];
 type InvitationErrorCode = components['schemas']['TeamInvitationError']['code'];
+// The two 409 of the team routes are INLINE payloads in `openapi.yaml` (no named schema,
+// unlike `TeamInvitationError`), so their `code` is read straight off `paths`. Same purpose
+// as `InvitationErrorCode`: a code the backend renames breaks the build at the constant
+// below instead of quietly rotting into the generic fallback message.
+type RemoveMemberConflictCode =
+  paths['/teams/{id}/members/{userId}']['delete']['responses'][409]['content']['application/json']['code'];
+type DissolveTeamConflictCode =
+  paths['/teams/{id}']['delete']['responses'][409]['content']['application/json']['code'];
 
 // ------------------------------------------------------------------ invalidation
 
@@ -80,6 +88,27 @@ const TEAM_GONE_MESSAGE = 'This team no longer exists.';
  * eight call sites below reading the way they did.
  */
 const sharedMessage = sharedApiErrorMessage;
+
+/**
+ * Reads the STABLE `code` of an error payload — the five invitation routes, and the two
+ * 409 of the member/team deletions.
+ *
+ * Those routes all answer `{ error, code }`: `error` is display prose the backend may
+ * reword at any time, `code` is the contract — so this is what we test, and the prose is
+ * never rendered. Narrowing rather than casting: a payload of another shape returns
+ * `undefined` and the caller falls back on OUR wording instead of `undefined`.
+ *
+ * ⚠️ It used to live in the invitations section below, under the name `invitationErrorCode`.
+ * It never knew anything about invitations — moved up here, unchanged, the day the team
+ * deletions needed the same read.
+ */
+function errorPayloadCode(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  if (!('code' in payload)) return undefined;
+
+  const { code } = payload as Record<'code', unknown>;
+  return typeof code === 'string' ? code : undefined;
+}
 
 export type TeamUpdateError = {
   /** `'name'` when the message belongs under the name field, `null` for a form-level one. */
@@ -133,22 +162,6 @@ const INVITATION_GONE_MESSAGE =
   'This invitation is no longer pending — it was answered or cancelled in the meantime.';
 
 /**
- * Reads the STABLE `code` of `components['schemas']['TeamInvitationError']`.
- *
- * The five invitation routes all answer `{ error, code }`: `error` is display prose the
- * backend may reword at any time, `code` is the contract — so this is what we test, and
- * the prose is never rendered. Narrowing rather than casting: a payload of another shape
- * returns `undefined` and the caller falls back on OUR wording instead of `undefined`.
- */
-function invitationErrorCode(payload: unknown): string | undefined {
-  if (typeof payload !== 'object' || payload === null) return undefined;
-  if (!('code' in payload)) return undefined;
-
-  const { code } = payload as Record<'code', unknown>;
-  return typeof code === 'string' ? code : undefined;
-}
-
-/**
  * The invitation the user is acting on is not `pending` any more (answered, cancelled, or
  * gone with its team). The screen is stale, so the caller must REFETCH on top of showing
  * the message — an error banner over a row that should no longer be there is worse than
@@ -157,7 +170,7 @@ function invitationErrorCode(payload: unknown): string | undefined {
 function isStaleInvitationError(error: unknown) {
   if (!(error instanceof ApiError)) return false;
 
-  const code = invitationErrorCode(error.payload);
+  const code = errorPayloadCode(error.payload);
   return code === 'invitation_not_found' || code === 'not_pending';
 }
 
@@ -167,7 +180,7 @@ function isStaleInvitationError(error: unknown) {
  * The tables below are typed `Partial<Record<InvitationErrorCode, string>>`, so a code the
  * backend renames (or that never existed) is a COMPILE error on the key instead of a
  * message that silently rots into the fallback. The lookup itself stays untyped on
- * purpose: `invitationErrorCode` returns `string | undefined`, and an unrecognised value
+ * purpose: `errorPayloadCode` returns `string | undefined`, and an unrecognised value
  * must simply miss and fall back on our own wording.
  */
 function messageTable(messages: Partial<Record<InvitationErrorCode, string>>) {
@@ -213,7 +226,7 @@ export function inviteTeamMemberErrorMessage(error: unknown) {
   if (shared) return shared;
 
   if (error instanceof ApiError) {
-    const code = invitationErrorCode(error.payload);
+    const code = errorPayloadCode(error.payload);
     const message = code === undefined ? undefined : inviteMessages.get(code);
     if (message) return message;
 
@@ -230,7 +243,7 @@ export function cancelTeamInvitationErrorMessage(error: unknown) {
   if (shared) return shared;
 
   if (error instanceof ApiError) {
-    const code = invitationErrorCode(error.payload);
+    const code = errorPayloadCode(error.payload);
     const message = code === undefined ? undefined : cancelInvitationMessages.get(code);
     if (message) return message;
   }
@@ -249,7 +262,7 @@ export function respondToInvitationErrorMessage(error: unknown) {
   if (shared) return shared;
 
   if (error instanceof ApiError) {
-    const code = invitationErrorCode(error.payload);
+    const code = errorPayloadCode(error.payload);
     const message = code === undefined ? undefined : respondMessages.get(code);
     if (message) return message;
   }
@@ -257,11 +270,42 @@ export function respondToInvitationErrorMessage(error: unknown) {
   return 'Could not answer this invitation.';
 }
 
-export function removeTeamMemberErrorMessage(error: unknown) {
+// --------------------------------------------- deletions blocked by a live match (409)
+
+// Typed against the codegen, so renaming the code backend-side breaks the build here
+// instead of silently degrading the screen to its generic fallback (invariant #8).
+const MEMBER_ENGAGED_CODE: RemoveMemberConflictCode = 'engaged_in_match';
+const TEAM_ENGAGED_CODE: DissolveTeamConflictCode = 'team_engaged_in_match';
+
+/**
+ * Which of the two actions `DELETE /teams/{id}/members/{userId}` is serving.
+ *
+ * The route is the same for both, but the SENTENCE cannot be: "this player is in an
+ * ongoing match" reads as someone else's problem when it is my own departure. The caller
+ * states it explicitly — it is never inferred from the component's state, because the two
+ * dialogs live in two different files and neither can be trusted to keep such a deduction
+ * true after a refactor.
+ */
+export type RemoveMemberIntent = 'kick' | 'leave';
+
+// Each carries its REMEDY (finish or cancel the match). No link to the match: the 409 does
+// not say which one it is, and a link that leads nowhere is worse than a sentence that
+// stops — same decision as `lib/matchmaking.ts`.
+const ENGAGED_MESSAGES: Record<RemoveMemberIntent, string> = {
+  kick: 'You cannot remove this player while they are in an ongoing match — finish it or cancel it first.',
+  leave: 'You cannot leave while you are in an ongoing match — finish it or cancel it first.',
+};
+
+export function removeTeamMemberErrorMessage(error: unknown, intent: RemoveMemberIntent) {
   const shared = sharedMessage(error);
   if (shared) return shared;
 
   if (error instanceof ApiError) {
+    // Tested on the `code`, not on the bare 409: this route may well grow a second
+    // conflict later, and that one would then wrongly inherit this wording. Same idiom as
+    // the invitation mappers above — and unlike `updateTeamErrorMessage`, whose 409 has no
+    // `code` at all because its only possible cause is `unique(ladder_id, name)`.
+    if (errorPayloadCode(error.payload) === MEMBER_ENGAGED_CODE) return ENGAGED_MESSAGES[intent];
     // The route's only 400: the captain trying to remove themselves. Unreachable through
     // the UI (a captain gets "Dissolve", never "Leave"), mapped for the stale-page case.
     if (error.status === 400) return 'The captain cannot leave — dissolve the team instead.';
@@ -275,7 +319,20 @@ export function dissolveTeamErrorMessage(error: unknown) {
   const shared = sharedMessage(error);
   if (shared) return shared;
 
-  if (error instanceof ApiError && error.status === 404) return TEAM_GONE_MESSAGE;
+  if (error instanceof ApiError) {
+    // A side of this team is still engaged in a `pending` / `in_progress` /
+    // `awaiting_confirmation` / `disputed` match: dissolving would leave that side without
+    // a team (`match_sides.team_id` is `set null`).
+    if (errorPayloadCode(error.payload) === TEAM_ENGAGED_CODE) {
+      // ⚠️ "open OR ongoing", and the difference is not cosmetic: this route refuses on
+      // ENGAGING_STATUSES (an unaccepted `pending` slot included), where member removal
+      // refuses on LOCKING_STATUSES only (a `pending` slot is cancelled instead, BX-LEAVE).
+      // Saying "ongoing match" here would leave a captain with a single open slot looking
+      // for a match that is not being played.
+      return 'You cannot dissolve this team while it has an open or ongoing match — cancel it or finish it first.';
+    }
+    if (error.status === 404) return TEAM_GONE_MESSAGE;
+  }
 
   return 'Could not dissolve the team.';
 }
