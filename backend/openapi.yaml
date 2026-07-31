@@ -236,6 +236,26 @@ components:
         avatarUrl:
           type: string
           nullable: true
+      # Le serveur envoie TOUJOURS les quatre (les deux derniers valent `null`, ils ne sont
+      # jamais absents). Sans ce `required`, la codegen les rend tous optionnels et chaque
+      # consommateur front paie des `?.` qui laissent croire à une donnée manquante.
+      required: [id, pseudo, displayName, avatarUrl]
+
+    # Un ami tel que le rend `GET /friends` : le résumé, plus l'id de la RELATION.
+    # 🔑 `id` = l'ami (bloquer, ouvrir son profil, lui écrire) ; `friendshipId` = la relation,
+    # le SEUL identifiant que `DELETE /friends/{id}` accepte. Les confondre rend un 404.
+    FriendListItem:
+      allOf:
+        - $ref: '#/components/schemas/FriendSummary'
+        - type: object
+          properties:
+            friendshipId:
+              type: string
+              format: uuid
+            since:
+              type: string
+              format: date-time
+          required: [friendshipId, since]
 
     # ---------- Friendship ----------
     Friendship:
@@ -1557,13 +1577,8 @@ paths:
                   friends:
                     type: array
                     items:
-                      allOf:
-                        - $ref: '#/components/schemas/FriendSummary'
-                        - type: object
-                          properties:
-                            since:
-                              type: string
-                              format: date-time
+                      $ref: '#/components/schemas/FriendListItem'
+                required: [friends]
         '500':
           $ref: '#/components/responses/InternalError'
 

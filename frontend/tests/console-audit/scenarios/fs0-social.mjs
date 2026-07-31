@@ -37,6 +37,34 @@ async function makeFriends(requester, addressee, ORIGIN) {
   if (!accept.ok) throw new Error(`acceptation de l'amitié a répondu ${accept.status}`);
 }
 
+/**
+ * Nombre d'amis vus en ligne PAR L'APPLICATION, lu dans son magasin de présence.
+ *
+ * 🚨 On ne peut pas le lire à l'écran : depuis [FS-1] l'onglet croise la liste d'amis avec la
+ * présence, donc un compte sans ami n'affiche aucun témoin — une fuite de présence y serait
+ * invisible et le check vert par construction.
+ *
+ * ⚠️ Même précaution que S1b : dès que le HMR de Vite a invalidé le module une fois,
+ * l'application tourne sur `…/realtime-store.ts?t=<horodatage>` et l'URL nue construirait une
+ * SECONDE instance vierge — qui rendrait 0 quoi qu'il arrive. On résout donc l'URL réellement
+ * chargée, la plus récente d'abord. Rend -1 si la lecture échoue, jamais 0 : un échec ne doit
+ * pas ressembler à une purge réussie.
+ */
+async function readOnlineFriendCount(page) {
+  return page
+    .evaluate(async () => {
+      const liveUrl = performance
+        .getEntriesByType('resource')
+        .map((entry) => entry.name)
+        .filter((name) => name.includes('/src/stores/realtime-store.ts'))
+        .sort()
+        .pop();
+      const { useRealtimeStore } = await import(liveUrl ?? '/src/stores/realtime-store.ts');
+      return useRealtimeStore.getState().onlineFriendIds.length;
+    })
+    .catch(() => -1);
+}
+
 export async function run({ page, setPhase, step, user, createUser, login, ORIGIN }) {
   const sockets = [];
   const connectionLabel = page
@@ -129,8 +157,10 @@ export async function run({ page, setPhase, step, user, createUser, login, ORIGI
   await friendContext.addCookies(friend.cookies);
   const friendPage = await friendContext.newPage();
   await friendPage.goto(`${ORIGIN}/home`, { waitUntil: 'networkidle' });
+  // ⚠️ Le témoin de présence a CHANGÉ avec [FS-1] : l'onglet n'affiche plus un compteur
+  // (« 1 friend online ») mais deux groupes titrés. On lit donc le titre du groupe.
   const presenceBecameLive = await page
-    .getByText('1 friend online', { exact: true })
+    .getByText('Online — 1', { exact: true })
     .waitFor({ timeout: 15000 })
     .then(() => true)
     .catch(() => false);
@@ -151,7 +181,7 @@ export async function run({ page, setPhase, step, user, createUser, login, ORIGI
     .then(() => true)
     .catch(() => false);
   const presenceRestored = await page
-    .getByText('1 friend online', { exact: true })
+    .getByText('Online — 1', { exact: true })
     .waitFor({ timeout: 15000 })
     .then(() => true)
     .catch(() => false);
@@ -291,6 +321,12 @@ export async function run({ page, setPhase, step, user, createUser, login, ORIGI
   );
 
   setPhase('7. logout puis autre compte sans fuite de présence');
+  // Relevé AVANT le logout : c'est lui qui rend S8 falsifiable. Un magasin fantôme (voir le
+  // piège du HMR dans `readOnlineFriendCount`) rendrait 0 des deux côtés, donc un « 0 après »
+  // serait vert par construction. En exigeant « au moins 1 AVANT », on prouve d'abord qu'on lit
+  // bien le magasin de l'application, et seulement ensuite qu'il a été purgé.
+  const onlineBeforeLogout = await readOnlineFriendCount(page);
+
   const newcomer = await createUser();
   const currentSocket = sockets.at(-1);
   const socketClosed = currentSocket.waitForEvent('close', { timeout: 10000 }).then(() => true).catch(() => false);
@@ -301,16 +337,21 @@ export async function run({ page, setPhase, step, user, createUser, login, ORIGI
   await login(newcomer);
   setPhase('7. nouveau compte connecté');
   await connectionLabel.filter({ hasText: 'Online' }).waitFor();
-  const previousPresencePurged = await page
-    .getByText('0 friends online', { exact: true })
-    .waitFor()
-    .then(() => true)
-    .catch(() => false);
+  // 🚨 CE CHECK A DÛ CHANGER DE SOURCE, PAS SEULEMENT DE LIBELLÉ, ET C'EST LE PIÈGE.
+  // Il lisait « 0 friends online », un compteur que l'ancien placeholder tirait DIRECTEMENT
+  // de `onlineFriendIds.length`. Depuis [FS-1], l'onglet n'affiche plus ce nombre : il croise
+  // la liste d'amis avec la présence. Or ce compte neuf n'a AUCUN ami — donc n'importe quelle
+  // présence fuitée du compte précédent serait invisible à l'écran, et un check retombé sur
+  // l'état vide serait vert par construction, exactement le faux vert qu'on chasse ici.
+  // On interroge donc le magasin lui-même, la seule source qui puisse encore porter la fuite.
+  // ⚠️ Même précaution que S1b : le HMR de Vite fait tourner l'app sur `…?t=<horodatage>`,
+  // l'URL nue construirait un magasin vierge — donc vert quoi qu'il arrive.
+  const onlineAfterSwitch = await readOnlineFriendCount(page);
   step('S7', closedOnLogout, `socket fermée au logout=${closedOnLogout}`);
   step(
     'S8',
-    previousPresencePurged,
-    `le nouveau compte affiche 0 ami en ligne : état précédent purgé=${previousPresencePurged}`,
+    onlineBeforeLogout >= 1 && onlineAfterSwitch === 0,
+    `présence dans le magasin : ${onlineBeforeLogout} avant le logout (≥ 1 attendu — c'est la preuve qu'on lit le magasin de l'app), ${onlineAfterSwitch} après bascule de compte (0 attendu — état du compte précédent purgé)`,
   );
 
   await friendContext.close();

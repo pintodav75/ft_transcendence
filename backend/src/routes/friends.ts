@@ -119,7 +119,12 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
         );
       const allRows = [...asRequester, ...asAddressee];
       const friends = allRows.map((row) => ({
+        // `id` est l'id de l'AMI (c'est lui qu'on bloque, dont on ouvre le profil et à qui
+        // on écrit) ; `friendshipId` est l'id de la RELATION, le seul que `DELETE /friends/:id`
+        // accepte. Sans lui, retirer un ami depuis cette liste était littéralement impossible
+        // — aucune autre route ne fait la correspondance (trouvé en préparant [FS-1]).
         id: row.users.id,
+        friendshipId: row.friendships.id,
         pseudo: row.users.pseudo,
         displayName: row.users.displayName,
         avatarUrl: row.users.avatarUrl,

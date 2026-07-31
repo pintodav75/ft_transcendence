@@ -1116,10 +1116,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            friends?: (components["schemas"]["FriendSummary"] & {
-                                /** Format: date-time */
-                                since?: string;
-                            })[];
+                            friends: components["schemas"]["FriendListItem"][];
                         };
                     };
                 };
@@ -4656,10 +4653,16 @@ export interface components {
         };
         FriendSummary: {
             /** Format: uuid */
-            id?: string;
-            pseudo?: string;
-            displayName?: string | null;
-            avatarUrl?: string | null;
+            id: string;
+            pseudo: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+        };
+        FriendListItem: components["schemas"]["FriendSummary"] & {
+            /** Format: uuid */
+            friendshipId: string;
+            /** Format: date-time */
+            since: string;
         };
         Friendship: {
             /** Format: uuid */

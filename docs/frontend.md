@@ -436,6 +436,35 @@ Validation finale après **second rebase, sur le `master` du 31/07 au soir** (au
 
 ⚠️ **Deux échecs de la campagne n'étaient PAS imputables à FS-0** et ont failli lui être attribués : `dispute` et `match-detail` sortaient `0/0` parce que les comptes de fixture `alice`/`bob`/`carol` avaient perdu leur mot de passe en base **et** que les matchs de démo du seed avaient expiré (le job de 24 h avait annulé la dispute, les créneaux étaient passés). Réparé par un `seed:dev`, après avoir **mesuré** qu'il ne détruisait rien (les données de démo posées à la main avaient déjà disparu ; les 3 matchs restants appartiennent à une équipe que le seed ne touche pas). **Un scénario qui rend `0/0` accuse toujours l'état de la base avant le ticket.**
 
+---
+
+## [FS-1] — onglet Amis du rail social
+
+**Livré** : `lib/friends.ts` (lecture, `FRIENDS_KEY`, helpers purs `sortedByPseudo`/`splitByPresence`), `lib/friend-mutations.ts` (retrait, blocage, mapping des erreurs), **`components/ui/action-menu.tsx` — menu « ⋮ » générique, sans connaissance du domaine, donc `ui/` d'emblée**, et `components/social/FriendsSlot.tsx` qui remplace le placeholder de FS-0.
+
+🔑 **Un blocage d'API trouvé AVANT de lancer le codeur, et c'est ce qui a sauvé le ticket** : `GET /friends` ne rendait que l'id de l'**utilisateur**, alors que `DELETE /friends/{id}` exige celui de la **relation** — retirer un ami depuis cette liste était **littéralement impossible**, aucune autre route ne faisait la correspondance. `friendshipId` ajouté au contrat (+ `required` déclaré sur `FriendSummary`, qui servait aussi `ConversationSummary`), `api-types.gen.ts` régénéré. **Ne jamais confondre les deux** : `id` pour bloquer et ouvrir le profil, `friendshipId` pour retirer.
+
+**Décisions produit** :
+
+- **Le groupe « Online » est rendu même vide** (« Nobody is online right now. ») — c'est la question pour laquelle on ouvre cet onglet ; une section absente n'y répond que par sous-entendu. Le groupe « Offline » disparaît s'il est vide, tout le monde étant déjà listé au-dessus.
+- **Le pseudo est un lien, la ligne ne l'est pas** : le lien et le bouton « ⋮ » sont **frères** dans le `<li>` (idiome de `RosterChips`). Un bouton dans un `<a>` est invalide et Chrome l'écrit en console.
+- **Pas de mise à jour optimiste** : la ligne part quand le serveur a confirmé. Donc aucun rollback à écrire, et aucun écran qui ment.
+
+**Trois corrections de review à ne pas défaire** :
+
+1. 🚨 **UNE SEULE région d'annonce pour tout le rail, portée par `SocialPanel`.** Le slot montait la sienne, or le rail est monté sur **toutes** les pages authentifiées : sa région était donc permanente, en plus de celle que chaque page déclare comme « la seule de cet écran ». Rien ne cassait ce jour-là, mais FS-2, FS-3 et FS-5 auraient voulu la leur — **quatre régions concurrentes dans 312 px**. Le commentaire qui l'interdit est dans `SocialPanel.tsx`.
+2. **« Who is online is not available right now. » ne doit pas s'afficher au chargement nominal.** `hasPresenceSnapshot` est faux tant que le temps réel n'a pas livré son instantané : la liste d'amis arrive vite (même origine), la présence attend le handshake — l'écran se présentait donc comme une panne **sur chaque chargement de page saine**. Trois états désormais : `waiting` (première tentative, ou socket ouverte sans instantané reçu — ligne discrète « Checking who is online… ») · `unavailable` (`reconnecting`/`closed` — l'encadré) · `ready`.
+3. **Le focus ne se gare pas sur un titre invisible.** Le garage **est nécessaire** (`ConfirmDialog` capture `document.activeElement` avant `showModal()`, et l'item de menu est démonté par le même rendu → l'ouvreur serait `<body>`, toujours connecté, donc le repli ne partirait jamais). Mais la cible était un `<h2 class="sr-only">` : au clavier, l'anneau de focus **disparaissait**. Le titre « Friends » de l'onglet est devenu **visible** — la bande d'onglets étant en icônes seules, rien ne nommait l'onglet ouvert, il gagne sa place.
+
+⚠️ **`ActionMenu` porte un tabindex glissant** (motif APG) : un seul arrêt de tabulation pour tout le menu, `Escape` rend le focus au déclencheur **à la frame suivante** (le faire dans le même rendu poserait le focus sur un nœud que React démonte).
+
+**Audit** : `fs1-friends.mjs`, **9 checks**. 🔑 **Les deux checks centraux assertent des STATUTS HTTP, pas l'écran** : à l'écran, retrait et blocage se ressemblent — la ligne disparaît au refetch même si la mutation a échoué. Seul le code de réponse distingue « j'ai envoyé le bon identifiant » de « j'ai envoyé l'autre ». Détail et pièges → `frontend/tests/console-audit/README.md`.
+
+⚠️ **Deux checks d'AUTRES scénarios ont dû bouger, et les deux méritaient mieux qu'un rechercher-remplacer** :
+
+- `fs0-social` S3/S4/S8 lisaient le compteur du placeholder que FS-1 supprime. S3/S4 se recablent sur le titre de groupe ; **S8 a dû changer de SOURCE** : le compte neuf n'ayant aucun ami, une présence fuitée du compte précédent serait **invisible à l'écran** et le check vert par construction. Il interroge désormais le magasin, et exige **≥ 1 avant le logout** pour prouver d'abord qu'il lit bien celui de l'application.
+- `home` H1 comptait `GET /friends` dans le budget de requêtes de la page. Corrigé **au bon niveau** : une liste `SOCIAL_RAIL` exclue du budget, comme l'était déjà le bootstrap de session. **Remonter le budget de 5 à 6 aurait été la mauvaise réponse** — FS-2 et FS-4 l'auraient recassé chacun leur tour.
+
 ## Détail par ticket — bloc déporté de `CLAUDE.md` (refacto du 31/07)
 
 > Ce paragraphe vivait sur **une seule ligne de 17,5 Ko** dans `CLAUDE.md` — à lui seul 20 % du fichier chargé à chaque session. Rapatrié ici verbatim.

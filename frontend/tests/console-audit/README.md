@@ -872,6 +872,37 @@ donc **imputé à un ticket innocent**. `login()` fait maintenant suivre un
 `waitForLoadState('networkidle')` (sous `catch`, et **dans** la phase « login », donc hors
 périmètre). Concerne les 7 appels de `match-result`, `match-detail`, `teams-detail` et
 `teams-manage`.
+## `fs1-friends` (FS-1) — deux identifiants qu'on ne peut pas distinguer à l'écran
+
+`scenarios/fs1-friends.mjs`, **9 checks**. `fs0-social` prouve le **transport** (une socket, la
+présence, la reconnexion, le panneau mobile) et ouvre bien l'onglet Friends, mais il n'y clique
+jamais rien : un vert de sa part ne dit rien du contenu de l'onglet.
+
+🚨 **Le check central assert des STATUTS HTTP, pas l'écran, et c'est tout l'intérêt.**
+`GET /friends` rend deux identifiants par ligne : celui de **l'ami** et celui de la **relation**.
+`DELETE /friends/{id}` exige le second, `POST /blocks/{userId}` exige le premier. Les confondre
+donne un 404 ou un 400 — donc une **ligne rouge en console**, motif de rejet du projet. Mais à
+l'écran les deux chemins se ressemblent : la ligne peut disparaître sur un refetch alors que la
+mutation a échoué. `F6` et `F7` relèvent donc le **statut réel de la réponse** (`200` et `201`),
+et `F9` compte **tous** les 4xx du parcours. Un écran qui a l'air juste ne suffit pas ici.
+
+⚠️ **`F5` ne se contente pas de « le focus n'est pas sur `<body>` ».** La première livraison
+garait le focus sur un titre `sr-only` : hors de `<body>`, donc vert au critère habituel, mais
+**invisible** — un utilisateur clavier voyant regardait l'anneau disparaître sans savoir d'où
+repartirait son Tab. Le check mesure aussi que l'élément focalisé occupe une surface à l'écran.
+
+⚠️ **`F8` garde la cohabitation des deux couches d'`Escape`.** Sous 1024 px, le panneau social
+est un `aria-modal` fait main dont le gestionnaire d'`Escape` est posé sur `document`, et sa
+garde cherche un attribut `[role="dialog"]` **qu'un `<dialog>` natif ne porte pas**. Sans
+isolation, un seul `Escape` fermait la confirmation **et** le panneau entier. Le check exige que
+la confirmation parte et que le panneau reste.
+
+🔑 **Un rouge vécu à l'écriture, dans le CHECK et pas dans le code** : `F4` lisait
+`document.activeElement` **immédiatement** après `Escape`, alors que le menu rend le focus à son
+déclencheur à la **frame suivante** — délibérément, pour ne pas poser le focus sur un nœud que
+React démonte. Le check attendait donc l'état d'avant et rougissait sur un composant correct.
+Même famille que l'invariant #11 : **chercher l'attente manquante avant d'accuser l'application.**
+
 ## FS-0 — le chrome persistant doit rester hors des sélecteurs métier
 
 Le rail social ajoute son propre `tablist` et son `tabpanel` sur toutes les pages authentifiées.
