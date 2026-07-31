@@ -371,3 +371,41 @@ Conséquences directes, toutes voulues :
 - ⚠️ **ET LE DÉFAUT N'EST PLUS SEULEMENT MOBILE — mesuré en review à 1280 px**, la largeur de bureau standard : sur `/history` (compte `alice`, 11 matchs) la boîte de table fait `clientWidth 575` pour un `scrollWidth 646`, soit **71 px hors champ**, et ce qui sort est la colonne **Status**. Contrôles pris dans la même session : page d'équipe **122 px** hors champ (dette **préexistante**, 7 colonnes), page solo **0**. `/history` n'invente donc pas le défaut, mais il le **rejoint au bureau** — alors que `MatchRow` documente lui-même que « le statut est ce pour quoi la ligne est lue ». 🔑 **Aucun check ne garde 1280 px** (`H16` ne mesure qu'à 375) : c'est délibéré, un check sur la valeur actuelle serait rouge le jour où il passerait. Les deux correctifs candidats : raccourcir la date, ou fusionner jeu + format sur une seule ligne dans la cellule Ladder.
 - La liste des options « Result » est dérivée de l'historique **complet**, pas de la sélection de jeu en cours : « Wins » peut donc être proposé sur un jeu où je n'ai aucune victoire. C'est **délibéré** — c'est précisément la combinaison qui produit l'état vide « ce sont tes filtres », et elle est gardée par un check.
 - Le `emptyMessage` de `MatchHistoryTable` est **inatteignable** depuis cet écran : les deux états vides (jamais joué / filtres trop étroits) sont rendus par `HistoryMatches` avant que la table ne soit montée. La prop reste requise par le composant.
+
+---
+
+## [F-DISPUTE] — `/disputes/$disputeId` (mergé le 31/07, commit `fbcc356`, merge `f6345c8`)
+
+**Le problème** : un litige était un cul-de-sac. FT-4B permet d'en ouvrir un depuis la fiche de match, puis **aucun écran n'existait** — le mot « dispute » n'apparaissait dans le front que comme badge. Or le job B7 annule un litige **24 h après son ouverture** faute d'arbitrage : qui ne peut pas déposer sa preuve perd son match par forfait de fait.
+
+**Livré** : `lib/dispute-detail.ts` (types codegen, `useDispute`, `DISPUTE_WINDOW_HOURS`, `canSubmitEvidence`, `settledByTimeout`, `resolutionVerdict`, `attachmentOf`, validation client), `lib/dispute-mutations.ts` (`useSubmitEvidence`, mapping 400/403/409/413/429), `pages/disputes/dispute-detail.tsx`, la route, et `components/disputes/{DisputeVerdict,DisputeClaims,EvidenceThread,EvidenceForm,EvidencePicker}.tsx`.
+
+**Extractions et généralisations** (règle du second usage) :
+
+- **`components/ui/progress-bar.tsx`** extraite d'`ImagePicker` — DOM inchangé (`teams-manage` surveille `[role="progressbar"]`), non-régression prouvée sur `teams-manage` 35/35 et `ft1c-team-logo` 12/12.
+- **`lib/upload.ts` gagne `fields?: Record<string, string>`** : `uploadFile` n'envoyait que le fichier, or une preuve est **fichier + message** dans le même multipart. Rétro-compatible — l'avatar et le logo envoient un corps **byte-identique**. ⚠️ Le serveur borne à `files: 1, fields: 1, parts: 2` : une troisième partie, même vide, fait un **400**.
+- **`MatchLineLink` généralisé par union discriminée** (`target: {kind:'match'} | {kind:'dispute'}`) plutôt qu'un `disputeId?` optionnel : la règle « une ligne en litige ouvre son dossier » est une décision **produit**, elle appartient au point d'appel. ⚠️ Le docblock du composant reste vrai — **un seul lien, rien d'interactif imbriqué** : c'est pourquoi la ligne **change de destination** au lieu de gagner un second lien.
+- **`isSoloMatch` / `sideName` / `sideAvatarUrl` / `sideInitials` élargis** à des types structurels (`NamedSide`, `PicturedSide`, deux types séparés pour ne pas promettre plus que la fonction ne lit). La règle « pas d'équipe ≠ 1v1 → Disbanded team » n'est donc **recopiée nulle part**.
+
+**Décisions verrouillées** :
+
+- 🚨 **Pas de chat avec l'admin.** Le modèle est : chaque camp dépose des preuves accompagnées d'un message, les deux camps voient le fil, l'admin tranche en laissant des notes. Il ne répond pas dans le fil — ne pas le promettre dans la copie.
+- 🚨 **Aucun contrôle d'arbitrage ici.** C'est [F-ADMIN], qui ajoutera ses actions **sur cette page**. D'où la séparation stricte, dans le code, entre l'affichage du dossier et `canSubmitEvidence`.
+- **`canSubmitEvidence` miroite la garde serveur** : dispute `open` **ET** (1v1 → je suis le joueur aligné ; 2v2+ → je suis `side.team.captainId`). Banc, joueur non-capitaine, admin non-participant, visiteur : **aucun contrôle**. ⚠️ Divergence volontaire avec le serveur, qui branche sur `side.teamId` : on tranche par le **format**, comme `canReportResult`. Elle est **inatteignable** — `DELETE /teams/:id` refuse une équipe engagée et `disputed` ∈ `ENGAGING_STATUSES`, donc pendant une dispute ouverte un camp 2v2+ a toujours son équipe.
+- **La course des 24 h est fermée** comme sur `/home` et `/matchmaking` : `Math.max(useSlotClock(), query.dataUpdatedAt)`, `dataUpdatedAt` en **plancher**. Un `now` en retard **cache** le formulaire, il ne l'offre jamais.
+
+**Pièges à ne pas rouvrir** :
+
+- ⚠️ **`useDispute` porte `staleTime: 0` ET `gcTime: 0`.** Les `evidenceUrl` sont **présignées ~5 min** (bucket privé) et React Query **peint le cache avant de revalider** : sans cache jeté, un retour sur la page monterait des `<img>` sur des URLs périmées → **403 → ligne rouge** (motif de rejet). Le flash de chargement à chaque visite est le prix, et il est écrit en commentaire. **Ne pas remettre un `staleTime`.**
+- ⚠️ **`ImagePicker` n'a PAS été réutilisé**, et ce n'est pas un oubli : quatre différences simultanées (types acceptés, plafond 5 vs 2 Mo, **un PDF n'a pas d'aperçu**, et sa forme est un contrôle d'avatar rond). Le paramétrer aurait rendu pluggables 4 de ses 5 comportements — on ne partage plus un composant, on partage un nom — tout en mettant en risque le chemin logo.
+- ⚠️ **Le type de pièce jointe se déduit de l'extension de l'URL présignée**, fiable parce que **le serveur** construit la clé `${uuid}.${EVIDENCE_MIME[mime]}` depuis une map fermée. `<img>` seulement sur une image connue, tout le reste en lien ; protocole restreint à `http:`/`https:`.
+- 🔑 **Un `<img>` pointé sur un PDF n'écrit PAS de ligne console** — mesuré sur un build volontairement cassé : MinIO répond **200**, la requête réussit, seul le **décodage** échoue et Chrome le signale par l'événement `error`. La règle reste bonne, son **motif** est le téléchargement inutile d'un fichier pour n'afficher qu'une image cassée.
+- ⚠️ **`settledBy` distingue l'arbitre du job.** Sans lui la page attribuait à un admin l'annulation automatique et servait sa `resolutionNotes` — une ligne de log interne **en français** — sous « Admin's note ». Le bloc de note est **absent** (pas replié) sur un timeout : un repli « aucune note » laisserait croire qu'un humain a regardé le dossier et choisi de se taire.
+
+**Dette assumée** :
+
+- **Le `HeroFrame` n'a PAS été extrait** alors que l'en-tête du dossier est la **4ᵉ copie** de l'idiome (`MatchHeader`, `game-detail`, `ladder-detail`, ici). **Décision de David** : gain cosmétique contre le risque de casser trois écrans qui fonctionnent. Ne pas le « corriger » en croyant à un oubli.
+- **Passation [F-ADMIN]** : le lien d'en-tête mène à `/matches/$matchId`, que `GET /matches/{id}` **refuse en 403 à un admin non-participant** sur un match `disputed`. Inatteignable aujourd'hui (`isAdmin` n'est pas exposé) ; à conditionner dès que [F-ADMIN] rend cette page atteignable par un arbitre.
+- **Non couvert** : « Disbanded team » sur un camp de dispute (inatteignable tant qu'une dispute est ouverte) · admin non-participant lisant le dossier (aucune fixture admin) · `author: null` dans le fil · deux camps qui déclarent le **même** vainqueur avec des scores différents · les objets MinIO des preuves déposées par l'audit restent orphelins dans le bucket privé de dev.
+
+**Audit** : `dispute.mjs`, **26 checks**. 🔑 **Quatre faux verts trouvés en review, aucun par les checks** — voir la ligne Tests de `CLAUDE.md` : ils forment le meilleur inventaire du repo sur cette famille de défaut.

@@ -118,3 +118,18 @@ Tests re-vérifiés après tous les correctifs : `tsc` propre, Vitest **19/19** 
 
 > ⚠️ Il n'y a **pas** de « matchmaking worker » à écrire. Cette ligne a longtemps figuré ici par erreur (« file d'attente, matching par ELO — la pièce centrale ») : **c'est faux**, le modèle est challenge/accept et il est **déjà implémenté**. Voir l'encadré du concept en haut du fichier.
 
+
+---
+
+## [F-DISPUTE] — extension de `GET /disputes/{id}` (31/07, commit `fbcc356`, merge `f6345c8`, aucune migration)
+
+Écrite **avant** de lancer le ticket front qui la consomme. La carte annonçait « front pur, zéro back » : **c'était faux**, vérifié dans le handler.
+
+- **`dispute.createdAt`** — c'est lui qui arme le timeout de 24 h du job B7 (`jobs/index.ts`), ni le coup d'envoi ni la soumission d'un score. Sans lui l'échéance exigée par la DoD de la carte était **incalculable**.
+- **Bloc `match`** : `{ id, status, scheduledAt, ladder { id, name, format, gameId, gameName } }`, en **une requête jointe**, servie **après la garde**. Deux raisons, la seconde étant la plus importante : `ladder.format` est la **seule autorité** pour dire « 1v1 » (un `side.team === null` ne l'est pas — une dispute reste consultable après arbitrage, donc après qu'une équipe a pu être dissoute) ; et 🚨 **la page ne peut pas aller chercher ce contexte sur `GET /matches/{id}`**, qui répond **403 à un admin non-participant** sur un match `disputed` — or [F-ADMIN] se greffera sur cette page.
+- **`settledBy: 'admin' | 'timeout' | null`** — `null` tant que la dispute est `open`. L'arbitrage et le job écrivent **les mêmes colonnes**, or ce ne sont pas les mêmes faits : sans ce champ le front attribuait à un arbitre l'annulation automatique et servait la `resolutionNotes` du job — une **ligne de log interne en français** — sous « Admin's note ». 🚨 **Tant que [F-ADMIN] n'existe pas, le timeout est le seul chemin vers `resolved`** : c'était le cas courant, pas le cas limite.
+  - ⚠️ **Dérivé de `resolved_by_user_id` ET de la `resolution`**, jamais du seul resolver : la colonne est en `set null`, donc un admin qui supprime son compte ferait passer son arbitrage pour un timeout — or le job n'écrit **jamais** qu'un `cancelled`, donc un vainqueur désigné implique un humain. Sans cette seconde branche, le champ affirmerait un état que le job ne sait pas produire, et tout consommateur qui lui ferait confiance seul hériterait du défaut.
+  - ⚠️ **Reste lossy dans un cas, assumé** : un admin qui règle `cancelled` **puis** supprime son compte est lu comme un timeout, donc sa note est masquée. Taire une note vraie coûte moins que présenter un log comme la prose d'un arbitre.
+- ⚠️ Les sous-objets `dispute` / `sides` / `evidence` ne déclaraient **aucun `required`** — même défaut que le payload de B16, corrigé par FT-4A : la codegen sortait tout en optionnel. Ajoutés en les confrontant un par un à ce que le handler renvoie réellement. **Aucun handler existant modifié.**
+
+Vérifié en live sur la base de dev (les trois valeurs de `settledBy` forcées en SQL puis la dispute semée **remise en `open`** — elle fait partie des 7 états cs2 dont `match-detail.mjs` dépend), `tsc --noEmit` et `npm test` 40/40 verts, codegen régénérée et committée (invariant #8).
