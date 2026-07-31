@@ -298,6 +298,11 @@ components:
         createdAt:
           type: string
           format: date-time
+      # Les cinq sont TOUJOURS envoyés. Sans ce `required`, la codegen les rend optionnels
+      # et le front dédupliquerait sur un `id` qu'il doit d'abord tester — or `id` est
+      # exactement la clé qui empêche un message d'apparaître deux fois entre l'historique
+      # et l'événement temps réel.
+      required: [id, senderId, receiverId, content, createdAt]
 
     # ---------- Conversation summary ----------
     ConversationSummary:

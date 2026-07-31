@@ -1,8 +1,13 @@
-import type { InputHTMLAttributes } from 'react'
+import type { ComponentPropsWithRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
-type InputProps = InputHTMLAttributes<HTMLInputElement>
+// ComponentPropsWithRef, not InputHTMLAttributes: same prop set PLUS `ref`, which React 19
+// passes to function components like any other prop (no forwardRef). Needed as soon as a
+// caller has to move focus into the field — the social panel focuses the chat composer when
+// a conversation is opened from the friends list, exactly like `Button` already does for
+// `ConfirmDialog`.
+type InputProps = ComponentPropsWithRef<'input'>
 
 export function Input({ className, ...props }: InputProps) {
   return (

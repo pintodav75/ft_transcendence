@@ -465,6 +465,32 @@ Validation finale après **second rebase, sur le `master` du 31/07 au soir** (au
 - `fs0-social` S3/S4/S8 lisaient le compteur du placeholder que FS-1 supprime. S3/S4 se recablent sur le titre de groupe ; **S8 a dû changer de SOURCE** : le compte neuf n'ayant aucun ami, une présence fuitée du compte précédent serait **invisible à l'écran** et le check vert par construction. Il interroge désormais le magasin, et exige **≥ 1 avant le logout** pour prouver d'abord qu'il lit bien celui de l'application.
 - `home` H1 comptait `GET /friends` dans le budget de requêtes de la page. Corrigé **au bon niveau** : une liste `SOCIAL_RAIL` exclue du budget, comme l'était déjà le bootstrap de session. **Remonter le budget de 5 à 6 aurait été la mauvaise réponse** — FS-2 et FS-4 l'auraient recassé chacun leur tour.
 
+---
+
+## [FS-3] — conversation DM du rail social
+
+**Livré** : `lib/messages.ts` (types codegen, clé de cache, fusion/tri/dédup, mapping d'erreurs, libellés de jour), `components/social/ChatConversation.tsx` (en-tête, journal, composeur), câblage dans `ChatSlot`/`SocialPanel`/`FriendsSlot`, et **trois extractions au 2ᵉ usage** : `ui/icon-button.tsx` (4 consommateurs), `social/PresenceAvatar.tsx` et `lib/presence.ts` (2 chacun). `ui/input.tsx` accepte désormais une `ref` (sur-ensemble strict, aucun appelant cassé).
+
+**Côté serveur, deux corrections faites AVANT de lancer le codeur** : `Message` passe en `required` sur ses 5 champs (sans quoi le front dédupliquerait sur un `id` qu'il doit d'abord tester — or c'est exactement la clé qui empêche le doublon), et `GET /messages/{friendId}` **départage son tri par `id`** — deux messages de la même milliseconde, cas normal d'un chat, remontaient dans un ordre arbitraire alors que le front trie `createdAt` puis `id`.
+
+🔑 **La corrélation envoi ↔ accusé, attaquée en review et validée.** Le serveur ne renvoie aucune corrélation avec la frappe. Choix retenu : **un seul envoi en vol**, contenu mémorisé, premier `message_sent` portant ce contenu = accusé. Le cas « j'écris *ok*, l'autre m'écrit *ok* au même instant » **ne peut pas se confondre** : le serveur n'envoie `message_sent` qu'à l'expéditeur, le message de l'autre arrive en `message`. 🚨 **Et surtout : aucune bulle optimiste.** Le message s'affiche par le chemin temps réel ordinaire, donc il n'y a **rien à réconcilier** — la classe de bug « le message apparaît deux fois » est supprimée à la racine. Prix : l'aller-retour avant de voir son propre message.
+
+**Défauts de review à ne pas rouvrir** :
+
+1. 🚨 **Un refetch en échec effaçait toute la conversation.** `isError` était testé **avant** `messages.length`, or TanStack Query **garde `data`** quand un *refetch* échoue. 40 messages à l'écran + une reconnexion + un rechargement raté (le limiteur global suffit) = écran d'erreur plein, tampon temps réel perdu avec. Aggravé par `refetchOnReconnect: false` : ce rechargement est **l'unique** chemin de rattrapage. Désormais : écran plein **seulement si rien à lire**, sinon bandeau discret hors de la zone qui défile.
+2. 🚨 **Le journal n'était pas atteignable au clavier** (ni `tabindex`, ni nom, aucun descendant focusable) : la tabulation sautait de l'en-tête au champ, et lire l'historique **est** la fonctionnalité. Corrigé en `tabIndex={0}` + `role="group"` + nom. ⚠️ **Pas `role="log"`** : c'est une région live implicite, le rail n'en veut qu'une.
+3. **Un accusé arrivé APRÈS le filet de 10 s** posait un faux « message non envoyé » alors que la bulle s'affichait — et un renvoi créait un **vrai doublon en base**. Fermé par une mémoire du dernier contenu déclaré perdu.
+4. **Le brouillon était perdu à chaque changement d'onglet du rail.** 🔑 **Correctif structurel : les trois panneaux restent montés, les inactifs masqués.** Deux conséquences à connaître — un panneau masqué **n'annonce rien**, et changer d'onglet **ne recharge plus rien**.
+5. **Un refus serveur arrivé après fermeture** était avalé en silence : il remonte maintenant dans la zone d'annonce du rail, qui survit au démontage.
+6. Les `FormMessage` du chat ne portent plus de rôle live (le rail n'a qu'une zone d'annonce) ; `aria-invalid` + `aria-describedby` relient le refus au champ ; **séparateurs de jour** (`Today`/`Yesterday`/date) au lieu d'un `title=` inatteignable au doigt et au clavier.
+
+**Décisions produit** :
+
+- **La conversation vit dans l'onglet Messages, pas en fenêtre flottante** comme la maquette. Sous 1024 px le panneau est déjà une modale faite main ; y empiler une fenêtre rejouait le piège d'`Escape`. Le composant est autonome et en `h-full` : **FS-4 peut le déplacer dans une fenêtre sans le toucher.**
+- **Bouton dédié sur la ligne d'ami** plutôt qu'une entrée du menu « ⋮ » : le chat est la raison d'être du rail.
+
+**Audit** : `fs3-chat.mjs`, **9 checks**. 🔑 **Le check central compte les occurrences, il ne constate pas une présence** — un message arrive par trois chemins, « il est affiché » serait vert même sur un doublon. ⚠️ **`C7` a été vu VERT PAR CONSTRUCTION et réécrit** : il rouvrait la conversation en croyant provoquer un rechargement, alors que les panneaux restent montés et que le cache répond. Il passe désormais par **coupure → reconnexion → rechargement**, seul moment où un message existe dans les deux sources à la fois. Détail → `frontend/tests/console-audit/README.md`.
+
 ## Détail par ticket — bloc déporté de `CLAUDE.md` (refacto du 31/07)
 
 > Ce paragraphe vivait sur **une seule ligne de 17,5 Ko** dans `CLAUDE.md` — à lui seul 20 % du fichier chargé à chaque session. Rapatrié ici verbatim.

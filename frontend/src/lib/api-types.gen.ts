@@ -4680,14 +4680,14 @@ export interface components {
         };
         Message: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            senderId?: string;
+            senderId: string;
             /** Format: uuid */
-            receiverId?: string;
-            content?: string;
+            receiverId: string;
+            content: string;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
         };
         ConversationSummary: {
             friend: components["schemas"]["FriendSummary"];

@@ -132,8 +132,18 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
               and(eq(messagesTable.receiverId, userId), eq(messagesTable.senderId, friendId)),
             ),
           )
-          .orderBy(desc(messagesTable.createdAt))
+          // ⚠️ DÉPARTAGE PAR `id` OBLIGATOIRE, ce n'est pas de la coquetterie. Sans lui,
+          // deux messages de la même milliseconde — deux personnes qui envoient en même
+          // temps, cas NORMAL d'un chat — remontent dans un ordre arbitraire, différent
+          // d'un appel à l'autre. Le front fusionne cet historique avec les événements
+          // temps réel en dédupliquant par `id` et en triant `createdAt` puis `id` : un
+          // serveur qui n'applique pas le même second critère lui fait afficher deux
+          // ordres différents pour la même conversation. Même règle que le tri de
+          // `GET /messages/conversations` et que celui de `GET /matches/me`.
+          .orderBy(desc(messagesTable.createdAt), desc(messagesTable.id))
           .limit(100);
+        // Les 100 DERNIERS sont pris en décroissant puis remis à l'endroit : trier
+        // croissant et limiter rendrait les 100 PREMIERS messages de la conversation.
         const messages = result.reverse();
         return reply.code(200).send({ messages });
       } catch (error) {

@@ -872,6 +872,39 @@ donc **imputé à un ticket innocent**. `login()` fait maintenant suivre un
 `waitForLoadState('networkidle')` (sous `catch`, et **dans** la phase « login », donc hors
 périmètre). Concerne les 7 appels de `match-result`, `match-detail`, `teams-detail` et
 `teams-manage`.
+## `fs3-chat` (FS-3) — compter les occurrences, pas constater une présence
+
+`scenarios/fs3-chat.mjs`, **9 checks**.
+
+🚨 **Le check central est un COMPTAGE, et c'est toute la différence.** Un message atteint
+l'écran par **trois** chemins : l'historique REST, l'événement temps réel, et l'accusé d'envoi.
+Asserter « le message est affiché » serait donc vert **même sur un doublon franc** — le défaut
+n°1 que ce ticket pouvait produire. `C4`, `C5` et `C7` comptent les bulles portant le texte et
+exigent **exactement 1**.
+
+🔑 **`C7` A DÛ ÊTRE RÉÉCRIT PARCE QU'IL ÉTAIT VERT PAR CONSTRUCTION.** Sa première version
+rouvrait la même conversation depuis la liste d'amis en croyant provoquer un rechargement. Elle
+n'en provoquait aucun : depuis la review de FS-3 les trois panneaux du rail restent **montés**,
+donc le composant n'est pas remonté et le cache répond. Le check ne mettait à l'épreuve
+**aucune fusion**. Il passe désormais par le seul chemin où un message existe réellement dans
+les deux sources à la fois — **couper le réseau, le rétablir, attendre le rechargement** — et
+vérifie que les deux messages du run, déjà présents dans le tampon temps réel, n'apparaissent
+pas deux fois une fois l'historique revenu. Le même check porte la **promesse centrale du
+ticket** : le temps réel ne rejoue rien, seul ce rechargement rattrape la coupure. ⚠️ Il attend
+le rechargement par son **effet réseau observable**, jamais par un délai fixe.
+
+⚠️ **`C1` garde une propriété du RAIL, pas de l'écran** : le rail est monté sur toutes les pages
+authentifiées, donc ce qu'il charge, il le charge partout. Aucune lecture d'historique ne doit
+partir tant qu'aucune conversation n'est ouverte — onglet Messages vide compris.
+
+⚠️ **`C3` garde une régression d'accessibilité trouvée en review** : le journal qui défile
+n'avait ni `tabindex` ni nom accessible, donc la tabulation sautait de l'en-tête au champ de
+saisie et **l'historique était illisible au clavier** — alors que le lire *est* la
+fonctionnalité du ticket.
+
+⚠️ **`C6` garde une conséquence de la review** : les trois panneaux restent montés (les
+inactifs masqués), sinon un aller-retour vers l'onglet Amis reprenait le brouillon à zéro.
+
 ## `fs1-friends` (FS-1) — deux identifiants qu'on ne peut pas distinguer à l'écran
 
 `scenarios/fs1-friends.mjs`, **9 checks**. `fs0-social` prouve le **transport** (une socket, la

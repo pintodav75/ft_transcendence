@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { RotateCw, ShieldBan, UserMinus } from 'lucide-react';
+import { MessageCircle, RotateCw, ShieldBan, UserMinus } from 'lucide-react';
 
+import { PresenceAvatar } from '@/components/social/PresenceAvatar';
 import { ActionMenu } from '@/components/ui/action-menu';
-import { Avatar } from '@/components/ui/avatar';
 import { Callout } from '@/components/ui/callout';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { FormMessage } from '@/components/ui/form-message';
+import { IconButton } from '@/components/ui/icon-button';
 import { InlineButton } from '@/components/ui/inline-button';
 import { SectionTitle } from '@/components/ui/section-title';
 import { useBackFrom } from '@/lib/back-navigation';
@@ -17,45 +18,11 @@ import {
   useRemoveFriend,
 } from '@/lib/friend-mutations';
 import { sortedByPseudo, splitByPresence, useFriends } from '@/lib/friends';
-import { cn } from '@/lib/utils';
+import { presenceStatusOf } from '@/lib/presence';
 import { useRealtimeStore } from '@/stores/realtime-store';
 
 import type { Friend } from '@/lib/friends';
-import type { RealtimeConnectionState } from '@/stores/realtime-store';
-
-/** What the row is allowed to SAY about presence — `unknown` is a state, not a default. */
-type Presence = 'online' | 'offline' | 'unknown';
-
-/**
- * What the tab knows about presence RIGHT NOW, which is not the same question as "is the
- * socket up".
- *
- * - `ready` — a snapshot has landed, the two groups mean something.
- * - `waiting` — the transport is still opening its FIRST connection (or has just reopened
- *   and the snapshot is in flight). Nothing is wrong; the answer is simply not in yet.
- * - `unavailable` — the connection dropped or was refused. That one IS worth saying.
- */
-type PresenceStatus = 'ready' | 'waiting' | 'unavailable';
-
-/**
- * 🚨 A FIRST CONNECTION IS NOT AN OUTAGE. The friends list comes back from the same origin
- * in a few milliseconds while the WebSocket still has a handshake to finish, so keying the
- * fallback on `hasPresenceSnapshot` alone flashed "not available right now" on a perfectly
- * healthy page load, every single load.
- *
- * `open` counts as waiting too: the socket is up but `initial_presence` has not arrived yet
- * — the same in-flight moment, and it is also what a successful reconnection goes through.
- */
-function presenceStatusOf(
-  hasPresenceSnapshot: boolean,
-  connectionState: RealtimeConnectionState,
-): PresenceStatus {
-  if (hasPresenceSnapshot) return 'ready';
-
-  return connectionState === 'connecting' || connectionState === 'open'
-    ? 'waiting'
-    : 'unavailable';
-}
+import type { Presence, PresenceStatus } from '@/lib/presence';
 
 type FriendsSlotProps = {
   /**
@@ -72,6 +39,12 @@ type FriendsSlotProps = {
    * the page's own region and with the three slots still to come.
    */
   announce: (text: string) => void;
+  /**
+   * Opens the conversation with that friend ([FS-3]). The panel owns "which conversation is
+   * open" — this slot only says WHO, because the Messages tab it switches to is a sibling
+   * that this slot cannot reach.
+   */
+  onOpenConversation: (friend: Friend) => void;
 };
 
 /**
@@ -83,7 +56,7 @@ type FriendsSlotProps = {
  * [FS-0]). A friend connecting must NOT refetch the list — it only moves a row from one group
  * to the other, which is what `splitByPresence` does on the next render.
  */
-export function FriendsSlot({ onNavigate, announce }: FriendsSlotProps) {
+export function FriendsSlot({ onNavigate, announce, onOpenConversation }: FriendsSlotProps) {
   const { data, isPending, isError, refetch } = useFriends();
   const onlineFriendIds = useRealtimeStore((state) => state.onlineFriendIds);
   const hasPresenceSnapshot = useRealtimeStore((state) => state.hasPresenceSnapshot);
@@ -213,6 +186,7 @@ export function FriendsSlot({ onNavigate, announce }: FriendsSlotProps) {
         onlineFriendIds={onlineFriendIds}
         backFrom={backFrom}
         onNavigate={onNavigate}
+        onMessage={onOpenConversation}
         onRemove={askToRemove}
         onBlock={askToBlock}
       />
@@ -273,6 +247,7 @@ type FriendsContentProps = {
   onlineFriendIds: string[];
   backFrom: ReturnType<typeof useBackFrom>;
   onNavigate?: () => void;
+  onMessage: (friend: Friend) => void;
   onRemove: (friend: Friend) => void;
   onBlock: (friend: Friend) => void;
 };
@@ -290,6 +265,7 @@ function FriendsContent({
   onlineFriendIds,
   backFrom,
   onNavigate,
+  onMessage,
   onRemove,
   onBlock,
 }: FriendsContentProps) {
@@ -333,7 +309,7 @@ function FriendsContent({
     );
   }
 
-  const rowProps = { backFrom, onNavigate, onRemove, onBlock };
+  const rowProps = { backFrom, onNavigate, onMessage, onRemove, onBlock };
 
   /**
    * ⚠️ NO SNAPSHOT = NO SPLIT. The store drops `hasPresenceSnapshot` while the socket
@@ -408,6 +384,7 @@ type FriendGroupProps = {
   emptyText?: string;
   backFrom: ReturnType<typeof useBackFrom>;
   onNavigate?: () => void;
+  onMessage: (friend: Friend) => void;
   onRemove: (friend: Friend) => void;
   onBlock: (friend: Friend) => void;
 };
@@ -434,6 +411,7 @@ type FriendListProps = {
   presence: Presence;
   backFrom: ReturnType<typeof useBackFrom>;
   onNavigate?: () => void;
+  onMessage: (friend: Friend) => void;
   onRemove: (friend: Friend) => void;
   onBlock: (friend: Friend) => void;
 };
@@ -455,6 +433,7 @@ type FriendRowProps = {
   presence: Presence;
   backFrom: ReturnType<typeof useBackFrom>;
   onNavigate?: () => void;
+  onMessage: (friend: Friend) => void;
   onRemove: (friend: Friend) => void;
   onBlock: (friend: Friend) => void;
 };
@@ -469,7 +448,15 @@ type FriendRowProps = {
  * inside the `<li>` (the idiom `RosterChips` settled on), `focus-within` lights the whole row
  * when either one takes keyboard focus, and the menu is never swallowed by the link.
  */
-function FriendRow({ friend, presence, backFrom, onNavigate, onRemove, onBlock }: FriendRowProps) {
+function FriendRow({
+  friend,
+  presence,
+  backFrom,
+  onNavigate,
+  onMessage,
+  onRemove,
+  onBlock,
+}: FriendRowProps) {
   // `||` and not `??`: the API types `displayName` as nullable, but an account that has one
   // and clears it stores an EMPTY STRING, which `??` would happily render as a blank line.
   // Same guard as the panel header, and it keeps this in step with the `&&` test below.
@@ -485,26 +472,15 @@ function FriendRow({ friend, presence, backFrom, onNavigate, onRemove, onBlock }
         onClick={onNavigate}
         className="focus-ring flex min-w-0 flex-1 items-center gap-2.5 rounded-control py-1"
       >
-        <span className="relative shrink-0">
-          <Avatar
-            src={friend.avatarUrl ?? undefined}
-            alt=""
-            fallback={friend.pseudo.slice(0, 2).toUpperCase()}
-            className="size-9"
-          />
-          {/* Purely visual, and only when presence is actually KNOWN: the list this row
-              belongs to is already named "Friends online" / "Friends offline", so a screen
-              reader is told once, on entering the list, instead of on every single row. */}
-          {presence !== 'unknown' && (
-            <span
-              aria-hidden="true"
-              className={cn(
-                'absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-surface-card',
-                presence === 'online' ? 'bg-success' : 'bg-text-muted',
-              )}
-            />
-          )}
-        </span>
+        {/* The dot is purely visual, and only drawn when presence is actually KNOWN: the list
+            this row belongs to is already named "Friends online" / "Friends offline", so a
+            screen reader is told once, on entering the list, instead of on every single row. */}
+        <PresenceAvatar
+          src={friend.avatarUrl}
+          fallback={friend.pseudo.slice(0, 2).toUpperCase()}
+          presence={presence}
+          className="size-9"
+        />
 
         {/* `min-w-0` on BOTH this column and the link above it: without either one, a long
             pseudo refuses to shrink and pushes the "⋮" button out of the 312 px rail — or,
@@ -518,6 +494,17 @@ function FriendRow({ friend, presence, backFrom, onNavigate, onRemove, onBlock }
           )}
         </span>
       </Link>
+
+      {/* Chatting is what this rail is FOR, so it gets its own control instead of hiding one
+          click deep in the "⋮" menu. Named after the row for the same reason the menu is: a
+          column of identical "Send a message" buttons says nothing about which one is which. */}
+      <IconButton
+        size="sm"
+        aria-label={`Send a message to @${friend.pseudo}`}
+        onClick={() => onMessage(friend)}
+      >
+        <MessageCircle className="size-4" aria-hidden="true" />
+      </IconButton>
 
       <ActionMenu
         // Named after the row: eight buttons called "Actions" are indistinguishable to
