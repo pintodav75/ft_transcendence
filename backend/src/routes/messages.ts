@@ -116,7 +116,14 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
       try {
         const userId = request.user.sub;
         const { friendId } = friendIdParamSchema.parse(request.params);
-        const [friend] = await db.select().from(usersTable).where(eq(usersTable.id, friendId));
+        // ⚠️ Projection EXPLICITE (invariant #6), même pour un simple test d'existence : un
+        // `select()` nu charge `email` et `password_hash` en mémoire. Rien ne fuyait ici — la
+        // ligne était jetée — mais c'est exactement la situation d'où part la fuite, le jour
+        // où quelqu'un ajoute `friend` à une réponse en croyant n'exposer qu'un pseudo.
+        const [friend] = await db
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(usersTable.id, friendId));
         if (!friend) return reply.code(404).send({ error: 'friend not found' });
         if (await isBlocked(userId, friendId)) {
           return reply.code(404).send({ error: 'friend not found' });
