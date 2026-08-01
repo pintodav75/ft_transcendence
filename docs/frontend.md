@@ -625,3 +625,55 @@ Merge `5f92d61`. Trois choses, détaillées dans `docs/journal.md` :
 3. ✅ **`player.mjs`, 9 checks**, les 4 défauts vus rouges avant vert, dont **un faux vert corrigé** (`P7`).
 
 **Suite du 1er août au soir (`2d61772`)** : les initiales du repli d'`Avatar` faisaient 12 px dans un cercle de 80 — vu sur une **capture**, invisible aux 9 checks. `text-xs` déplacé du `<span>` vers le conteneur, où `cn`/tailwind-merge le rend **surchargeable** ; les 20 autres appels ne bougent pas, `PlayerHero` demande `text-2xl`. ⚠️ `TeamHero` et `SoloHero` gardent le défaut, sciemment. Détail → `docs/journal.md`.
+
+## [FT] — Privacy Policy et Terms of Service (`/privacy`, `/terms`)
+
+Les deux dernières pages vides du projet, et **le premier motif de rejet de la liste** : le sujet
+exige qu'elles ne soient ni vides ni un placeholder, et elles tenaient chacune en un `<h3>`.
+
+🚨 **ELLES DÉCRIVENT LE CODE, PAS UN MODÈLE.** Chaque affirmation a été lue dans la source le 1er
+août avant d'être écrite : les colonnes de `backend/src/db/schema.ts` pour ce qu'on stocke ; le
+**cookie unique** `refresh` (HttpOnly, Secure, SameSite=Strict, 7 jours) de `auth/cookies.ts` ;
+les `onDelete` de chaque clé étrangère pour ce que la suppression de compte efface **et ce qui
+survit** (messages, blocages et compositions en `cascade` ; un match joué garde son score) ; les
+**deux horloges de 24 h** de `jobs/index.ts` ; `IMAGE_MIME`/`EVIDENCE_MIME` et les limites
+multipart pour les 2 Mo d'image et les 5 Mo de preuve. **Le code change → ces deux pages
+changent** ; une politique qui promet plus que le code est pire que pas de politique.
+
+**Décisions produit prises avec David** :
+- **Les 4 adresses `@student.42.fr` des mainteneurs** sont le contact des deux documents (pas
+  d'adresse personnelle sur une page consultable sans compte).
+- **Cadrage assumé** : projet étudiant 42, sans but commercial, fourni « en l'état », **droit
+  français** — d'où la CNIL, les 15 ans (âge du consentement numérique en France) et la clause de
+  juridiction.
+
+**Ce que les CGU verrouillent, et que le code applique déjà** : aucun jeu n'est jouable ici ;
+**pas de file d'attente**, challenge/accept ; les deux camps saisissent le score, un désaccord
+ouvre un litige, l'arbitrage est définitif ; on ne quitte pas une équipe ni la plateforme au
+milieu d'une rencontre. ⚠️ **Ne pas y ajouter une règle que la plateforme n'applique pas**, ni une
+sanction que personne ne peut prononcer — les pouvoirs admin s'arrêtent à l'arbitrage d'un litige.
+
+**Composants** : `components/legal/legal-page.tsx` — coquille (`LegalPage`), clause
+(`LegalSection`), liste (`LegalList`) et bloc de contact (`MaintainerList`). **Extrait au second
+usage**, comme la règle le veut : les deux documents naissent le même jour et rien d'autre dans
+l'app n'a la forme d'un document. La coquille réutilise `SiteLogo`, `SiteFooter` et
+`ui/section-title.tsx` — **aucune classe recopiée**.
+
+⚠️ **PAGES PUBLIQUES** : atteignables sans session (pied de la landing, écrans de connexion et
+d'inscription). Elles ne montent ni le rail ni `AuthenticatedLayout` et **n'appellent jamais
+l'API**. La seule sortie est le wordmark, que `SiteLogo` pointe déjà au bon endroit selon la
+session.
+
+🔑 **Le sommaire est en `<a href="#…">` nu, pas en `<Link>`** : un saut dans la page n'est pas une
+navigation, et un `<Link>` empilerait une entrée d'historique — le bouton Précédent du navigateur
+se mettrait à remonter le document clause par clause.
+
+**Audit** : `landing-public` passe de 7 à **11 checks**, `exit 0`, console 0. Les checks ne lisent
+plus seulement le titre — ils **comptent les clauses** (13 de chaque côté) et les 4 adresses de
+contact, seule façon de rendre un retour au placeholder détectable. Deux pièges de harnais tombés
+au passage (`waitForURL` qui rend la main avant le rendu, `innerText` qui applique le
+`text-transform`) → `frontend/tests/console-audit/README.md`.
+
+**Vérifications** : `tsc -b --noEmit` vert, lint vert (0 warning), `npm run build` vert **dans le
+conteneur** (sur l'hôte, `dist/` appartient à root — dette connue, sans rapport), captures
+relues à 1280 px et à 390 px.
