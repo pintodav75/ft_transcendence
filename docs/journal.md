@@ -311,3 +311,19 @@ _21 juillet 2026 — **FL (landing publique) rebasée sur `master` `1c8f7a6`** (
 🚨 **`P7` a été VU VERT SUR DU CODE CASSÉ** — il ouvrait l'onglet des bloqués **après** le blocage, donc la liste se montait de zéro et se chargeait toute seule ; retirer l'invalidation du hook ne le faisait pas bouger. Réécrit pour ouvrir l'onglet **avant** l'action. 6ᵉ faux vert de cette famille, le premier hors du rail. → `frontend/tests/console-audit/README.md`
 
 **Vérifications** : `tsc -b` vert, lint vert, prettier vert, `player` 9/9, `teams-detail` 14/14, console 0. ⚠️ **Campagne complète non relancée.**
+
+## 1er août (fin de soirée) — la capture, et le défaut que l'audit ne pouvait pas voir
+
+**Commit `e9511a2`, merge `2d61772`.** Aucune migration.
+
+David a ouvert `/players/bob` et envoyé une capture. Deux enseignements.
+
+**① Le correctif de l'état périmé tient en vrai**, pas seulement en test : le bandeau « Friend request sent to… » n'était plus là sur le profil suivant.
+
+**② Un défaut visuel net que les 9 checks ne pouvaient pas attraper** — les initiales du repli d'avatar faisaient **12 px au centre d'un cercle de 80 px**. 🔑 **C'était exactement le besoin que [F-PLAYER] avait tenté de régler** en retirant `text-xs` d'`ui/avatar.tsx`, cassant les 20 autres appels : le besoin était réel, c'est la méthode qui ne l'était pas.
+
+**La bonne correction tient en un déplacement** : `text-xs` passe du `<span>` du repli (où il est écrit en dur, donc imposé à tous) au **conteneur**, où `cn` — qui passe par `tailwind-merge` — laisse un appelant le surcharger. Valeur par défaut inchangée, 20 appels inchangés, et `PlayerHero` demande `text-2xl`. 🚨 **`TeamHero` et `SoloHero` ont le même cercle et le même défaut** : volontairement pas touchées (pages mergées, non regardées à l'écran), une classe suffira.
+
+⚠️ **Deux points laissés ouverts, tous deux au jugement de David** : la **bande du hero** (~130 px de dégradé quasi noir et vide — un joueur n'appartenant à aucun jeu, il n'y a pas d'artwork honnête à y mettre) et la **campagne complète non relancée** alors qu'on a touché `Avatar`, monté par 21 écrans.
+
+🔑 **La leçon de méthode, la même qu'après [F-HOME]** : les 9 checks étaient verts, `teams-detail` et `solo` aussi, la console à 0 — et le premier coup d'œil a trouvé un défaut. **Réclamer la capture fait partie de la livraison d'un ticket front.**
