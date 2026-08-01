@@ -6,8 +6,13 @@ import {
   matchSidesTable,
   matchParticipantsTable,
   teamsTable,
+  teamMembersTable,
+  laddersTable,
+  rankingsTable,
+  friendshipsTable,
 } from '../db/schema.js';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { ENGAGING_STATUSES } from '../utils/match-status.js';
 import { rlMax } from '../utils/rate-limit.js';
 import z from 'zod';
@@ -62,6 +67,133 @@ const deleteSchema = z.object({
     .regex(/^\d{6}$/)
     .optional(),
 });
+
+async function profileFriendship(viewerId: string, profileId: string) {
+  // Personne n'est ami avec soi-même
+  if (viewerId === profileId) return null;
+
+  const [row] = await db
+    .select({
+      id: friendshipsTable.id,
+      requesterId: friendshipsTable.requesterId,
+      addresseeId: friendshipsTable.addresseeId,
+      status: friendshipsTable.status,
+      createdAt: friendshipsTable.createdAt,
+      updatedAt: friendshipsTable.updatedAt,
+    })
+    .from(friendshipsTable)
+    .where(
+      // we do OR, because la même amitié est stockée en (moi, lui) ou en (lui, moi)
+      or(
+        and(
+          eq(friendshipsTable.requesterId, viewerId),
+          eq(friendshipsTable.addresseeId, profileId),
+        ),
+        and(
+          eq(friendshipsTable.requesterId, profileId),
+          eq(friendshipsTable.addresseeId, viewerId),
+        ),
+      ),
+    );
+
+  return row ?? null;
+}
+
+async function profileRankings(profileId: string) {
+  // Les ladders où CE joueur est classé. Alias explicite : sans lui, les deux niveaux
+  // s'appellent `rankings` et il faut savoir de tête que Postgres résout au plus proche.
+  const myLadders = alias(rankingsTable, 'my_ladders');
+
+  const ranked = db
+    .select({
+      ladderId: rankingsTable.ladderId,
+      userId: rankingsTable.userId,
+      elo: rankingsTable.elo,
+      wins: rankingsTable.wins,
+      losses: rankingsTable.losses,
+      lastMatchAt: rankingsTable.lastMatchAt,
+      // `::int` : `row_number()` et `count()` rendent un `bigint`, remonté en **string** alors que le contrat le déclare `integer`
+      // this is the messed up way to calculate the rank
+      rank: sql<number>`(row_number() over (
+        partition by ${rankingsTable.ladderId}
+        order by ${rankingsTable.elo} desc, ${rankingsTable.wins} desc,
+                 ${rankingsTable.losses} asc, ${rankingsTable.id} asc
+      ))::int`.as('rank'),
+      ladderSize: sql<number>`(count(*) over (partition by ${rankingsTable.ladderId}))::int`.as(
+        'ladder_size',
+      ),
+    })
+    .from(rankingsTable)
+    .where(
+      inArray(
+        rankingsTable.ladderId,
+        db
+          .select({ ladderId: myLadders.ladderId })
+          .from(myLadders)
+          .where(eq(myLadders.userId, profileId)),
+      ),
+    )
+    .as('ranked');
+
+  return (
+    db
+      .select({
+        ladderId: ranked.ladderId,
+        ladderName: laddersTable.name,
+        gameId: laddersTable.gameId,
+        elo: ranked.elo,
+        wins: ranked.wins,
+        losses: ranked.losses,
+        rank: ranked.rank,
+        ladderSize: ranked.ladderSize,
+      })
+      .from(ranked)
+      .innerJoin(laddersTable, eq(laddersTable.id, ranked.ladderId))
+      .where(eq(ranked.userId, profileId))
+      // ordered by most recent
+      .orderBy(desc(ranked.lastMatchAt), asc(laddersTable.name))
+  );
+}
+
+/**
+ * Les équipes du profil consulté, pour la navigation joueur → équipe (elle n'existait que
+ * dans l'autre sens : le roster d'une équipe pointe vers ses joueurs).
+ *
+ * ⚠️ `isCaptain` DÉCRIT LE PROFIL CONSULTÉ, PAS L'APPELANT — l'inverse exact de la même clé
+ * dans `TeamListItem` (`GET /teams`, « mes » équipes). Les deux payloads ont la même forme et
+ * le même nom de champ pour deux référents différents ; c'est pour ça que le contrat déclare
+ * un schéma `PlayerTeam` distinct au lieu de réutiliser `TeamListItem`, et que les deux
+ * descriptions nomment leur référent. Un jour où l'un serait servi à la place de l'autre, la
+ * couronne se poserait sur la mauvaise tête sans qu'aucun type ne bronche.
+ *
+ * Dérivé en JS depuis `captainId`, comme le fait `GET /teams` : une comparaison en SQL
+ * rendrait la même chose, mais deux façons d'écrire une même règle finissent par diverger.
+ *
+ * Appartenance publique : le roster complet d'une équipe est déjà lisible par tout compte
+ * connecté (`GET /teams/{id}`) et les équipes figurent dans les classements.
+ */
+async function profileTeams(profileId: string) {
+  const rows = await db
+    .select({
+      id: teamsTable.id,
+      name: teamsTable.name,
+      logoUrl: teamsTable.logoUrl,
+      captainId: teamsTable.captainId,
+      gameId: laddersTable.gameId,
+      ladder: laddersTable.name,
+      elo: rankingsTable.elo,
+    })
+    .from(teamMembersTable)
+    .innerJoin(teamsTable, eq(teamsTable.id, teamMembersTable.teamId))
+    .innerJoin(laddersTable, eq(laddersTable.id, teamsTable.ladderId))
+    .leftJoin(rankingsTable, eq(teamsTable.id, rankingsTable.teamId))
+    .where(eq(teamMembersTable.userId, profileId))
+    // Tri explicite, même raison que `GET /teams` : sans lui Postgres est libre de renvoyer
+    // les lignes dans n'importe quel ordre et la liste se réordonnerait entre deux chargements.
+    .orderBy(asc(teamsTable.name));
+
+  return rows.map(({ captainId, ...team }) => ({ ...team, isCaptain: captainId === profileId }));
+}
 
 export const userRoutes: FastifyPluginAsync = async (server) => {
   server.get('/me', { onRequest: [server.authenticate] }, async (request, reply) => {
@@ -134,23 +266,45 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const pseudo = request.params.pseudo;
+        // ⚠️ PROJECTION EXPLICITE, exactement les 9 champs du schéma `PublicUser` — invariant
+        // du projet, et il ne protégeait pas que d'une théorie ici : la version précédente
+        // sélectionnait la ligne entière puis retirait 5 colonnes par déstructuration, ce qui
+        // laissait passer `isAdmin` alors que le contrat ne le déclarait pas. Une liste de ce
+        // qu'on RETIRE oublie par construction toute colonne ajoutée après elle.
+        //
+        // 🔑 `isAdmin` est désormais DÉCLARÉ et servi volontairement (pastille sur le profil).
+        // Ce qui a changé n'est pas le risque, c'est le contrat : ce booléen n'a jamais été un
+        // secret — l'autorisation le relit en base à chaque appel (`disputes.ts:41`, `:288`,
+        // `:426`), donc le connaître ne permet rien. Les 5 autres colonnes restent dehors, et
+        // deux d'entre elles (`passwordHash`, `totpSecret`) sont des SECRETS, pas des drapeaux :
+        // ne jamais élargir cette liste par analogie avec ce champ-ci.
         const [user] = await db
-          .select()
+          .select({
+            id: usersTable.id,
+            pseudo: usersTable.pseudo,
+            displayName: usersTable.displayName,
+            bio: usersTable.bio,
+            avatarUrl: usersTable.avatarUrl,
+            oauthProvider: usersTable.oauthProvider,
+            oauthId: usersTable.oauthId,
+            isAdmin: usersTable.isAdmin,
+            createdAt: usersTable.createdAt,
+          })
           .from(usersTable)
           .where(sql`lower(${usersTable.pseudo}) = lower(${pseudo})`);
         if (!user) return reply.code(404).send({ error: 'Profile not found' });
         if (await isBlocked(request.user.sub, user.id)) {
           return reply.code(404).send({ error: 'Profile not found' });
         }
-        const {
-          passwordHash: _,
-          email: _email,
-          updatedAt: _updatedAt,
-          totpSecret: _ts,
-          totpEnabled: _te,
-          ...userSafe
-        } = user;
-        return { user: userSafe };
+        // Trois lectures indépendantes : rien ne dépend du résultat d'une autre, donc en
+        // parallèle. Séquentielles, elles feraient payer trois allers-retours à une page qui
+        // n'en attendait qu'un.
+        const [friendship, rankings, teams] = await Promise.all([
+          profileFriendship(request.user.sub, user.id),
+          profileRankings(user.id),
+          profileTeams(user.id),
+        ]);
+        return { user, friendship, rankings, teams };
       } catch (error) {
         reply.code(500).send({ error: 'internal error' });
       }

@@ -29,6 +29,7 @@ import test_disputes
 import test_notifications
 import test_search
 import test_social_data
+import test_users_profile
 import test_users_deletion
 import test_proxy_smoke
 import test_auth_contract
@@ -53,6 +54,7 @@ SUITES = [
     test_notifications,
     test_search,
     test_social_data,
+    test_users_profile,
     # Supprime des comptes : la placer APRÈS les suites qui inspectent des users partagés.
     test_users_deletion,
     # Dernier : suppose le proxy Vite (https://localhost:5173) en marche. Valide la topologie I4

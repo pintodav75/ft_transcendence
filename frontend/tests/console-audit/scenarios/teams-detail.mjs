@@ -12,7 +12,7 @@
  *     un Elo inventé ;
  *   - l'onglet Matches d'une équipe sans match rend un état vide honnête ;
  *   - les onglets répondent aux flèches (pattern WAI-ARIA) ;
- *   - le placeholder /players/$pseudo ne parle pas, la fiche de match rend son écran 404 sur
+ *   - la puce de roster mène bien à /players/$pseudo, la fiche de match rend son écran 404 sur
  *     un uuid inconnu (FT-4A l'a remplacée : elle n'est plus muette), et la page ladder est
  *     atteinte PAR LE LIEN « See the full ladder » ;
  *   - rien ne déborde horizontalement à 375 px.
@@ -142,8 +142,14 @@ export async function run({
   // ⚠️ `waitForURL` rend la main dès que l'URL change, avant le rendu de la route : on attend
   // un repère de la page RENDUE (son titre) plutôt que le bouton lui-même, sinon un libellé
   // devenu faux ferait patienter 10 s pour rien avant de rougir.
+  // ⚠️ REPÈRE MIS À JOUR PAR [F-PLAYER], exactement comme `S13d` de `solo.mjs` : le `<h1>`
+  // valait `@pseudo` sur le PLACEHOLDER de FT-2A, la vraie page y met le nom d'affichage et
+  // relègue le `@pseudo` en sous-titre mono. Un compte d'audit n'a pas de nom d'affichage,
+  // donc le titre EST son pseudo. 🔑 Ce check est le seul chemin de retour du scénario : tant
+  // qu'il échouait, la phase suivante restait bloquée SUR la page joueur et son
+  // `overviewTab.focus()` expirait à 30 s — un rouge imputable qui se transformait en `exit 2`.
   const playerPageRendered = await page
-    .getByRole('heading', { level: 1, name: `@${user.pseudo}` })
+    .getByRole('heading', { level: 1, name: user.pseudo })
     .waitFor({ timeout: 10000 })
     .then(() => true)
     .catch(() => false);
@@ -200,7 +206,7 @@ export async function run({
   step('A9', overflow <= 0, `débordement horizontal du document : ${overflow}px (0 attendu)`);
   await page.setViewportSize({ width: 1280, height: 900 });
 
-  setPhase('6. placeholder /players, fiche de match et page ladder');
+  setPhase('6. lien /players, fiche de match et page ladder');
   await rosterChip.first().click();
   await page.waitForURL(`**/players/${user.pseudo}`, { timeout: 10000 });
   await page.goBack();

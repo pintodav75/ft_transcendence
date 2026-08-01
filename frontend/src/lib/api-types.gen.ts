@@ -1068,7 +1068,17 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            user?: components["schemas"]["PublicUser"];
+                            user: components["schemas"]["PublicUser"];
+                            /**
+                             * @description Relation d'amitié entre le VISITEUR et ce profil, `null` s'il n'y en a aucune (et toujours `null` sur son propre profil). Sans elle le front ne peut que proposer « ajouter en ami » à tout le monde, y compris à un ami déjà accepté — que l'API refuse alors en 400.
+                             *
+                             *     Le SENS de la relation (qui a demandé) se lit en comparant `requesterId` à son propre id : c'est `friendCta()` côté front.
+                             */
+                            friendship: components["schemas"]["Friendship"] | null;
+                            /** @description Son niveau, ladder par ladder. Toujours présent, souvent VIDE : une ligne de classement naît du premier résultat de match, jamais d'une inscription (cf. `PlayerRanking`). */
+                            rankings: components["schemas"]["PlayerRanking"][];
+                            /** @description Ses équipes, triées par nom. Toujours présent, vide pour un joueur qui n'en a aucune. ⚠️ `isCaptain` y désigne le PROFIL CONSULTÉ, pas l'appelant (cf. `PlayerTeam`). */
+                            teams: components["schemas"]["PlayerTeam"][];
                         };
                     };
                 };
@@ -4646,10 +4656,49 @@ export interface components {
             avatarUrl?: string | null;
             oauthProvider?: string | null;
             oauthId?: string | null;
-            /** @description Vrai si le compte arbitre les litiges. **Volontairement conservé sur le profil public** : le handler ne le retire pas, et la qualité d'arbitre n'est pas un secret (elle se lit déjà sur toute dispute qu'il a tranchée). Documenté ici parce qu'il est bel et bien servi — un champ rendu et tu par le contrat est pire que le champ lui-même. */
+            /** @description Badge d'AFFICHAGE uniquement. L'autorisation n'est jamais dérivée de ce champ : les routes d'arbitrage relisent `users.is_admin` en base à chaque appel (`routes/disputes.ts`), donc un client qui forcerait ce booléen à `true` ne gagnerait rien d'autre qu'une pastille — et un 403 au premier appel réel. */
             isAdmin: boolean;
             /** Format: date-time */
             createdAt: string;
+        };
+        /**
+         * @description Une ligne de classement du profil consulté (GET /users/{pseudo}) : un ladder où il a une entrée `rankings`.
+         *
+         *     ⚠️ Aucune ligne ne naît d'une inscription — elle apparaît au PREMIER RÉSULTAT DE MATCH. Un tableau vide est donc l'état normal d'un compte neuf, pas une anomalie ni une erreur, et le front doit le dire comme tel.
+         *
+         *     `rank` est la position dans le tri de `GET /ladders/{id}/rankings` (`elo desc, wins desc, losses asc, id asc`), départages compris : les deux pages sont reliées par un lien, elles doivent annoncer le même numéro. `ladderSize` en est le dénominateur — « #1 / 2 » et « #1 / 200 » ne racontent pas la même chose.
+         */
+        PlayerRanking: {
+            /** Format: uuid */
+            ladderId: string;
+            /** @description Nom du ladder — il porte déjà le format ("Chess 1v1"). */
+            ladderName: string;
+            gameId: string;
+            elo: number;
+            wins: number;
+            losses: number;
+            /** @description Position sur ce ladder, 1-based. */
+            rank: number;
+            /** @description Nombre total de compétiteurs classés sur ce ladder. */
+            ladderSize: number;
+        };
+        /**
+         * @description Une équipe du profil consulté (GET /users/{pseudo}).
+         *
+         *     🚨 `isCaptain` DÉCRIT LE PROFIL CONSULTÉ, PAS L'APPELANT — l'inverse exact du champ homonyme de `TeamListItem`. C'est toute la raison d'être de ce schéma distinct : les deux payloads ont la même forme, et servir l'un à la place de l'autre poserait la couronne sur la mauvaise tête sans qu'aucun type ne bronche.
+         */
+        PlayerTeam: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Chemin relatif `/media/avatars/…` (upload) **ou** URL absolue `https://…` (saisie) — cf. `Team.logoUrl`. */
+            logoUrl: string | null;
+            gameId: string;
+            /** @description Nom du ladder sur lequel l'équipe concourt. */
+            ladder: string;
+            /** @description Le PROFIL CONSULTÉ est capitaine de cette équipe. */
+            isCaptain: boolean;
+            elo: number | null;
         };
         FriendSummary: {
             /** Format: uuid */
@@ -4812,6 +4861,7 @@ export interface components {
             /** @enum {string} */
             format: "1v1" | "2v2" | "3v3" | "5v5";
             gameId: string;
+            /** @description L'APPELANT est capitaine de cette équipe. ⚠️ Le champ homonyme de `PlayerTeam` (GET /users/{pseudo}) décrit le PROFIL CONSULTÉ : même nom, même forme, référent différent. */
             isCaptain: boolean;
             /** @description Chemin relatif `/media/avatars/…` (upload) **ou** URL absolue `https://…` (saisie) — cf. `Team.logoUrl`. */
             logoUrl: string | null;
