@@ -854,3 +854,113 @@ Le balayage responsive de `[FIX-RESPONSIVE]` et de `[A11Y-AA]` couvre la questio
 768 px, zéro débordement horizontal sur les 21 routes**, tableaux compris. Il reste possible qu'un
 détail esthétique déplaise, mais **plus rien ne casse la mise en page** — ce n'était que ça, le
 risque.
+
+---
+
+## [F4] — `/profile`, la page de réglages (mergée le 2 août, commit `37534e1`, merge `4de7683`)
+
+Branche `feature/f4-profil-page` d'**Adrien** (`acattet`), deuxième passage en review après le
+renvoi à l'auteur du 30/07. **Les 5 bloquants d'alors sont tous traités** ; la branche arrive
+rebasée sur le sommet de `master`, en un seul commit. C'était la **dernière branche de coéquipier
+hors de master**, et `/profile` était la **dernière route sans `<h1>`**.
+
+### Ce que la page contient
+
+Quatre sections dans une seule `Card`, sous le shell `_authenticated` (les rails ne sont pas
+retouchés — c'était le bloquant ① de la première review) :
+
+- **`AvatarUploader`** — aperçu rond de 160 px, envoi via `lib/upload.ts` (XHR, seul chemin qui
+  produise une vraie barre de progression), suppression derrière un `ConfirmDialog`.
+- **`ProfileForm`** — pseudo et bio, en lecture puis en édition.
+- **`PasswordChange`** — changement de mot de passe, masqué pour un compte sans mot de passe local.
+- **`TwoFactorSettings`** — QR code, **secret affiché en clair sous le QR**, activation puis
+  désactivation.
+
+Côté partagé : `lib/profile-mutations.ts` (les appels et leur formulation d'erreur, sur le modèle
+de `team-mutations.ts`), `lib/profile-schema.ts`, `lib/password-schema.ts`,
+`lib/use-return-focus.ts`, et **`ui/textarea.tsx`** — 26ᵉ composant du design system.
+
+### Les décisions qui méritent d'être connues ailleurs
+
+🔑 **`skipAuthRefresh` sur `PATCH /users/me/password` est porteur, pas une optimisation.** La route
+répond **401 quand le mot de passe courant est faux**, et `lib/api.ts` lit tout 401 comme « token
+expiré » : sans le drapeau, une faute de frappe partait **deux fois** (donc le quota de 5/min épuisé
+en 3 essais) et **déconnectait l'utilisateur** dès que le cookie de refresh manquait. Contrepartie
+assumée : un access token réellement expiré est signalé comme un mauvais mot de passe, et un
+rechargement suffit à s'en sortir. C'était le bloquant ② de la première review.
+
+🔑 **La garde de « Change password » se fonde sur `hasPassword`, JAMAIS sur `oauthProvider`** — les
+2 lignes que `[BX-HASPWD]` avait laissées à appliquer sont faites. Le scénario garde **les deux
+sens** : 6.1 retire le formulaire à un compte sans mot de passe, **6.2 le laisse à un compte du
+cas B** (Google rattaché par email, mot de passe conservé). C'est 6.2 qui compte : c'est le cas que
+l'ancienne garde cassait **en silence**, et qu'aucun check ne voyait.
+
+🔑 **`displayName` est REQUIS côté formulaire, et c'est un choix.** La route accepte de l'omettre
+mais ne sait pas le remettre à `null` : un champ vidé partait donc comme « absent », l'API répondait
+200 et le pseudo restait en place — un succès qui ment. Le refus explicite vaut mieux.
+
+🔑 **La règle d'image et la règle de mot de passe ont été SORTIES, pas recopiées.**
+`lib/image-file.ts` (types acceptés, plafond de 2 Mo, les deux phrases de refus) est désormais
+partagé par `ui/image-picker.tsx` **et** par l'avatar de `/profile` ; `lib/password-rule.ts` est
+partagé par l'inscription et par le changement de mot de passe. ⚠️ **Les deux phrases de refus de
+`image-file.ts` sont affirmées mot pour mot** par `ft1c-team-logo.mjs` et `teams-manage.mjs` — les
+reformuler rougit ces campagnes. C'est le bloquant ④ traité **par le bon bout** : partager la
+*règle*, pas la *présentation* (l'avatar a un aperçu rond de 160 px et ses propres boutons, que
+`ImagePicker` ne sait pas dessiner — trois props de présentation pour réutiliser une présentation
+n'est pas de la réutilisation).
+
+🔑 **Une seule région live pour toute la page**, tenue par `pages/profile.tsx` et prêtée aux quatre
+sections : deux régions montées ensemble se disputent la lecture.
+
+🔑 **`useReturnFocus` existe parce que les six actions de la page démontent le bouton qu'on vient de
+presser.** Le focus tomberait sur `<body>`, renvoyant un utilisateur au clavier en haut de page. Le
+hook passe par un **compteur** (deux enregistrements de suite doivent tous deux déplacer le focus)
+et ne touche la ref que depuis un effet — `handleSubmit()` de react-hook-form s'exécute **pendant le
+rendu**, où lire une ref est interdit.
+
+### Le seul bloquant de cette review, et pourquoi l'outillage ne pouvait pas le voir
+
+🚨 **`ui/textarea.tsx` bordait le champ Bio avec `border-border-subtle`.** Or la bordure d'un champ
+de saisie **n'est pas décorative** : c'est elle qui dit où commence la zone où l'on tape, et WCAG
+1.4.11 lui impose 3:1. Mesuré :
+
+| Token | contre `surface-card` | contre `surface-input` |
+| --- | --- | --- |
+| `border-subtle` (livré) | **1,30:1** | **1,42:1** |
+| `border-control` (attendu) | 3,17:1 | 3,47:1 |
+
+*(Ces chiffres retombent sur les 3,02–3,50:1 déjà mesurés pour `border-control` dans `index.css` :
+la méthode est calibrée sur nos propres relevés.)*
+
+Corrigé en un mot, avec le commentaire qui explique la mesure pour que personne ne le remette en
+arrière. 🔑 **Ni `axe` ni le harnais ne l'ont vu** — `axe` sort 0 violation sur cette page. C'est
+encore la lecture manuelle qui l'attrape, exactement comme les 4 défauts d'`[A11Y-AA]`. Et ça
+**confirme la note ci-dessus** : `border-subtle` ne doit border que cartes et séparateurs, et le
+premier composant de saisie ajouté après la campagne AA a immédiatement rouvert la dette.
+
+### Vérifications
+
+- `npm run lint` : 0 · `npx tsc -b --noEmit` : 0. ⚠️ `npm run build` échoue en `EACCES` sur
+  `frontend/dist/` — c'est le problème de permissions de l'hôte déjà connu, pas le code.
+- **`npm run audit profile` : 37/37, exit 0, console 0** — relancé **après** le correctif de bordure.
+- Scénarios des fichiers partagés touchés, tous exit 0 : `auth-register` 4/4, `ft1c-team-logo` 12/12,
+  `teams-manage` 35/35, `fs0-social` 9/9.
+- **`axe-core` sur `/profile`** en 1280 / 375 / **320 px**, formulaires ouverts : **0 violation
+  réelle**, et **aucun débordement horizontal à 320 px** (`scrollWidth` = `clientWidth` = 320). Les
+  2 violations remontées sont le pied de page des **devtools TanStack Router** — présentes à
+  l'identique sur `/home`, absentes du build de prod (même famille que la note « ce qui reste sous
+  3:1 » plus haut). 🔑 **Sonde jetable, exécutée depuis le scratchpad** : `axe-core` n'est pas
+  installé dans le dépôt et n'y a pas été ajouté.
+- ✅ **Campagne complète rejouée après le merge (2 août) : 28 scénarios, 453/453, console 0 sur les
+  28, exit 0.** `profile` y entre pour 37 checks (416 → 453) et **aucun autre scénario n'a bougé**.
+  🔑 **Le seed a dû être régénéré avant de lancer** : les 3 litiges de démo étaient tous `resolved`,
+  donc `dispute` serait sorti `0/0` → `exit 2`, et le rapport aurait accusé [F4] au lieu de la base.
+  C'est exactement le mode de panne décrit dans `CLAUDE.md` — il s'est produit. `docker compose exec
+  backend npm run seed:dev` avant toute campagne, et vérifier qu'il reste un litige `open`.
+
+### Ce qui reste, non bloquant
+
+`AvatarUploader` monte **deux fois la même phrase** quand la suppression d'avatar échoue (dans le
+`ConfirmDialog` et sous les boutons). Invisible en pratique — la modale masque la seconde, et le
+contenu inerte sort de l'arbre d'accessibilité. À reprendre par le prochain ticket qui touche la
+page, c'est-à-dire **[F4B]**.

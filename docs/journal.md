@@ -364,3 +364,82 @@ titre est en capitales par `text-transform`, le DOM ne l'est pas.
 
 **Capture relue à 1280 px et 390 px** avant de dire « fini », comme d'habitude : rien à reprendre
 cette fois. Détail du ticket → `docs/frontend.md`.
+
+---
+
+## 2 août — [F4] relue, corrigée et mergée : plus aucune branche de coéquipier en travers
+
+**Commit `37534e1`, merge `4de7683`, poussés.** Branche `feature/f4-profil-page` d'Adrien
+(`acattet`), deuxième passage après le renvoi à l'auteur du 30/07. Récit complet, décisions et
+mesures → `docs/frontend.md`, section **[F4]**.
+
+**Verdict : 1 bloquant, 1 ligne.** Les 5 bloquants de la première review sont tous traités, la
+branche arrive rebasée sur le sommet de `master` en un seul commit, et la couche métier — jugée
+saine dès le 30/07 — n'a pas bougé.
+
+🚨 **Le bloquant : `ui/textarea.tsx` bordait le champ Bio en `border-subtle`** (1,30:1 contre la
+carte, 1,42:1 contre le fond du champ, pour un seuil de 3:1 imposé par WCAG 1.4.11). 🔑 **Ni `axe`
+ni le harnais ne le voient** : `axe` sort 0 violation sur cette page. Le premier composant de saisie
+ajouté après la campagne `[A11Y-AA]` a rouvert la dette **le jour même**, et c'est encore la lecture
+manuelle qui l'a attrapé — troisième fois que ce constat se répète.
+
+**Ce que la review a vérifié, et qui n'était écrit nulle part** :
+
+- Les **5 fichiers partagés** touchés par la branche (`ui/image-picker.tsx`, `ui/textarea.tsx`,
+  `lib/register-schema.ts`, `stores/auth-store.ts`, `routes/_authenticated.profile.tsx`) ont été
+  audités par leurs **consommateurs**, pas par leur diff — méthode déjà écrite en mémoire. Aucun
+  composant `ui/` réécrit : la règle d'image et la règle de mot de passe ont été **sorties** dans
+  `lib/image-file.ts` et `lib/password-rule.ts`, partagées, et les scénarios des appelants restent
+  verts (`ft1c-team-logo` 12/12, `teams-manage` 35/35, `auth-register` 4/4, `fs0-social` 9/9).
+- **`/profile` est passé aux deux audits qu'il n'avait jamais vus** — l'avertissement de `CLAUDE.md`
+  est levé. `axe-core` en 1280 / 375 / **320 px**, formulaires ouverts : **0 violation réelle**,
+  **0 débordement horizontal**. 🔑 **Les 2 violations remontées sont un faux positif de dev** : le
+  pied de page des devtools TanStack Router, second `contentinfo` de la page. **Prouvé plutôt que
+  supposé** — la même sonde sur `/home` sort exactement les deux mêmes, donc c'est le shell en mode
+  dev, pas le ticket. Sans ce contrôle croisé, on corrigeait un défaut inexistant dans le code
+  d'Adrien.
+- **`axe-core` n'est pas installé dans le dépôt** et n'y a pas été ajouté : la sonde vit dans le
+  scratchpad et charge `playwright-core` du harnais. Rien n'a été écrit sous `frontend/` pendant les
+  runs (invariant #10).
+
+⚠️ **Le commit a été amendé et mergé au nom d'Adrien** (`git -c user.name=acattet -c
+user.email=acattet@student.42.fr`, `--amend --reset-author` avec la date d'auteur d'origine
+conservée, puis `merge --no-ff`) — auteur **et** committeur. Même discipline que pour les branches
+du rail social signées `wacista` : le correctif d'un reviewer ne doit pas déplacer la paternité du
+ticket.
+
+✅ **Campagne complète rejouée le 2 août, après le merge : 28 scénarios, 453/453, console 0 sur les
+28, aucun check rouge, exit 0.** `profile` apporte ses 37 checks (416 → 453) et **aucun autre
+scénario n'a changé de compte**. Tenu **malgré `RATE_LIMIT_FACTOR=1000`**, donc sans aucune pause de
+quota entre scénarios — le suspect n°1 des rouges de campagne (invariant #13) ne s'est pas manifesté.
+
+🚨 **Le mode de panne du seed s'est produit pour de bon, et il a été évité de justesse.** Avant de
+lancer, contrôle de la base : 0 compte admin, 0 compte `audit…` résiduel — mais **les 3 litiges de
+démo étaient tous `resolved`, aucun `open`**. Lancée en l'état, la campagne sortait `dispute` en
+`0/0`, donc **`exit 2`**, et le rapport aurait accusé [F4] au lieu de la base. 🔑 **Trois contrôles à
+faire AVANT toute campagne**, et pas après avoir vu un rouge : `is_admin = false` partout, aucun
+compte `audit…` en reste, et **au moins un litige `open`** — sinon `docker compose exec backend npm
+run seed:dev`.
+
+⚠️ **Erreur de méthode à ne pas refaire** : le premier lancement avait sa sortie filtrée par
+`tail -120`, ce qui n'a gardé que les 2 derniers scénarios. `run.mjs` **n'imprime aucun récapitulatif
+global** — chaque scénario imprime son propre `CHECKS : n/n`, et le code de sortie est le pire des
+28. Filtrer la sortie d'une campagne, c'est donc jeter le décompte et devoir tout relancer.
+
+**Conséquences immédiates**, toutes déjà reportées dans `CLAUDE.md` :
+
+1. **Plus aucune branche de coéquipier hors de master**, et **plus aucune route sans `<h1>`**.
+2. **[F4B] est débloquée** — c'est désormais le seul vrai développement restant, et celui qui permet
+   à un joueur réel de lier son compte Steam, donc d'utiliser la fonction centrale du site.
+3. Le design system compte **26** composants `ui/` (le sujet en demande 10).
+
+📌 **Relevé au passage, hors ticket : les identités git sont éclatées.** `git shortlog` affiche
+**8 contributeurs pour une équipe de 4** — David signe sous 4 identités (`dpinto@student.42.fr`,
+`da.pinto75@gmail.com`, `pintodav75@gmail.com` en auteur/nom mélangés), William sous 2
+(`fynmorph@gmail.com`, `wiwu@student.42.fr`), dont trois adresses Gmail personnelles là où la
+convention de l'équipe impose l'identité 42. Répartition réelle une fois consolidée, hors merges et
+hors fichiers générés : **David 138 commits, Walid 28, William 10, Adrien 2** (178 au total).
+🔑 **Réparable sans réécrire l'historique, par un `.mailmap` à la racine** — non fait, à décider.
+⚠️ Et ces chiffres **ne mesurent pas les contributions** : Adrien et William ont travaillé avec
+David, qui a tout committé. C'est le chapitre I du sujet (savoir expliquer son code, modification en
+direct possible) qui reste le risque, pas le `git log`.
