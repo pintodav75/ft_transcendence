@@ -3,7 +3,11 @@ import { ShieldCheck, UserCheck, UserRound } from 'lucide-react';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Pill } from '@/components/ui/pill';
-import { Stat, StatStrip } from '@/components/ui/stat';
+// ⚠️ `ui/stat-strip.tsx`, celui de [F-SOLO] — PAS une seconde copie. [F-PLAYER] en avait
+// d'abord écrit une (`ui/stat.tsx`, même balisage à la classe près, API en `children`) et
+// migré `TeamHero` dessus au passage, laissant `SoloHero` sur l'original : deux composants
+// identiques pour trois consommateurs. Réutiliser, c'est se plier à l'API existante.
+import { StatStrip } from '@/components/ui/stat-strip';
 import { EM_DASH } from '@/lib/utils';
 
 import type { ReactNode } from 'react';
@@ -105,13 +109,15 @@ export function PlayerHero({
         {actions ? <div className="ml-auto flex flex-wrap gap-2">{actions}</div> : null}
       </div>
 
-      <StatStrip>
-        {/* Dashed rather than dropped: every account HAS a creation date, so a missing one
-            is an unreadable value, not an absent fact. Opposite call from "Friends since"
-            just below — see the prop's docblock. */}
-        <Stat label="Member since" value={joinedOn ?? EM_DASH} />
-        {friendsSince && <Stat label="Friends since" value={friendsSince} />}
-      </StatStrip>
+      <StatStrip
+        stats={[
+          // Dashed rather than dropped: every account HAS a creation date, so a missing one
+          // is an unreadable value, not an absent fact. Opposite call from "Friends since"
+          // just below — see the prop's docblock.
+          { label: 'Member since', value: joinedOn ?? EM_DASH },
+          ...(friendsSince ? [{ label: 'Friends since', value: friendsSince }] : []),
+        ]}
+      />
     </section>
   );
 }

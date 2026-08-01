@@ -21,7 +21,7 @@ export function Avatar({ src, alt = '', fallback = '?', className }: AvatarProps
       {src ? (
         <img src={src} alt={alt} className="size-full object-cover" />
       ) : (
-        <span className="label-caps">{fallback}</span>
+        <span className="text-xs label-caps">{fallback}</span>
       )}
     </div>
   );

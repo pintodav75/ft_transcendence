@@ -61,7 +61,7 @@ export function PlayerTeams({ teams, name }: PlayerTeamsProps) {
                   src={team.logoUrl ?? undefined}
                   alt=""
                   fallback={team.name.slice(0, 2).toUpperCase()}
-                  className="size-8 shrink-0 text-xs"
+                  className="size-8 shrink-0"
                 />
                 <span className="truncate">{team.name}</span>
 
