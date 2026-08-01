@@ -88,11 +88,21 @@ export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
     // without replaying the navigate/removeQueries minefield of the dissolution flow.
     accept.mutate(invitation.id, {
       onSuccess: () => {
-        // Le focus est déplacé AVANT le rendu qui démonte la ligne : il est alors déjà
-        // ailleurs, donc la disparition ne l'emporte pas.
-        headingRef.current?.focus();
         answered.announce(`You joined ${invitation.team.name}.`);
         setJoinedTeamName(invitation.team.name);
+        // 🚨 À LA FRAME SUIVANTE, PAS TOUT DE SUITE — et le commentaire d'avant disait
+        // l'inverse. Focaliser ici mettait bien le focus sur le titre, mais le rendu
+        // déclenché par `setJoinedTeamName` juste au-dessus **remplace** le bloc (la ligne
+        // d'invitation disparaît, « You joined … » apparaît) : le titre est remonté et le
+        // focus retombe sur `<body>`. L'utilisateur au clavier repartait donc du haut de la
+        // page. Même idiome que `ActionMenu` et `ChatConversation` — on attend que React ait
+        // committé avant de poser le focus.
+        // 🔑 Le défaut était RÉEL depuis FT-INV mais se cachait derrière un check instable :
+        // l'attente du harnais rendait la main dès que le focus quittait `<body>`, donc elle
+        // échantillonnait parfois l'instant AVANT la retombée. Rendue stricte (focus hors de
+        // `<body>` sur trois frames consécutives), elle a rendu le défaut visible à tous les
+        // coups.
+        requestAnimationFrame(() => headingRef.current?.focus());
       },
     });
   }

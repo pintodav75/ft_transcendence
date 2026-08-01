@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { apiFetch } from '@/lib/api';
+import { retryServerErrorsOnly } from '@/lib/ladders';
 
 import type { components, paths } from '@/lib/api-types.gen';
 
@@ -36,11 +37,16 @@ export const FRIENDS_KEY = ['friends'] as const;
  * the realtime store (`onlineFriendIds`), fed by the single WebSocket opened by [FS-0]. The
  * two are joined at render time by `splitByPresence` below — never by re-fetching this list
  * when somebody connects.
+ *
+ * ⚠️ `retryServerErrorsOnly`, like every other read of the rail: a 401/403/429 is a verdict, not
+ * a hiccup, and retrying it writes four red lines in a console the subject requires to be empty
+ * (a rate-limit refusal on this route did exactly that until [FS-5]).
  */
 export function useFriends() {
   return useQuery({
     queryKey: FRIENDS_KEY,
     queryFn: () => apiFetch<FriendsResponse>('/friends'),
+    retry: retryServerErrorsOnly,
   });
 }
 

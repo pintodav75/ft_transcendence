@@ -449,9 +449,28 @@ const SLOW_FOCUS_MS = 1000;
 async function awaitFocusRestored(page, timeout = 15000) {
   const startedAt = Date.now();
   return page
-    .waitForFunction(() => document.activeElement && document.activeElement.tagName !== 'BODY', null, {
-      timeout,
-    })
+    .waitForFunction(
+      () => {
+        // ⚠️ « Le focus a quitté BODY » NE SUFFIT PAS, et c'est ce qui a fait de `I6-bis` de
+        // `teams-invitations` une pièce à pile ou face pendant des mois : rouge en campagne,
+        // vert en isolation. Mécanisme : l'application pose bien le focus, puis un rendu
+        // SUIVANT (une requête de fond qui atterrit, le rail social qui se réactualise)
+        // démonte l'élément et le focus retombe sur BODY le temps d'une frame. Cette fonction
+        // rendait la main sur ce premier échantillon, et `focusLanding()` — un instantané —
+        // lisait le creux.
+        // On exige donc que le focus soit HORS de BODY sur trois frames CONSÉCUTIVES.
+        // 🔑 Ça ne masque aucun vrai défaut : si l'application ne restaure jamais le focus, ou
+        // le perd durablement, le compteur ne monte jamais à 3, on atteint le délai, et
+        // `focusLanding()` lit BODY — le check rougit, comme il le doit.
+        const stable = 3;
+        if (!window.__auditFocusStreak) window.__auditFocusStreak = 0;
+        const el = document.activeElement;
+        window.__auditFocusStreak = el && el.tagName !== 'BODY' ? window.__auditFocusStreak + 1 : 0;
+        return window.__auditFocusStreak >= stable;
+      },
+      null,
+      { timeout, polling: 'raf' },
+    )
     .then(() => {
       const elapsed = Date.now() - startedAt;
       if (elapsed > SLOW_FOCUS_MS) {

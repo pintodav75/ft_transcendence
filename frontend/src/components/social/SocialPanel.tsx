@@ -648,7 +648,15 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
         />
       </div>
 
-      <div {...panelProps('addFriend')}>{activeTab === 'addFriend' && <AddFriendSlot />}</div>
+      {/* Same two props, and for the same two reasons, as the friends panel above: one live
+          region for the whole rail (this one), and a way to close the mobile overlay before a
+          link navigates out from under it. Mounted only while its tab is on screen — the slot
+          reads four lists, and the rail is on every authenticated page. */}
+      <div {...panelProps('addFriend')}>
+        {activeTab === 'addFriend' && (
+          <AddFriendSlot announce={announce} onNavigate={onClose} />
+        )}
+      </div>
 
       {/* OUTSIDE the tab panels on purpose: a floating window belongs to the screen, not to a
           tab, so it stays readable while the user is on "Friends" or "Add friend" — and it is
