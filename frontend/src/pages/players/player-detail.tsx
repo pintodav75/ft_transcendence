@@ -64,8 +64,31 @@ function PlayerErrorPanel({ title, message }: { title: string; message: string }
   );
 }
 
+/**
+ * 🚨 GOING FROM ONE PLAYER TO THE NEXT DOES NOT REMOUNT THIS ROUTE — only the param changes,
+ * so React keeps the same component instance and EVERY piece of local state below survives
+ * the navigation. Measured, on the real app: sending a friend request to Bob and then opening
+ * Erin's profile through the search bar left "Friend request sent to…" on screen, re-rendered
+ * with ERIN's name — a message claiming an act that never happened, on top of a profile that
+ * may well already be a friend. The mutation results, the live-region text, the two dialog
+ * flags and `blocked` were all affected; `blocked` is the worst of them, since it would have
+ * shown "You blocked Erin" to someone who blocked Bob.
+ *
+ * 🔑 THE KEY IS THE FIX. Keying on the pseudo makes React discard the instance and build a
+ * fresh one, which is the only remedy that covers state added LATER without anyone
+ * remembering this. Resetting field by field in an effect would also flash the stale message
+ * for a frame, since effects run after paint.
+ *
+ * Lowercased for the same reason `playerQueryKey` is: two spellings of one pseudo are one
+ * player, and re-keying on the casing alone would throw away a perfectly valid instance.
+ */
 export function PlayerDetail() {
   const { pseudo } = useParams({ from: '/_authenticated/players/$pseudo' });
+
+  return <PlayerProfile key={pseudo.toLowerCase()} pseudo={pseudo} />;
+}
+
+function PlayerProfile({ pseudo }: { pseudo: string }) {
   // The signed-in user's ID, not their pseudo: it answers both "is this my own page" and
   // "whose friend request is this". Selector form so the page re-renders on the user, not on
   // every token refresh.
