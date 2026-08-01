@@ -432,7 +432,14 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
       'aria-labelledby': tabId(tabsId, id),
       tabIndex: 0,
       hidden: activeTab !== id,
-      className: 'min-h-0 flex-1 overflow-y-auto focus:outline-none',
+      // 🚨 `focus-ring`, PAS `focus:outline-none`. Ce panneau porte `tabIndex={0}` — c'est
+      // exigé par le motif WAI-ARIA « tabs », pour qu'un contenu non focalisable reste
+      // atteignable au clavier. Le supprimer de l'ordre de tabulation n'est donc pas une
+      // option ; le laisser SANS anneau en était une pire : on tabulait dessus et le focus
+      // disparaissait de l'écran, exactement le défaut corrigé deux fois ailleurs sur ce rail
+      // (le garage de focus `sr-only` de FS-1, le retour à la cloche de FS-2).
+      // `focus-ring` n'agit qu'au `focus-visible` : un clic souris ne dessine rien.
+      className: 'min-h-0 flex-1 overflow-y-auto focus-ring focus-visible:outline-offset-[-2px]',
     }
   }
 
