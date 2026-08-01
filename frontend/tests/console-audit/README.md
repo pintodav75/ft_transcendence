@@ -1122,3 +1122,49 @@ compte** — exactement le parcours de sortie imposé aux vrais utilisateurs. V�
 de `teams-matchmaking`, qui ouvre 5 slots et crée une équipe, ne laisse plus **aucun** compte.
 Si un jour le rapport en nomme à nouveau, c'est que le parcours de sortie s'est cassé quelque
 part — le message est un signal, pas une corvée.
+
+## `player` (F-PLAYER) — le faux vert qui ouvrait l'onglet APRÈS l'action
+
+Neuf checks sur `/players/$pseudo`. Trois d'entre eux gardent des défauts **mesurés en usage
+réel ou trouvés en review**, pas des hypothèses — et les quatre ont été **remis dans le code un
+par un, puis vus rouges**, seule méthode qui distingue un check d'un commentaire.
+
+### 🚨 `P7` a d'abord été VERT SUR DU CODE CASSÉ
+
+Le check veut prouver que bloquer quelqu'un depuis sa fiche **met à jour le rail social** — la
+personne quitte l'onglet Amis et apparaît dans « Blocked players ». Première version :
+
+```js
+await clicSurBlock();                       // le blocage
+await page.getByRole('tab', { name: 'Add friend' }).click();   // ❌ APRÈS
+await blockedList.getByRole('listitem').filter({ hasText: pseudo }).waitFor();
+```
+
+Vert. Puis l'invalidation de `BLOCKS_KEY` a été **retirée du hook** pour vérifier : **toujours
+vert**. La raison est mécanique — l'onglet n'ayant jamais été ouvert, sa requête n'avait aucun
+observateur monté ; en l'ouvrant après coup on ne lit pas un cache rafraîchi, on **monte la
+liste de zéro**, qui se charge toute seule. Le check mesurait le montage, pas l'invalidation.
+
+Le correctif est l'ordre : **ouvrir l'onglet AVANT l'action et ne plus y toucher.** La liste a
+alors un observateur, et la seule chose qui peut la faire bouger est une invalidation. Un
+témoin (`alreadyThere === 0`, porté par `P5`) prouve au passage qu'elle était bien vide avant.
+
+🔑 **La règle générale** : un check qui observe une liste doit la trouver **déjà montée**. Sinon
+il garde le chargement initial, ce qui est vrai de n'importe quel code. C'est le 6ᵉ faux vert de
+cette famille sur ce projet, et le premier hors du rail lui-même.
+
+### ⚠️ La navigation de `P4` doit rester CLIENT
+
+`P4` garde le défaut central : le bandeau « Friend request sent to… » restait affiché en
+changeant de joueur, **re-rendu au nom du nouveau**. Il n'apparaît que parce que la route n'est
+pas remontée — donc un `page.goto` à sa place remonte tout et **rend le check vert par
+construction**. Le scénario passe par la barre de recherche du rail, à la souris.
+
+### ⚠️ Cibler un résultat de recherche : filtrer sur le TEXTE, pas sur le nom accessible
+
+`getByRole('button', { name: /pseudo/ })` en ramenait **deux** : le résultat de recherche, et le
+bouton d'action du même ami **dans le rail social**, monté sur toutes les pages authentifiées et
+dont l'`aria-label` porte le pseudo alors qu'il n'a aucun texte. `.first()` cliquait celui du
+rail : aucune erreur, aucune navigation, un `waitForURL` qui expire 10 s plus tard sur un
+symptôme qui n'a rien à voir. `.filter({ hasText: pseudo })` tranche — les boutons du rail sont
+des icônes sans texte.

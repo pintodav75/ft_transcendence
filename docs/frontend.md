@@ -615,3 +615,11 @@ Branche `feature/f-player-page` (William), **rebasée** puis squashée en un com
 **Audit** : ⚠️ **cette page n'a TOUJOURS PAS de scénario** — David l'écrira. `solo` (S13d) et `teams-detail` n'en vérifient que le `<h1>`, dont le repère est passé de `@pseudo` au nom d'affichage (un compte d'audit n'ayant pas de nom d'affichage, le titre EST son pseudo). Les deux relancés : **22/22 et 14/14, console 0**. Le parcours ami/blocage n'est gardé par rien, et le 404 du profil bloqué devra s'y déclarer en `expectHttp`.
 
 **Aussi livré** : `components/ui/row-list.tsx` et `components/ui/stat.tsx` (génériques, donc directement dans `ui/`), `TeamHero` rebasculé sur `Stat`/`StatStrip`, et ✅ **`vite.config.ts` gagne `watch.ignored` sur `**/tests/**` et `**/*.md`** — correctif **structurel** de l'invariant #10 (plus de full reload quand on écrit un `.md` pendant une campagne).
+
+### [F-PLAYER] — le lot de correctifs du 1er août au soir
+
+Merge `5f92d61`. Trois choses, détaillées dans `docs/journal.md` :
+
+1. 🚨 **`/players/$pseudo` est montée sur `key={pseudo}`** : changer le paramètre d'une route **ne la remonte pas**, donc tout l'état local passait d'un joueur au suivant (bandeau de demande d'ami re-rendu au nom du profil suivant, écran de fin du blocage compris). **Le piège vaut pour tout écran `/x/$id` portant de l'état local.**
+2. 🚨 **Trois régressions sur des composants partagés annulées** : `ui/avatar.tsx` (le `text-xs` retiré pour un appelant, 20 autres en dépendaient), `ui/stat.tsx` (doublon de `ui/stat-strip.tsx`, avec `TeamHero` migrée dessus et `SoloHero` laissée derrière) et `ui/icon-menu-item.tsx` (deux props sans appelant). 🔑 **Un composant de `ui/` se plie, il ne se réécrit pas.**
+3. ✅ **`player.mjs`, 9 checks**, les 4 défauts vus rouges avant vert, dont **un faux vert corrigé** (`P7`).

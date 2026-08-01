@@ -290,3 +290,24 @@ _21 juillet 2026 — **FL (landing publique) rebasée sur `master` `1c8f7a6`** (
 **Vérifications avant merge** : `tsc -b --noEmit` vert, `npm run lint` vert, `npm run build` échoue **uniquement** sur la permission root de `frontend/dist/` (dette d'environnement connue, 2260 modules transformés avant), scénarios `solo` **22/22** et `teams-detail` **14/14**, console 0, suite `test_users_profile.py` **27/27**.
 
 ⚠️ **Il n'existe toujours aucun scénario d'audit pour `/players/$pseudo`** : les deux scénarios touchés n'en vérifient que le titre. David l'écrira.
+
+## 1er août (soir) — le lot de correctifs de la fiche joueur
+
+**Commit `e79c736`, merge `5f92d61`**, branche `fix/player-page-stale-state`, signée à l'identité de William. Aucune migration.
+
+**Le défaut trouvé par David en usage réel.** Demande d'ami envoyée à un joueur, puis ouverture d'un autre profil par la barre de recherche : le bandeau vert « Friend request sent to… » était **toujours là, re-rendu au nom du second joueur**, au-dessus d'un compte avec qui il était **déjà ami**.
+
+🚨 **La cause n'est pas la fiche joueur, c'est TanStack Router** — et elle vaut pour tout écran `/x/$id` : **changer le paramètre ne remonte pas la route**. React garde la même instance, donc tout l'état local survit. Étaient touchés : les résultats des 5 mutations, la région vocale, les 2 drapeaux de fenêtre de confirmation, et l'écran de fin du blocage (qui aurait annoncé « You blocked X » au nom d'un joueur jamais bloqué). **Correctif : `key={pseudo}`** — le seul qui couvre l'état qu'on ajoutera plus tard sans se souvenir de ce piège ; une remise à zéro champ par champ dans un effet laisserait en plus le message périmé une frame à l'écran.
+
+**Et l'audit de ce que la branche avait fait aux composants PARTAGÉS**, demandé par David (« ne te fie pas à son code ») — trois régressions, toutes annulées :
+1. **`ui/avatar.tsx` avait perdu son `text-xs`**, déplacé vers un seul appelant. **20 des 21 appels** en dépendaient : les initiales des listes, des rosters, du rail et des fils de litige changeaient de taille en silence. 🔑 Et le besoin n'existait pas : `TeamHero` et `SoloHero` sont déjà en `size-20` et vivaient très bien avec.
+2. **`ui/stat.tsx` dupliquait `ui/stat-strip.tsx`** à la classe près (API en `children` au lieu d'un tableau), et `TeamHero` — page **déjà mergée** — avait été réécrite pour l'utiliser, en laissant `SoloHero` sur l'original. **Deux composants identiques pour trois consommateurs.** Doublon supprimé, `TeamHero` revenue à l'identique, `PlayerHero` pliée à l'API existante.
+3. **`ui/icon-menu-item.tsx`** gagnait `className` et `disabled` sans **aucun** appelant — la page avait cessé d'utiliser le composant en cours de route.
+
+🔑 **La leçon, à retenir plus que les trois cas** : un composant de `components/ui/` **se plie, il ne se réécrit pas**. Un besoin local se règle au point d'appel.
+
+**Le scénario `player.mjs` (9 checks) écrit dans la foulée**, et les 4 défauts **remis dans le code un par un et vus rouges** : sans clé → `P4` compte 2 bandeaux périmés (le visible + la région vocale) ; garde du dialogue remise sur « inconnu » → `P5` rouge puis le scénario casse faute de bouton à cliquer ; écran de fin retiré → `P6` compte 2 actions encore proposées, exactement la capture de David.
+
+🚨 **`P7` a été VU VERT SUR DU CODE CASSÉ** — il ouvrait l'onglet des bloqués **après** le blocage, donc la liste se montait de zéro et se chargeait toute seule ; retirer l'invalidation du hook ne le faisait pas bouger. Réécrit pour ouvrir l'onglet **avant** l'action. 6ᵉ faux vert de cette famille, le premier hors du rail. → `frontend/tests/console-audit/README.md`
+
+**Vérifications** : `tsc -b` vert, lint vert, prettier vert, `player` 9/9, `teams-detail` 14/14, console 0. ⚠️ **Campagne complète non relancée.**
