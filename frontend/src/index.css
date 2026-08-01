@@ -15,10 +15,25 @@
   --color-surface-header: #0d121c;
   --color-border-subtle: #252d3e;
   --color-border-strong: #3a455c;
+  /* 🚨 LA BORDURE D'UN CHAMP N'EST PAS DÉCORATIVE : c'est elle qui dit où commence la zone
+     où l'on tape. WCAG 1.4.11 lui impose donc 3:1 contre ce qui l'entoure, alors qu'un simple
+     trait de séparation, lui, en est exempté. `border-subtle` plafonnait à **1,44:1** — le
+     champ était invisible pour qui voit mal. Ce token ne sert QU'AUX CONTRÔLES DE SAISIE
+     (input, select, textarea), pas aux cartes ni aux séparateurs : les repasser tous en
+     3:1 transformerait l'interface en grille de cases. Mesuré : 3,02 à 3,50:1 selon la
+     surface, donc au-dessus du seuil sur les cinq. */
+  --color-border-control: #5a6785;
 
   --color-text-primary: #f3f6fb;
   --color-text-secondary: #a9b2c7;
-  --color-text-muted: #707b94;
+  /* ⚠️ #707b94 À L'ORIGINE, SOUS WCAG AA SUR TROIS DES CINQ SURFACES de l'app : 4,23:1 sur
+     `surface-card`, 4,02:1 sur `surface-card-strong`, 4,42:1 sur `surface-header` — pour un
+     seuil de 4,5:1. Le token est posé 131 fois, c'était donc la dette de contraste la plus
+     répandue du front, et le seul obstacle mesuré au module « accessibilité WCAG 2.1 AA ».
+     #78849e tient 4,54:1 sur la PIRE des cinq surfaces, sans toucher un seul composant.
+     🔑 Toute nouvelle valeur se vérifie contre `card-strong` (#151c2a), la plus claire des
+     cinq : celle qui passe là passe partout. */
+  --color-text-muted: #78849e;
 
   --color-arena-red: #ff3f68;
   --color-arena-blue: #3f7dff;
@@ -32,7 +47,10 @@
      à 4,88:1 : on ne touche pas ce qui est conforme. */
   --color-arena-blue-soft-foreground: #4f8aff;
   --color-action-primary: #343579;
-  --color-action-primary-border: #5053a4;
+  /* ⚠️ #5053a4 À L'ORIGINE, à 2,53–2,93:1 selon la surface : sous le seuil de 3:1 que
+     WCAG 1.4.11 impose au contour qui identifie un bouton. #6266b8 garde exactement la même
+     teinte violette et tient 3,34:1 au pire. */
+  --color-action-primary-border: #6266b8;
   /* Indigo LISIBLE en TEXTE sur nos surfaces de carte. `--color-action-primary-border`
      est une couleur de BORDURE : posée en texte sur `--color-surface-card-strong` elle
      tombe à 2,53:1, loin sous le 4,5:1 exigé par WCAG AA (mesuré sur la pastille

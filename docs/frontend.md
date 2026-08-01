@@ -677,3 +677,180 @@ au passage (`waitForURL` qui rend la main avant le rendu, `innerText` qui appliq
 **Vérifications** : `tsc -b --noEmit` vert, lint vert (0 warning), `npm run build` vert **dans le
 conteneur** (sur l'hôte, `dist/` appartient à root — dette connue, sans rapport), captures
 relues à 1280 px et à 390 px.
+
+---
+
+## [FIX-RESPONSIVE] — navigation mobile (branche `fix/responsive-mobile-nav`, 1er août)
+
+**Pourquoi c'était bloquant, et pas cosmétique.** Le sujet v21.1 (chap. III.3) exige *« a frontend
+that is clear, responsive, and accessible across all devices »* — c'est une exigence
+**obligatoire**, donc un motif de rejet du projet, au même titre que la console à zéro. Or
+`LeftRail` est `hidden … lg:flex` et le `MobileHeader` d'origine n'exposait **qu'un seul bouton**,
+celui du panneau social. Conséquence mesurée : sous 1024 px, l'application n'avait **ni les six
+destinations, ni « Profile », ni « Logout »**. Un correcteur qui bascule en vue mobile dans les
+devtools — le premier réflexe pour tester le responsive — tombait sur un cul-de-sac.
+
+**Ce qui a été fait.**
+
+- **`components/layout/PrimaryNav.tsx`** — extraction des six items (sept pour un admin, badge de
+  litiges compris). Extrait parce qu'il y a **deux consommateurs réels**, pas par principe : le
+  rail et le tiroir. Conforme à la règle d'extraction au second usage.
+- **`MobileHeader.tsx`** — bouton menu à gauche du wordmark, tiroir plein écran contenant
+  `PrimaryNav` + `AuthNav`.
+- **`pages/home.tsx`** — la phrase d'accueil disait « …are in the rail on the left », **faux sous
+  1024 px** : c'était la seule phrase qui apprend à l'utilisateur où trouver ses équipes, et elle
+  le renvoyait vers un panneau invisible. Reformulée sur la destination, pas sur le meuble.
+
+**Les trois pièges du chantier.**
+
+1. 🔑 **UN SEUL ÉTAT `openPanel: 'nav' | 'social' | null`, PAS DEUX BOOLÉENS.** Deux booléens
+   autorisent les deux tiroirs ouverts en même temps : deux `aria-modal="true"` empilés, deux
+   pièges à focus qui se disputent le clavier, et un `Escape` qui ne sait plus lequel il ferme.
+   L'union rend l'état illégal inexprimable et le piège à focus n'a qu'un tiroir à connaître.
+2. 🔑 **FERMETURE PAR DÉLÉGATION DE CLIC, PAS SUR UN CHANGEMENT DE `pathname`.** Re-cliquer la
+   destination où l'on est **déjà** ne change pas l'URL : le tiroir serait resté ouvert en
+   couvrant `inset-3`, donc en masquant intégralement la page vers laquelle il venait de mener. Le
+   test porte sur `<a>` uniquement — « Logout » est un `<button>`, le tiroir reste donc en place
+   pendant que sa confirmation s'affiche par-dessus (et l'`Escape` du tiroir se garde déjà d'un
+   `[role="dialog"]` enfant).
+3. ⚠️ **LES DEUX MONTAGES NE COEXISTENT JAMAIS DANS L'ARBRE D'ACCESSIBILITÉ.** Le rail reste
+   *monté* quand le tiroir s'ouvre, mais en `display:none` — donc retiré de l'arbre, pas seulement
+   de l'écran. C'est ce qui évite deux landmarks « Primary navigation » annoncés en même temps, et
+   c'est vérifié par un check plutôt que supposé.
+
+**Vérifications.** `tsc -b --noEmit` vert, lint vert. `f-nav` passe de 18 à **22 checks** — quatre
+ajoutés (`N13b` le rail cède la place au bouton · `N13c` le tiroir sert la même liste + Profile +
+Logout, rail hors de l'arbre · `N13d` un item navigue **et** referme · `N13e` Escape referme et rend
+le focus au bouton) — et la phase mobile s'insère **avant** celle de déconnexion, en rendant la
+fenêtre au format desktop, sans quoi `logoutItem` viserait un élément `display:none`. `home`,
+`fs1`, `fs2` (les scénarios qui exercent l'overlay social en 375 px) restent verts. Console **0**
+partout. Capture relue à 375 px.
+
+**Restes ouverts de [F-PLAYER]** *(déportés de `CLAUDE.md` le 01/08)* : ① `player.mjs` (9 checks,
+4 défauts vus rouges) ne couvre **pas** « Refuser » / « Annuler ma demande » / « Retirer des
+amis » ; ② la **bande du hero** fait ~130 px de dégradé vide — choix produit à trancher.
+
+## [FIX-CONTRASTE] — `--color-text-muted`, la dette AA soldée en une ligne (1er août)
+
+**Le défaut.** `--color-text-muted` valait `#707b94`, **sous WCAG AA sur trois des cinq surfaces**
+de l'app : 4,23:1 sur `surface-card`, 4,02:1 sur `surface-card-strong`, 4,42:1 sur
+`surface-header`, pour un seuil de 4,5:1. Le token est posé **131 fois** — c'était la dette de
+contraste la plus répandue du front, et le seul obstacle *mesuré* au module « accessibilité
+WCAG 2.1 AA » (Major, 2 pts), dont le reste (rôles, régions live, gestion du focus) est déjà là et
+déjà testé par le harnais.
+
+**Le correctif** : `#78849e`, qui tient **4,54:1 sur la pire des cinq surfaces**. Aucun composant
+touché. 🔑 **Toute nouvelle valeur se vérifie contre `card-strong` (`#151c2a`)**, la plus claire des
+cinq : ce qui passe là passe partout.
+
+**Deux erreurs de la doc corrigées au passage** (elles traînaient dans le backlog de `CLAUDE.md`) :
+`--color-rank-bronze` n'a **jamais** été en dette (4,60 à 5,34:1 selon la surface, pas 4,3:1), et le
+token était utilisé **131 fois, pas 45**.
+
+**Balayage complet du design system.** Les 11 tokens porteurs de texte ont été croisés avec les 5
+surfaces, plus les 5 paires dédiées (`action-primary-foreground` sur `action-primary` et son
+`hover`, `google-text` sur `google-button`, `arena-blue-soft-foreground` sur `arena-blue-soft`,
+`arena-red` sur `arena-red-soft`) : **plus aucun texte sous AA**, le minimum de la table est
+désormais 4,54:1. ⚠️ **Restent sous 3:1 les deux tokens de BORDURE** (`border-strong` 1,77 à 2,06:1,
+`border-subtle` 1,24 à 1,44:1). Ils relèvent de WCAG 1.4.11 (non-texte), pas de 1.4.3, et un
+séparateur décoratif y échappe — mais **la bordure d'un champ de saisie, non**. À regarder si le
+module WCAG est réellement revendiqué. Script de mesure : scratchpad, `contrast.py`.
+
+**Vérifications.** Campagne **complète** — c'est un token global, un scénario filtré n'aurait rien
+prouvé : **27 scénarios, 416/416 checks verts, console 0, exit 0**.
+
+## Responsive — balayage de vérification (1er août)
+
+Après `[FIX-RESPONSIVE]`, **21 routes × 2 largeurs (375 et 768 px)**, connecté sur un compte semé
+pour que les listes aient de vraies lignes : landing, login, register, privacy, terms, home, teams,
+solo, games, matchmaking, history, profile, fiche joueur, les 3 fiches de jeu, 2 ladders, un ladder
+solo, un détail d'équipe et un détail de match.
+
+**Résultat : zéro débordement horizontal sur les 42 chargements, zéro erreur et zéro warning de
+console.** Les pages reflowent réellement (cartes empilées, onglets, bandeaux de stats en grille,
+filtres en colonne) — le travail responsive des pages était déjà fait, **il ne manquait que la
+navigation**.
+
+⚠️ **Deux réserves honnêtes** : ① `/profile` est encore le stub `<div>a faire</div>` en master
+(F4 non mergée), il n'a donc **rien de vérifié** — et c'est aussi la seule route sans `<h1>`, ce
+qu'il faudra contrôler quand Adrien la livrera ; ② `/disputes/$id` et `/admin/disputes` n'étaient
+pas atteignables avec les fixtures du jour, ils restent à balayer. Script : scratchpad,
+`responsive.mjs`.
+
+## [A11Y-AA] — audit WCAG 2.1 AA complet et mise en conformité (1er août)
+
+Objectif : pouvoir **revendiquer le module « Complete accessibility compliance (WCAG 2.1 AA) »**
+(Major, 2 pts) sans se faire recaler en soutenance. Méthode en deux temps, parce qu'un seul des
+deux ne prouve rien.
+
+### ① Balayage automatique — `axe-core`
+
+Installé **hors du dépôt** (dans le scratchpad) et injecté dans la page, pour ne pas ajouter une
+dépendance au projet. Filtré sur les seuls tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`.
+
+**17 routes × 2 largeurs (1280 et 375 px) + 4 états interactifs** que jamais un balayage de pages
+statiques ne voit : tiroir de navigation mobile ouvert, panneau social mobile ouvert, formulaire de
+connexion en erreur, formulaire d'inscription en erreur.
+
+**Résultat : 0 violation.** Script : scratchpad, `a11y.mjs`.
+
+### ② Ce qu'`axe` ne sait PAS voir — vérifié à la main
+
+🚨 **`axe` ne couvre qu'une fraction des critères.** S'arrêter là aurait été malhonnête : les
+quatre défauts réels de ce chantier ont TOUS été trouvés dans cette seconde passe, aucun par
+`axe`. Script : scratchpad, `a11y2.mjs`.
+
+| Critère | Avant | Après |
+| --- | --- | --- |
+| **2.4.2 Page Titled (niveau A)** | **1 seul titre pour 13 routes** | 13 titres distincts |
+| **1.4.10 Reflow (320 px)** | 1 route débordait de 0,9 px | 0 |
+| 1.4.4 Zoom texte 200 % | 0 | 0 |
+| 1.4.12 Espacement du texte imposé | 0 | 0 |
+| 2.4.7 / 2.1.1 / 2.1.2 clavier | 25 arrêts, 0 sans focus visible, pas de piège | inchangé |
+| **1.4.11 Contraste non-texte** | 4 contrôles sous 3:1 | tous ≥ 3:1 |
+
+### Les quatre correctifs
+
+1. **`lib/page-title.ts` + `RootLayout`** — 🚨 **2.4.2 est de niveau A**, le plus bas de la norme :
+   les 13 routes rendaient toutes « VS MODE ». Dans une liste d'onglets, dans l'historique et à
+   l'annonce d'un lecteur d'écran (qui lit le titre à chaque changement de page), rien ne
+   distinguait une page d'une autre. 🔑 **Table centrale, pas un `useEffect` par page** : un titre
+   posé par chaque page n'est posé que si la page y pense, et la 26ᵉ hérite en silence du titre de
+   la précédente. Une route absente de la table retombe sur le titre nu, jamais sur le précédent.
+2. **`--color-border-control: #5a6785`** (nouveau token) — la bordure d'un champ **n'est pas
+   décorative** : c'est elle qui dit où commence la zone où l'on tape, et 1.4.11 lui impose 3:1.
+   `border-subtle` plafonnait à **1,44:1**. ⚠️ **Ce token ne sert QU'AUX CONTRÔLES** (input, select,
+   textarea, bouton secondaire, bouton Google) : repasser cartes et séparateurs en 3:1
+   transformerait l'interface en grille de cases, et un séparateur décoratif est **exempté** par
+   la norme.
+3. **`--color-action-primary-border` `#5053a4` → `#6266b8`** — même teinte, 2,53–2,93:1 → 3,34:1 au
+   pire.
+4. **`ui/tabs.tsx`, `px-3 sm:px-4`** — à 320 px, la largeur *exacte* que 1.4.10 impose de tenir,
+   les trois onglets faisaient scroller la **page entière** de 0,9 px. Resserrage plutôt
+   qu'`overflow-x-auto`, pour la raison déjà expliquée sur le `role="tablist"`.
+
+### Ce qui reste sous 3:1, et pourquoi c'est acceptable
+
+- **`border-subtle`** (1,24 à 1,44:1) ne borde plus que des **cartes et des séparateurs** — de la
+  décoration, explicitement hors du champ de 1.4.11.
+- Les **boutons sans bordure ni remplissage** (`ghost`, `IconButton`) s'identifient par leur
+  libellé ou leur icône, à 8,44:1 — c'est 1.4.3 qui s'applique, et il passe.
+- Deux boutons mesurés sous 3:1 appartiennent aux **devtools TanStack Router**. Vérifié dans le
+  paquet plutôt que supposé : `process.env.NODE_ENV !== "development"` les fait rendre `null`.
+- L'état sélectionné d'`OptionTile` passe par `border-focus-ring` (**4,58:1**), pas par la bordure
+  discrète : la sélection reste perceptible.
+
+### Vérifications
+
+`tsc -b --noEmit` et lint verts. **Campagne complète : 27 scénarios, 416/416, console 0, exit 0.**
+⚠️ Une campagne intermédiaire a sorti **A9 rouge** (`admin-disputes`, focus rendu sur `<BODY>` au
+lieu de `<H1>`) : vert en isolation (15/15) **et** vert à la campagne suivante — c'est la course de
+harnais décrite par l'invariant #11, pas une régression. Notée ici pour que personne ne la
+redécouvre en croyant à un défaut du ticket.
+
+**[FX-TABLE] — validation visuelle faite le 01/08** *(entrée déportée de `CLAUDE.md`)*. La carte
+signalait « 3 points d'apparence à regarder un jour sur un écran étroit », mergés sans contrôle.
+Le balayage responsive de `[FIX-RESPONSIVE]` et de `[A11Y-AA]` couvre la question : **320, 375 et
+768 px, zéro débordement horizontal sur les 21 routes**, tableaux compris. Il reste possible qu'un
+détail esthétique déplaise, mais **plus rien ne casse la mise en page** — ce n'était que ça, le
+risque.

@@ -194,7 +194,7 @@ export function EvidenceForm({
             // in an element nothing points at.
             aria-describedby={messageError ? `${messageHintId} ${messageErrorId}` : messageHintId}
             disabled={submit.isPending}
-            className="focus-ring min-w-0 rounded-control border border-border-subtle bg-surface-input px-3 py-2 text-sm text-text-primary placeholder:text-text-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="focus-ring min-w-0 rounded-control border border-border-control bg-surface-input px-3 py-2 text-sm text-text-primary placeholder:text-text-muted disabled:cursor-not-allowed disabled:opacity-50"
             {...register('message')}
           />
           <p id={messageHintId} className="text-xs text-text-muted">
