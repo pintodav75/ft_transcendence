@@ -230,9 +230,14 @@ export function Home() {
           >
             {displayName ? `Welcome back, ${displayName}` : 'Welcome back'}
           </h1>
+          {/* ⚠️ « the rail on the left » MENTAIT SOUS 1024 px, où le rail est masqué et remplacé
+              par le menu de l'en-tête : la seule phrase qui apprend à l'utilisateur où trouver ses
+              équipes le renvoyait vers un panneau invisible. On nomme donc la DESTINATION, pas le
+              meuble qui la porte — une formulation qui reste vraie aux deux largeurs. */}
           <p className="mt-2 max-w-prose text-sm text-text-secondary">
             What needs you right now — your next matches, the ones on the clock, and the slots you
-            can take. Your teams, the games and your full history are in the rail on the left.
+            can take. Your teams, the games and your full history are one tap away in the navigation
+            menu.
           </p>
         </div>
       </header>

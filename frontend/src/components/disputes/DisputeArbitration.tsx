@@ -335,7 +335,7 @@ export function DisputeArbitration({
               // sits in an element nothing points at.
               aria-describedby={notesError ? `${notesHintId} ${notesErrorId}` : notesHintId}
               disabled={resolve.isPending}
-              className="focus-ring min-w-0 rounded-control border border-border-subtle bg-surface-input px-3 py-2 text-sm text-text-primary placeholder:text-text-muted disabled:cursor-not-allowed disabled:opacity-50"
+              className="focus-ring min-w-0 rounded-control border border-border-control bg-surface-input px-3 py-2 text-sm text-text-primary placeholder:text-text-muted disabled:cursor-not-allowed disabled:opacity-50"
               {...register('notes')}
             />
             <p id={notesHintId} className="text-xs text-text-muted">

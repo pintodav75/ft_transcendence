@@ -25,7 +25,7 @@ const ITEMS = [
 const isLadders = (url) => url.includes('/api/ladders');
 const isSearch = (url) => url.includes('/api/search');
 
-export async function run({ page, setPhase, step, countRequests, ORIGIN }) {
+export async function run({ page, setPhase, step, countRequests, awaitFocusRestored, ORIGIN }) {
   const rail = page.locator('aside:has(nav[aria-label="Primary navigation"])');
   const links = rail.locator('nav[aria-label="Primary navigation"] a');
   const input = rail.locator('input[type=search]');
@@ -320,6 +320,77 @@ export async function run({ page, setPhase, step, countRequests, ORIGIN }) {
     active.border !== TRANSPARENT && hovered.border === TRANSPARENT && active.bg === hovered.bg,
     `actif border=${active.border} bg=${active.bg} | survolé border=${hovered.border} bg=${hovered.bg}`,
   );
+
+  // ------------------------------------------------------------- §5b le tiroir mobile
+  //
+  // 🚨 CE QUI EST MESURÉ ICI EST UN MOTIF DE REJET DU PROJET, pas une commodité. Le sujet exige
+  // « a frontend that is clear, responsive, and accessible across all devices » ; le rail est
+  // `hidden … lg:flex`, donc sous 1024 px ces six destinations, « Profile » et « Logout »
+  // n'existaient nulle part — l'app était un cul-de-sac sur téléphone.
+  setPhase('10b. sous 1024 px : le rail cède la place au tiroir');
+  await page.setViewportSize({ width: 375, height: 812 });
+  // Les media queries de Tailwind s'appliquent au repaint suivant, pas au resize lui-même.
+  await page.waitForTimeout(300);
+
+  const burger = page.locator('header button[aria-label="Open navigation menu"]');
+  const drawer = page.locator('#mobile-nav-panel');
+  const railVisible = await rail.isVisible();
+  const burgerVisible = await burger.isVisible();
+  step(
+    'N13b',
+    !railVisible && burgerVisible,
+    `à 375 px : rail visible=${railVisible} (false attendu), bouton de menu visible=${burgerVisible} (true attendu)`,
+  );
+
+  setPhase('10c. le tiroir sert la MÊME liste que le rail');
+  await burger.click();
+  await drawer.waitFor({ timeout: 5000 });
+  const drawerLabels = await drawer
+    .locator('nav[aria-label="Primary navigation"] a')
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()));
+  const hasProfile = (await drawer.locator('nav[aria-label="Account"] a:has-text("Profile")').count()) === 1;
+  const hasLogout = (await drawer.locator('nav[aria-label="Account"] button:has-text("Logout")').count()) === 1;
+  // 🔑 Le rail reste MONTÉ (il est seulement `display:none`) : c'est ce qui garantit qu'il sort
+  // de l'arbre d'accessibilité et qu'un lecteur d'écran n'annonce pas DEUX « Primary
+  // navigation » superposées pendant que le tiroir est ouvert.
+  const railStillHidden = !(await rail.isVisible());
+  step(
+    'N13c',
+    drawerLabels.length === 6 &&
+      drawerLabels.every((text, i) => text === expected[i]) &&
+      hasProfile &&
+      hasLogout &&
+      railStillHidden,
+    `tiroir : ${JSON.stringify(drawerLabels)} + Profile=${hasProfile} + Logout=${hasLogout} ; rail hors de l'arbre=${railStillHidden}`,
+  );
+
+  setPhase('10d. un item navigue ET referme le tiroir');
+  // Le défaut que ce check garde : sans fermeture, le tiroir couvre `inset-3` — donc la page
+  // vers laquelle on vient de naviguer est intégralement masquée par le menu qui y a mené.
+  await drawer.locator('nav[aria-label="Primary navigation"] a:has-text("Games")').click();
+  await page.waitForURL(/\/games/, { timeout: 10000 });
+  await drawer.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+  const drawerGone = (await drawer.count()) === 0;
+  step('N13d', drawerGone, `après navigation vers /games : tiroir démonté=${drawerGone} (true attendu)`);
+
+  setPhase('10e. Escape referme et rend le focus au bouton');
+  await burger.click();
+  await drawer.waitFor({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await drawer.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+  await awaitFocusRestored();
+  const focusLabel = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+  step(
+    'N13e',
+    (await drawer.count()) === 0 && focusLabel === 'Open navigation menu',
+    `Escape : tiroir fermé=${(await drawer.count()) === 0}, focus rendu à « ${focusLabel} » (« Open navigation menu » attendu)`,
+  );
+
+  // Les deux phases suivantes pilotent le rail : on rend la fenêtre au format desktop, sans quoi
+  // `logoutItem` viserait un élément `display:none`.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForTimeout(300);
+  await page.goto(`${ORIGIN}/home`, { waitUntil: 'networkidle' });
 
   // ------------------------------------------------------------------ §6 déconnexion
   setPhase('11. déconnexion : la boîte de confirmation');

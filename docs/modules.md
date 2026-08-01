@@ -1,8 +1,12 @@
 # Modules 42 — détail
 
-> Extrait de CLAUDE.md (refacto 25/07). Détail complet des 11 modules revendiqués, du module le plus fragile et des candidats de réserve.
+> Extrait de CLAUDE.md (refacto 25/07). Détail complet des 12 modules revendiqués, du module le plus fragile et des candidats de réserve.
 
-## 🧩 Modules choisis (16 points)
+> ⚠️ **Mis à jour le 1er août 2026** : le tableau passe à **18 points** (ajout de l'accessibilité
+> WCAG 2.1 AA, validée ce jour-là), et 🚨 **le plafond de notation est 19** — voir la note sous le
+> tableau.
+
+## 🧩 Modules choisis (18 points)
 
 | Module                                         | Type  | Points | État                                   |
 | ---------------------------------------------- | ----- | ------ | -------------------------------------- |
@@ -17,7 +21,53 @@
 | File upload                                    | Minor | 1      | ✅ **complet** — back (T1, 24/07) + puces front (FT-2B, 27/07) |
 | Notification system                            | Minor | 1      | ✅ **B9 + #53 + B11** (match, dispute, amis, équipe) |
 | **Advanced search**                            | Minor | **1**  | ✅ **vérifié PDF 22/07** — `GET /search` (filtres + tri + pagination) |
-| **TOTAL**                                      |       | **16** |                                        |
+| **Accessibilité WCAG 2.1 AA**                  | Major | **2**  | ✅ **VALIDÉ le 01/08** — voir ci-dessous |
+| **TOTAL**                                      |       | **18** |                                        |
+
+### 🚨 Le plafond de notation est 19 points, pas plus
+
+Chapitre VII du sujet : le bonus n'est compté que **jusqu'à 5 points au-dessus des 14** requis.
+**19 est donc le maximum comptabilisable.** À 18, un module de plus ne rapporte plus qu'**un seul**
+point — mais viser au-delà reste utile comme **marge** si un module n'est pas validé en
+soutenance, ce que le sujet conseille explicitement (« aiming for more than 14 points may be a
+good idea, especially if some modules aren't validated »).
+
+### Accessibilité WCAG 2.1 AA — VALIDÉ le 1er août 2026
+
+Le sujet demande : *« Complete accessibility compliance (WCAG 2.1 AA) with screen reader support,
+keyboard navigation, and assistive technologies »* (Major, 2 pts).
+
+**Ce qui était déjà là** (livré au fil des tickets front, pas pour ce module) : 92 `aria-label`,
+55 `role="status"`, 4 régions live, un lien d'évitement, une gestion explicite du focus — et
+surtout un **harnais d'audit qui teste** la restauration du focus (`awaitFocusRestored`) et les
+annonces vocales (`awaitAnnouncement`), donc des preuves rejouables en soutenance.
+
+**La mise en conformité du 1er août**, en deux passes — 🚨 **la seconde est celle qui compte** :
+
+1. **`axe-core`**, filtré sur les tags `wcag2a/2aa/21a/21aa`, sur 17 routes × 2 largeurs + 4 états
+   interactifs (tiroir mobile, panneau social, deux formulaires en erreur) → **0 violation**.
+2. **Les critères qu'`axe` ne sait pas mesurer**, vérifiés à la main. **Les 4 défauts réels
+   viennent tous de là, aucun n'a été vu par l'outil** :
+   - 🚨 **2.4.2 « Page Titled », niveau A** (donc en dessous même du AA revendiqué) : **un seul
+     titre « VS MODE » pour 13 routes**. → `frontend/src/lib/page-title.ts`.
+   - **1.4.11** : bordure des champs de saisie à **1,44:1** au lieu de 3:1 → token
+     `--color-border-control` (3,02–3,50:1), réservé aux **contrôles**.
+   - **1.4.11** : bordure du bouton primaire à 2,53–2,93:1 → `#6266b8` (3,34:1).
+   - **1.4.10** : à **320 px** — le seuil exact de la norme, pas 375 — les onglets faisaient
+     scroller la page entière.
+
+**Propres sans intervention** : zoom texte 200 %, espacement de texte imposé, focus visible
+(25 arrêts de tabulation, 0 sans indicateur), aucun piège clavier, contraste de tous les textes
+(après le passage de `--color-text-muted` à `#78849e` le même jour).
+
+**Ce qui reste volontairement sous 3:1, et la réponse à donner en soutenance** : `border-subtle` ne
+borde plus que **cartes et séparateurs** — de la décoration, explicitement exemptée de 1.4.11 ; les
+boutons sans bordure ni fond s'identifient par leur **libellé à 8,44:1**, ce qui relève de 1.4.3
+(qui passe) ; et les deux derniers boutons mesurés appartiennent aux **devtools TanStack**, qui
+rendent `null` hors développement (vérifié dans le paquet, pas supposé).
+
+📄 Récit complet, tableau avant/après et scripts de mesure → `docs/frontend.md`, section
+`[A11Y-AA]`.
 
 ### File upload — COMPLET (back 24/07, front 27/07)
 
@@ -34,9 +84,10 @@ Le sujet est explicite : *« You will be asked to demonstrate each claimed modul
 - *« **Ability to delete uploaded files** »* → **`DELETE /users/me/avatar`** : supprime l'objet MinIO **et** remet `avatar_url` à `NULL`, **idempotente** (sans avatar, renvoie l'user inchangé). ⚠️ L'échec de suppression MinIO est **loggé en `warn`, pas propagé** : on préfère un objet orphelin dans le bucket à un utilisateur bloqué avec un avatar qu'il ne peut plus retirer. Le front retombe sur l'avatar par défaut dès que `avatarUrl` est `NULL`.
 - *« Support multiple file types (images, documents, etc.) »* → l'allowlist MIME partagée `MIME_TO_EXT` est **scindée en deux** : `IMAGE_MIME` (avatar : jpeg/png/webp **uniquement**) et `EVIDENCE_MIME` (preuves de dispute : images **+ `application/pdf`**). 🔑 **Ne jamais les refusionner** : un avatar est forcément une image, une preuve de litige peut être un document. C'est le seul découpage qui satisfait le sujet sans absurdité produit.
 
-⚠️ **Ce qui reste : les puces FRONT du module** (validation côté client, aperçu avant envoi, indicateur de progression) — aucune n'est faite, et le bouton « Upload Avatar » de la page team est encore un `alert` stub. Le module ne sera démontrable qu'une fois ces puces livrées.
-
-⚠️ **L'option de repli tient toujours** : le sujet décrit un vrai **système de gestion de fichiers**, on a un avatar et des preuves de litige. Si le front coince, **l'échanger contre « Custom design system »** (voir candidats de réserve) reste bien moins cher — on garde 16 pts dans les deux cas.
+⚠️ **Ces deux paragraphes disaient encore, au 31/07, que « les puces FRONT ne sont pas faites » et
+qu'il fallait prévoir un repli — c'était périmé depuis FT-2B (27/07) et contredit par le haut de
+cette même section.** Supprimé le 01/08. Le module est complet et démontrable ; « Custom design
+system » n'est plus un **repli** mais un **module de plus** à prendre (voir candidats de réserve).
 
 ### 🚨 Pourquoi « Game stats & match history » a disparu
 

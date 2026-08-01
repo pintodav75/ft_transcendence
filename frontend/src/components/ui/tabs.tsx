@@ -109,7 +109,12 @@ export function Tabs({ tabs, active, onSelect, idPrefix, label, variant = 'defau
               tabIndex={selected ? 0 : -1}
               onClick={() => onSelect(tab.id)}
               className={cn(
-                'focus-ring -mb-px border-b-2 px-4 py-3 text-xs label-caps transition',
+                // ⚠️ `px-3` SOUS 640 px, ET C'EST UNE EXIGENCE, PAS UN GOÛT : à 320 px — la largeur
+                // exacte que WCAG 1.4.10 impose de tenir sans défilement horizontal — les trois
+                // onglets en `px-4` dépassaient de 0,9 px et faisaient scroller la PAGE ENTIÈRE.
+                // On resserre plutôt que d'ajouter un `overflow-x-auto`, pour la raison expliquée
+                // sur le `role="tablist"` juste au-dessus.
+                'focus-ring -mb-px border-b-2 px-3 py-3 text-xs label-caps transition sm:px-4',
                 selected
                   ? 'border-b-arena-red text-text-primary'
                   : 'border-b-transparent text-text-muted hover:text-text-secondary',
