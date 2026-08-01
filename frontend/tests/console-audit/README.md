@@ -1205,3 +1205,72 @@ masqués, ce qu'on ne veut pas ici.)
 Un saut dans la page n'est pas une navigation : un `<Link>` empilerait une entrée d'historique et
 le bouton Précédent du navigateur se mettrait à remonter le document clause par clause. `L7` garde
 les deux moitiés — l'URL finit bien par `/terms#liability`, **et** la cible existe.
+
+## `profile` (F4) — deux garde-fous de teardown, et un piège de sélecteur
+
+Ce scénario couvre les quatre sections de `/profile` : avatar, profil, mot de passe, 2FA.
+
+### 🚨 Ce qu'il ne doit JAMAIS laisser derrière lui
+
+`deleteAuditUser()` supprime le compte avec `{ password: user.password }` et **rien d'autre**.
+Deux conséquences que tout ajout à ce scénario doit respecter :
+
+1. **La 2FA doit être désactivée à la fin.** `DELETE /users/me` réclame un `totpCode` dès que
+   `totpEnabled` est vrai, or le runner n'en envoie pas : un run qui s'arrêterait 2FA active
+   laisserait un compte orphelin **à chaque campagne**. La phase 5 fait donc toujours
+   `enable` **puis** `disable`, et le check **5.6** vérifie explicitement le retour à
+   « Disabled » avant la fin.
+2. **Le mot de passe ne doit jamais changer pour de vrai.** Le teardown présente
+   `user.password`, l'original. La phase 4 ne teste donc que le **refus** (401) — ce qui est
+   de toute façon le seul comportement que la review demandait de garder.
+
+### Le code TOTP est calculé, pas deviné
+
+Le secret base32 est **lu dans la page**, sous le QR code, puis un TOTP (HMAC-SHA1, pas de
+30 s, RFC 6238 — les réglages par défaut de `speakeasy`) est calculé avec `node:crypto`, sans
+dépendance ajoutée. C'est le correctif **NB5** qui le permet : avant lui, seule l'image du QR
+portait le secret, dont un harnais ne tire rien — comme un lecteur d'écran, ou comme un
+utilisateur dont l'application TOTP tourne sur la machine qui affiche le QR.
+
+⚠️ **`POST /auth/2fa/setup` régénère le secret À CHAQUE appel** (`2fa.ts` écrase `totpSecret`).
+La phase 5 annule volontairement le premier flux (check **5.3**) : elle doit donc **relire le
+secret** après avoir rouvert « Enable 2FA ». Réutiliser celui d'avant le Cancel produit un code
+refusé, et on conclurait à tort que le flux est cassé.
+
+### B3 se fabrique par `page.route`, surtout pas en base
+
+Le compte du harnais vient de `POST /auth/register` : il a un mot de passe, donc la garde de
+B3 ne se déclencherait jamais. La phase 6 réécrit donc `GET /api/users/me` à la volée —
+l'idiome de `history`, `ladder-detail`, `admin-disputes` et `matchmaking`.
+
+🚨 **Ne jamais passer par `update users set password_hash = null`.** Le compte deviendrait
+**insupprimable** tant que la valeur n'est pas restaurée : `deleteAuditUser()` présente
+`user.password`, que le serveur ne pourrait plus vérifier. Un crash dans cette fenêtre laisse
+un orphelin à chaque run — le mode de panne exact pour lequel NB11 a été abandonné. Le stub,
+lui, n'a rien à restaurer.
+
+🔑 **Deux checks, et c'est le second qui garde le correctif.** `6.1` sert `hasPassword: false`
+et attend le `Callout` ; `6.2` sert le **cas B** (`oauthProvider: 'google'` **et**
+`hasPassword: true` — un compte inscrit par email puis lié à Google, dont `auth/google.ts` ne
+touche pas le `passwordHash`) et attend le **formulaire**. Mesuré en remettant l'ancienne garde
+`oauthProvider` dans le code : **`6.1` reste VERT**, seul `6.2` rougit. Un check qui ne teste
+que le cas négatif aurait laissé passer le défaut — c'est d'ailleurs ce qui s'est produit.
+
+### Deux règles de sélecteur, payées en rouge
+
+- **Scoper toute balise générique** (`code`, `pre`, `button` nu) sur une page authentifiée :
+  les devtools de TanStack Router en montent des dizaines, et le mode strict de Playwright
+  fait alors échouer tout le scénario (`exit 2`). Ici : `form:has(#totp-code) code`.
+- **`textContent`, jamais `innerText`**, pour vérifier ce que le DOM porte : `innerText` lit le
+  texte **rendu**, donc « PROFILE » là où le `<h1>` contient « Profile » (`label-caps-black`
+  applique `text-transform: uppercase`).
+
+### Ce que le scénario laisse volontairement de côté
+
+- La **barre de progression** de l'upload d'avatar : en local, le transfert est trop rapide
+  pour être échantillonné de façon déterministe. `teams-manage` la couvre déjà sur le logo
+  d'équipe, avec le **même** `ui/progress-bar.tsx` alimenté par le **même** `lib/upload.ts`.
+- **NB11**, l'effacement du message « Password updated. » après 6 s : le vérifier demanderait
+  un changement de mot de passe RÉUSSI, puis un second pour revenir à l'original. Si le
+  scénario meurt entre les deux, le compte garde un mot de passe que `deleteAuditUser` ignore,
+  et devient insupprimable. **Le risque ne vaut pas le check.**

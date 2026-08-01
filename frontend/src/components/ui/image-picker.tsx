@@ -3,15 +3,13 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { FormMessage } from '@/components/ui/form-message';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { IMAGE_ACCEPT_ATTRIBUTE, imageFileError } from '@/lib/image-file';
 import { cn } from '@/lib/utils';
 
-// Mirrors the backend's own gate on POST /teams/{id}/logo (and
-// POST /users/me/avatar): image/jpeg, image/png, image/webp, <= 2 MB. The
-// server is the real rampart — this is a client echo so a bad pick fails
-// instantly and readably instead of after a round trip that ends in 400/413.
-const ACCEPTED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const ACCEPTED_ACCEPT_ATTRIBUTE = ACCEPTED_MIME_TYPES.join(',');
-const MAX_SIZE_BYTES = 2 * 1024 * 1024;
+// The accepted types, the 2 MB cap and the two refusal sentences used to be declared right
+// here. They moved to `lib/image-file.ts` when the profile avatar became the second screen
+// to need them behind a DIFFERENT look (160 px round preview, its own buttons): a component
+// owns a presentation, not a validation rule — and a copied rule is one that drifts.
 
 type ImagePickerProps = {
   // Controlled like a native <input>: no "selected file" state lives in here.
@@ -70,13 +68,9 @@ export function ImagePicker({
 
     if (!file) return;
 
-    if (!ACCEPTED_MIME_TYPES.includes(file.type)) {
-      setValidationError('Use a JPEG, PNG or WebP image.');
-      return;
-    }
-
-    if (file.size > MAX_SIZE_BYTES) {
-      setValidationError(`Image is too large — max ${MAX_SIZE_BYTES / (1024 * 1024)} MB.`);
+    const refusal = imageFileError(file);
+    if (refusal) {
+      setValidationError(refusal);
       return;
     }
 
@@ -99,7 +93,7 @@ export function ImagePicker({
           ref={inputRef}
           id={inputId}
           type="file"
-          accept={ACCEPTED_ACCEPT_ATTRIBUTE}
+          accept={IMAGE_ACCEPT_ATTRIBUTE}
           className="hidden"
           disabled={isDisabled}
           onChange={(event) => handleFileSelected(event.target.files)}
