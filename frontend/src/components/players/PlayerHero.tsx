@@ -79,7 +79,10 @@ export function PlayerHero({
           src={user.avatarUrl ?? undefined}
           alt=""
           fallback={user.pseudo.slice(0, 2).toUpperCase()}
-          className="size-20 shrink-0 ring-4 ring-background-app"
+          // `text-2xl` : la taille des initiales est décidée AU POINT D'APPEL, parce que c'est
+          // lui qui connaît le diamètre du cercle. Le défaut de départ tenait au `text-xs`
+          // écrit en dur dans `Avatar` — 12 px perdus au milieu de 80.
+          className="size-20 shrink-0 text-2xl ring-4 ring-background-app"
         />
         <div className="min-w-0">
           {/* Eyebrow: says WHAT this page is. Kept from the FT-2A placeholder, and placed
