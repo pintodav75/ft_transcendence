@@ -271,3 +271,22 @@ _21 juillet 2026 — **FL (landing publique) rebasée sur `master` `1c8f7a6`** (
 
 ---
 
+
+## 1er août — [F-PLAYER] relue, corrigée et mergée
+
+**Commit `4396106`, merge `430e908`.** Branche `feature/f-player-page` de William, signée à son identité (`Omshinwa <fynmorph@gmail.com>`). Aucune migration. Détail du ticket → `docs/frontend.md`.
+
+**Ce qui s'est passé.** La branche annoncée « à 90 % » sous le nom `page/player` était en fait arrivée rebasée et squashée sous un nouveau nom, `feature/f-player-page` — récupérée par un simple `git fetch`. Les **trois points en travers** listés dans `CLAUDE.md` étaient réglés par l'auteur : plus de redirection de `/profile` (donc **plus aucun conflit avec [F4]** d'Adrien), plus d'`avatar-upload-button.tsx` orphelin, et le `watch.ignored` de `vite.config.ts` conservé.
+
+**Mais la branche était basée sur master AVANT le rail social** (au merge de FS-0), ce qui n'était visible d'aucun signal : elle compilait, ses tests passaient. C'est en voulant réutiliser `lib/friend-mutations.ts` que le `tsc -b` a répondu « module introuvable ». 🔑 **Un `git log --oneline master..<branche>` ne dit pas de quoi la branche est en retard — il faut regarder `git merge-base`.**
+
+**Trois défauts trouvés en review, tous corrigés avant merge :**
+1. **« Bloquer » ne faisait rien sur la fiche d'un ami** — le bouton était offert à un ami, la fenêtre de confirmation n'était montée que pour un inconnu. Bug franc, une ligne.
+2. **Après un blocage réussi, la fiche restait affichée et reproposait « Ajouter en ami »** — juste sous « X est maintenant bloqué ». La carte Trello demandait une redirection ; on a tranché **l'écran de fin** à la place (cette page n'a pas de parent, et seul un écran peut dire **où** défaire le blocage).
+3. 🚨 **La fiche portait une copie privée des mutations de relation**, écrite avant le rail et qui **n'invalidait aucune de ses listes**. C'est le défaut le plus coûteux et le moins visible : tout marchait à l'écran, seul le rail mentait jusqu'au rechargement. **Leçon : une branche ancienne ne « conflicte » pas avec une couche apparue depuis — elle la duplique en silence.** À vérifier systématiquement sur toute branche dont la `merge-base` est vieille.
+
+**Deux rouges dans sa propre suite Python**, découverts en la lançant : les listes de champs attendus (`PublicUser`, `PlayerTeam`) étaient restées en arrière de son propre `openapi.yaml`. Le code avait raison. 27/27 après correction. 🔑 **Lancer la suite d'un coéquipier fait partie de la review** — celle-ci n'avait jamais tourné depuis sa dernière modif du contrat.
+
+**Vérifications avant merge** : `tsc -b --noEmit` vert, `npm run lint` vert, `npm run build` échoue **uniquement** sur la permission root de `frontend/dist/` (dette d'environnement connue, 2260 modules transformés avant), scénarios `solo` **22/22** et `teams-detail` **14/14**, console 0, suite `test_users_profile.py` **27/27**.
+
+⚠️ **Il n'existe toujours aucun scénario d'audit pour `/players/$pseudo`** : les deux scénarios touchés n'en vérifient que le titre. David l'écrira.
