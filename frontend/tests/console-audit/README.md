@@ -1168,3 +1168,40 @@ dont l'`aria-label` porte le pseudo alors qu'il n'a aucun texte. `.first()` cliq
 rail : aucune erreur, aucune navigation, un `waitForURL` qui expire 10 s plus tard sur un
 symptôme qui n'a rien à voir. `.filter({ hasText: pseudo })` tranche — les boutons du rail sont
 des icônes sans texte.
+
+## `landing-public` ([FT]) — deux documents à prouver, pas seulement à afficher
+
+`scenarios/landing-public.mjs`, **11 checks**, déconnecté. Il gardait déjà la landing (`L1`→`L4`,
+`L11`) ; les pages légales n'y étaient qu'un titre lu dans un `<h3>`. Rempli par [FT], le
+scénario les traite comme des **documents**.
+
+🚨 **Un placeholder sur `/terms` ou `/privacy` est un motif de REJET du projet**, au même titre
+qu'un warning console. Un check qui ne lit que le titre ne prouve rien : « Page Terms of
+services! » contient déjà « Terms ». `L6` et `L9` **comptent les clauses** (`main section[id] h2`,
+13 attendues de chaque côté) — un retour en arrière tomberait à 0. `L10` compte les **4 adresses
+de contact** : une politique de confidentialité sans destinataire n'en est pas une.
+
+### ⚠️ `waitForURL` REND LA MAIN AVANT LE RENDU
+
+Trois rouges au premier passage, aucun imputable au code : `L5` lisait le `<h1>` de la **landing**
+sur ce qui était déjà l'URL `/terms`, et `L6` y comptait 0 clause. L'URL change au clic, React
+échange l'écran une frame plus tard. Même famille que l'invariant #11 — **un `waitFor` qui
+n'attend rien**.
+
+🔑 **Le remède ne doit pas rendre le check tautologique.** Attendre le `<h1>` qu'on s'apprête à
+affirmer, c'est transformer un rouge en `exit 2` et un vert en vide. Le scénario attend une entrée
+de sommaire **propre à chaque document** (`a[href="#scope"]` n'existe que dans les CGU,
+`a[href="#who"]` que dans la politique), puis affirme autre chose.
+
+### ⚠️ `innerText` rend le texte AFFICHÉ, pas celui du DOM
+
+`L5` et `L8` ont ensuite rougi sur « TERMS OF SERVICE » ≠ « Terms of Service » : `label-caps-black`
+met le titre en capitales via `text-transform`, et `innerText` **applique le CSS**. Comparaison
+insensible à la casse. (`textContent` aurait rendu la casse source — mais lit aussi les nœuds
+masqués, ce qu'on ne veut pas ici.)
+
+### 🔑 Le sommaire est en `<a href="#…">` NU, pas en `<Link>`
+
+Un saut dans la page n'est pas une navigation : un `<Link>` empilerait une entrée d'historique et
+le bouton Précédent du navigateur se mettrait à remonter le document clause par clause. `L7` garde
+les deux moitiés — l'URL finit bien par `/terms#liability`, **et** la cible existe.

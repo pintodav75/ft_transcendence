@@ -329,3 +329,38 @@ David a ouvert `/players/bob` et envoyé une capture. Deux enseignements.
 🔑 **La leçon de méthode, la même qu'après [F-HOME]** : les 9 checks étaient verts, `teams-detail` et `solo` aussi, la console à 0 — et le premier coup d'œil a trouvé un défaut. **Réclamer la capture fait partie de la livraison d'un ticket front.**
 
 **Campagne complète, 1er août au soir** : `npm run audit` sans filtre, **27 scénarios, `exit 0`**. Elle lève le doute laissé par le correctif d'`Avatar` (composant monté par 21 écrans, dont tout le rail social) : rien n'a bougé ailleurs. `dispute` et `match-detail`, les deux seuls scénarios qui se connectent avec un compte **semé**, ne sont pas sortis à `0/0` — le seed de dev était encore valide. ⚠️ Le décompte de checks n'a pas été relevé (sortie tronquée au lancement) ; `exit 0` reste le critère, `1` signalant un check rouge et `2` un harnais en échec.
+
+## 1er août — [FT] : les deux pages légales, dernier motif de rejet levé
+
+**Branche `feature/ft-legal-pages`.** Aucune migration, aucun changement backend.
+
+`/privacy` et `/terms` étaient les deux dernières pages vides, et le **premier motif de rejet de
+la liste du sujet**. Elles tenaient chacune en un `<h3>` de placeholder.
+
+🔑 **La seule façon d'écrire ces pages, c'est de lire le code d'abord.** Un modèle trouvé en ligne
+aurait parlé de partenaires publicitaires, de transferts hors UE et de durées de conservation
+inventées — tout ce que ce projet ne fait pas. Chaque affirmation vient de la source : les
+colonnes du schéma, le cookie unique `refresh` de `auth/cookies.ts`, les `onDelete` de chaque clé
+étrangère, les deux horloges de 24 h des jobs, `IMAGE_MIME`/`EVIDENCE_MIME`. C'est aussi ce qui
+rend les documents **démontrables en soutenance** : on peut ouvrir le fichier derrière chaque
+phrase.
+
+**Deux questions tranchées par David** : contact = **les 4 adresses `@student.42.fr`** de l'équipe
+(pas d'adresse personnelle sur une page publique) ; cadrage = **projet étudiant 42, droit
+français** (d'où la CNIL, les 15 ans, la clause de juridiction).
+
+**L'audit a été le vrai travail.** `landing-public` ne vérifiait que « le `<h3>` contient
+Terms » — un check que le placeholder d'origine passait déjà (« Page Terms of services! »
+contient « Terms »). Il compte désormais les **clauses** (13) et les **adresses de contact** (4) :
+un retour en arrière tombe à 0. Passé de 7 à **11 checks, exit 0, console 0**.
+
+🚨 **Trois rouges au premier passage, aucun imputable au code** — `waitForURL` rend la main dès que
+l'URL change, avant que React ait échangé l'écran : `L5` lisait le `<h1>` de la landing sur ce qui
+était déjà l'URL `/terms`. Même famille que l'invariant #11. 🔑 **Et le remède ne doit pas rendre
+le check tautologique** : attendre le titre qu'on s'apprête à affirmer transforme un rouge en
+`exit 2` et un vert en vide. On attend une ancre de sommaire propre à chaque document, puis on
+affirme autre chose. Deux rouges de plus ensuite, sur `innerText` qui **applique le CSS** — le
+titre est en capitales par `text-transform`, le DOM ne l'est pas.
+
+**Capture relue à 1280 px et 390 px** avant de dire « fini », comme d'habitude : rien à reprendre
+cette fois. Détail du ticket → `docs/frontend.md`.
