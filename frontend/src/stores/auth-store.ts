@@ -17,6 +17,7 @@ type AuthState = {
 
 type AuthActions = {
   setSession: (session: AuthSessionResponse) => void
+  setUser: (user: AuthUser) => void
   setAccessToken: (accessToken: string | null) => void
   clearSession: () => void
   restoreSession: () => Promise<void>
@@ -68,6 +69,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   setSession: ({ accessToken, user }) => {
     set({ accessToken, user, ready: true })
+  },
+
+  setUser: (user) => {
+    set({ user })
   },
 
   setAccessToken: (accessToken) => {
