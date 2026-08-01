@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
 import { MessageCircle, RotateCw, ShieldBan, UserMinus } from 'lucide-react';
 
-import { PresenceAvatar } from '@/components/social/PresenceAvatar';
+import { PersonRow } from '@/components/social/PersonRow';
 import { ActionMenu } from '@/components/ui/action-menu';
 import { Callout } from '@/components/ui/callout';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -439,14 +438,17 @@ type FriendRowProps = {
 };
 
 /**
- * One friend: a link to their profile, plus the actions menu.
+ * One friend: a link to their profile, plus the two actions.
  *
- * 🔑 THE ROW IS NOT ENTIRELY CLICKABLE, and that is the whole reason the pseudo is a link.
- * The repo's rule is "every pseudo leads to its player page, unless the line around it is
- * already a link" — nesting an interactive element inside an `<a>` is invalid HTML that
- * browsers repair by silently splitting the DOM. So the link and the "⋮" button are SIBLINGS
- * inside the `<li>` (the idiom `RosterChips` settled on), `focus-within` lights the whole row
- * when either one takes keyboard focus, and the menu is never swallowed by the link.
+ * 🔑 THE LINE ITSELF IS `PersonRow`, shared with [FS-5]'s three lists. It is what carries the
+ * "the row is not entirely clickable" rule (an interactive element nested inside an `<a>` is
+ * invalid HTML that browsers repair by splitting the DOM) and the double `min-w-0` that keeps a
+ * long pseudo from pushing the buttons out of the 312 px rail. What stays here is the only part
+ * that knows about friendship: WHICH controls the row carries.
+ *
+ * The presence dot is drawn only when presence is actually KNOWN, and it is never spoken: the
+ * list this row belongs to is already named "Friends online" / "Friends offline", so a screen
+ * reader is told once, on entering the list, instead of on every single row.
  */
 function FriendRow({
   friend,
@@ -457,76 +459,49 @@ function FriendRow({
   onRemove,
   onBlock,
 }: FriendRowProps) {
-  // `||` and not `??`: the API types `displayName` as nullable, but an account that has one
-  // and clears it stores an EMPTY STRING, which `??` would happily render as a blank line.
-  // Same guard as the panel header, and it keeps this in step with the `&&` test below.
-  const name = friend.displayName || friend.pseudo;
-
   return (
-    <li className="flex items-center gap-1 rounded-control border border-transparent px-1.5 py-1 transition focus-within:border-border-subtle hover:border-border-subtle hover:bg-surface-card">
-      <Link
-        to="/players/$pseudo"
-        params={{ pseudo: friend.pseudo }}
-        // Names what the player page goes back to (the page the rail is sitting on).
-        state={backFrom}
-        onClick={onNavigate}
-        className="focus-ring flex min-w-0 flex-1 items-center gap-2.5 rounded-control py-1"
-      >
-        {/* The dot is purely visual, and only drawn when presence is actually KNOWN: the list
-            this row belongs to is already named "Friends online" / "Friends offline", so a
-            screen reader is told once, on entering the list, instead of on every single row. */}
-        <PresenceAvatar
-          src={friend.avatarUrl}
-          fallback={friend.pseudo.slice(0, 2).toUpperCase()}
-          presence={presence}
-          className="size-9"
-        />
+    <PersonRow
+      person={friend}
+      presence={presence}
+      backFrom={backFrom}
+      onNavigate={onNavigate}
+      actions={
+        <>
+          {/* Chatting is what this rail is FOR, so it gets its own control instead of hiding
+              one click deep in the "⋮" menu. Named after the row for the same reason the menu
+              is: a column of identical "Send a message" buttons says nothing about which one
+              is which. */}
+          <IconButton
+            size="sm"
+            aria-label={`Send a message to @${friend.pseudo}`}
+            onClick={() => onMessage(friend)}
+          >
+            <MessageCircle className="size-4" aria-hidden="true" />
+          </IconButton>
 
-        {/* `min-w-0` on BOTH this column and the link above it: without either one, a long
-            pseudo refuses to shrink and pushes the "⋮" button out of the 312 px rail — or,
-            in a flex row, collapses the name to 0 px. `truncate` only works below it. */}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-text-primary">{name}</span>
-          {/* The pseudo is shown under the display name only when they differ — repeating
-              "Bob / @bob" on every row costs a line and says nothing. */}
-          {friend.displayName && friend.displayName !== friend.pseudo && (
-            <span className="block truncate text-xs text-text-muted">@{friend.pseudo}</span>
-          )}
-        </span>
-      </Link>
-
-      {/* Chatting is what this rail is FOR, so it gets its own control instead of hiding one
-          click deep in the "⋮" menu. Named after the row for the same reason the menu is: a
-          column of identical "Send a message" buttons says nothing about which one is which. */}
-      <IconButton
-        size="sm"
-        aria-label={`Send a message to @${friend.pseudo}`}
-        onClick={() => onMessage(friend)}
-      >
-        <MessageCircle className="size-4" aria-hidden="true" />
-      </IconButton>
-
-      <ActionMenu
-        // Named after the row: eight buttons called "Actions" are indistinguishable to
-        // anyone browsing by controls.
-        label={`Actions for @${friend.pseudo}`}
-        items={[
-          {
-            id: 'remove',
-            label: 'Remove friend',
-            tone: 'danger',
-            icon: <UserMinus className="size-4 shrink-0" aria-hidden="true" />,
-            onSelect: () => onRemove(friend),
-          },
-          {
-            id: 'block',
-            label: 'Block player',
-            tone: 'danger',
-            icon: <ShieldBan className="size-4 shrink-0" aria-hidden="true" />,
-            onSelect: () => onBlock(friend),
-          },
-        ]}
-      />
-    </li>
+          <ActionMenu
+            // Named after the row: eight buttons called "Actions" are indistinguishable to
+            // anyone browsing by controls.
+            label={`Actions for @${friend.pseudo}`}
+            items={[
+              {
+                id: 'remove',
+                label: 'Remove friend',
+                tone: 'danger',
+                icon: <UserMinus className="size-4 shrink-0" aria-hidden="true" />,
+                onSelect: () => onRemove(friend),
+              },
+              {
+                id: 'block',
+                label: 'Block player',
+                tone: 'danger',
+                icon: <ShieldBan className="size-4 shrink-0" aria-hidden="true" />,
+                onSelect: () => onBlock(friend),
+              },
+            ]}
+          />
+        </>
+      }
+    />
   );
 }

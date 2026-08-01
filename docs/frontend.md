@@ -554,6 +554,32 @@ Validation finale après **second rebase, sur le `master` du 31/07 au soir** (au
 
 ⚠️ **`home` H1 a dû accueillir `/api/notifications` dans sa liste `SOCIAL_RAIL`** — 3ᵉ carte du rail à toucher ce budget, et grâce à la liste posée en FS-1 la correction est **une ligne** au lieu d'un débat sur le bon chiffre.
 
+---
+
+## [FS-5] — onglet Ajouter : recherche, demandes, blocages *(dernière carte du rail)*
+
+**Livré** : `lib/friend-requests.ts`, `lib/blocks.ts`, 5 mutations dans `friend-mutations.ts`, **`components/social/PersonRow.tsx` extrait de FS-1** (4 consommateurs de plus, rendu de l'onglet Amis inchangé, vérifié classe par classe), et `AddFriendSlot.tsx` réécrit.
+
+🚨 **Changement de route décidé avant de coder, et c'est le cœur du ticket.** La carte faisait chercher par `GET /users/{pseudo}`, qui rend **404** sur un pseudo inconnu. Une barre de recherche produit des pseudos inconnus **à chaque faute de frappe** : chacune aurait écrit une ligne rouge — motif de rejet. **`GET /search?q=&type=user` rend 200 avec une liste vide** (mesuré au `curl`), exclut déjà les blocages dans les deux sens, et c'est la route de la barre du rail gauche. ⚠️ Elle exige `q` entre 2 et 50 caractères, sinon **400**.
+
+**Défauts de review à ne pas rouvrir** :
+
+1. 🚨 **LE PIRE DÉFAUT DE TOUT LE RAIL.** L'onglet était le **seul** à ne pas écouter le temps réel. Quand l'autre acceptait ma demande, la ligne « Requests sent » restait affichée **avec son bouton « Annuler »** — or `DELETE /friends/{id}` accepte aussi une amitié **`accepted`**. Le clic **détruisait l'amitié** en affichant « demande annulée », **sans notifier personne**. Fermé par un abonnement au temps réel qui invalide demandes **et** amis ; ça ferme du même coup « une demande reçue n'apparaît pas » et « le nouvel ami n'apparaît pas quand c'est l'autre qui accepte » — **la 3ᵉ porte vers une amitié**, que la resynchronisation de présence ne couvrait pas.
+2. 🚨 **Le panneau de résultats avalait le PREMIER clic ailleurs dans l'onglet.** Mécanisme exact : en se démontant sur `pointerdown`, le panneau inline fait **remonter tout ce qui est en dessous** — le navigateur pose alors le `click` sur l'ancêtre commun de `mousedown` et `mouseup`, et le bouton visé ne le reçoit **jamais**. Corrigé en écoutant `click` (et non `pointerdown`) pour le panneau **inline** ; la branche `overlay` du rail gauche est inchangée au caractère près. ⚠️ **Le même défaut touchait `TeamInvitePlayer`** (onglet Manage d'une équipe) : le premier clic sur « retirer un membre » après une recherche était avalé. Corrigé au passage.
+3. **Le rafraîchissement promis n'avait pas lieu sur un 400** : accepter/refuser une demande qui n'est plus en attente rend **400**, pas 404 — la ligne restait et chaque clic écrivait une ligne rouge de plus.
+4. **La garde « déjà ami » tombait en silence** si `GET /friends` échouait ; `useFriends` était aussi le seul hook du lot sans `retryServerErrorsOnly`.
+5. **Un commentaire faux** affirmait que la recherche exclut l'appelant — **elle ne le fait pas**, la garde « soi-même » est le chemin normal, pas une ceinture morte.
+
+**Décisions** :
+
+- **Envoyée vs acceptée automatiquement** se lit sur `friendship.status`, pas sur le code HTTP (`apiFetch` ne rend que le corps). `Friendship` a été passé **`required`** au contrat pour ça.
+- **La resynchronisation de présence vit dans les mutations**, pas aux points d'appel, pour qu'aucune porte ne l'oublie. ⚠️ **Dette assumée et documentée dans le code** : elle ferme et rouvre la connexion, donc elle fait clignoter ma présence chez tous mes amis — il n'existe aucune route pour redemander la présence autrement, et l'alternative (un nouvel ami affiché hors ligne à tort) est pire. La victime collatérale — un envoi de chat en vol déclaré perdu — **est traitée** : la resynchronisation attend l'accusé d'envoi, avec un filet de 10 s.
+- **Pas de lien vers le profil dans la liste des bloqués** : la page rend 404 sur un compte bloqué.
+
+🔑 **Comportement du blocage, mesuré sur deux comptes jetables** : bloquer **supprime l'amitié des deux côtés** (1 ami → 0 chez chacun), l'historique devient inaccessible aux deux, chacun disparaît de la recherche de l'autre, et une nouvelle demande d'ami rend « utilisateur introuvable » — **le bloqué n'apprend jamais qu'il l'est**. La page du joueur rend 404 **aux deux**, y compris au bloqueur.
+
+**Audit** : `fs5-add-friend.mjs`, **6 checks**. 🔑 **Les checks comptent les requêtes qui ne partent PAS** : un message d'erreur juste ne prouve rien si la requête est partie quand même. ⚠️ **`A5` a d'abord été écrit avec un contournement** — il vidait le champ de recherche avant de cliquer, ce qui **faisait disparaître le défaut**. → `frontend/tests/console-audit/README.md`.
+
 ## Détail par ticket — bloc déporté de `CLAUDE.md` (refacto du 31/07)
 
 > Ce paragraphe vivait sur **une seule ligne de 17,5 Ko** dans `CLAUDE.md` — à lui seul 20 % du fichier chargé à chaque session. Rapatrié ici verbatim.

@@ -165,20 +165,38 @@ export function SearchBar({
 
   // Fermeture au clic extérieur.
   //
-  // `pointerdown` et non `click` : le panneau doit céder la place dès l'appui, pas une fois le
-  // clic résolu. ⚠️ Les lignes de résultat vivent DANS `containerRef`, donc cliquer une ligne
-  // ne ferme pas — sinon le bouton se démonterait avant que son `onClick` ne parte et la
-  // sélection ne marcherait plus du tout.
+  // ⚠️ Les lignes de résultat vivent DANS `containerRef`, donc cliquer une ligne ne ferme pas —
+  // sinon le bouton se démonterait avant que son `onClick` ne parte et la sélection ne
+  // marcherait plus du tout.
+  //
+  // 🚨 DEUX ÉVÉNEMENTS, ET CE N'EST PAS UNE PRÉFÉRENCE — c'est la différence entre les deux
+  // panneaux.
+  //
+  //   • `overlay` (rail gauche) : le panneau FLOTTE (`absolute`), le fermer ne déplace rien
+  //     sous le doigt. On garde `pointerdown`, pour qu'il cède la place dès l'appui.
+  //
+  //   • `inline` (onglet « Ajouter » du rail social, onglet Manage d'une équipe) : le panneau
+  //     est DANS LE FLUX, donc le fermer fait REMONTER tout ce qui est en dessous. Sur
+  //     `pointerdown`, la cible visée s'était déjà déplacée au moment du relâchement : le
+  //     navigateur ne dispatchait alors aucun `click` dessus (il le dispatche sur l'ancêtre
+  //     commun de la cible du `mousedown` et de celle du `mouseup`), et le PREMIER clic sur un
+  //     bouton situé sous la barre était avalé en silence — mesuré au navigateur sur [FS-5] :
+  //     bouton visible, non désactivé, clic accepté, AUCUNE requête. Il fallait cliquer deux
+  //     fois. Sur `click`, React a déjà exécuté le `onClick` de la cible quand cet écouteur de
+  //     `document` se déclenche (React branche ses listeners sur la racine, sous `document`) :
+  //     l'action part du premier coup, puis le panneau se ferme.
+  const dismissEvent = panel === 'inline' ? 'click' : 'pointerdown';
+
   useEffect(() => {
     if (!showPanel) return;
 
-    function handlePointerDown(event: PointerEvent) {
+    function dismissOnOutside(event: Event) {
       if (!containerRef.current?.contains(event.target as Node)) setDismissed(true);
     }
 
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [showPanel]);
+    document.addEventListener(dismissEvent, dismissOnOutside);
+    return () => document.removeEventListener(dismissEvent, dismissOnOutside);
+  }, [dismissEvent, showPanel]);
 
   return (
     <div ref={containerRef} className="relative w-full">

@@ -1151,7 +1151,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            friendship?: components["schemas"]["Friendship"];
+                            friendship: components["schemas"]["Friendship"];
                         };
                     };
                 };
@@ -1162,7 +1162,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            friendship?: components["schemas"]["Friendship"];
+                            friendship: components["schemas"]["Friendship"];
                         };
                     };
                 };
@@ -1222,11 +1222,11 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            requests?: {
+                            requests: {
                                 /** Format: uuid */
-                                id?: string;
+                                id: string;
                                 /** Format: date-time */
-                                sentAt?: string;
+                                sentAt: string;
                                 /** @description Présent uniquement pour direction=received. */
                                 from?: components["schemas"]["FriendSummary"];
                                 /** @description Présent uniquement pour direction=sent. */
@@ -4666,17 +4666,17 @@ export interface components {
         };
         Friendship: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            requesterId?: string;
+            requesterId: string;
             /** Format: uuid */
-            addresseeId?: string;
+            addresseeId: string;
             /** @enum {string} */
-            status?: "pending" | "accepted";
+            status: "pending" | "accepted";
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
             /** Format: date-time */
-            updatedAt?: string;
+            updatedAt: string;
         };
         Message: {
             /** Format: uuid */
@@ -4718,8 +4718,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             pseudo: string;
-            displayName?: string | null;
-            avatarUrl?: string | null;
+            displayName: string | null;
+            avatarUrl: string | null;
             /**
              * Format: date-time
              * @description createdAt de la ligne `blocks`.

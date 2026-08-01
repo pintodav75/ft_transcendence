@@ -258,8 +258,16 @@ components:
           required: [friendshipId, since]
 
     # ---------- Friendship ----------
+    # 🔑 `status` EST LA SEULE CHOSE QUI DISTINGUE UNE DEMANDE ENVOYÉE D'UNE ACCEPTATION
+    # AUTOMATIQUE côté front : `POST /friends` rend 201 + `pending` quand la demande part, et
+    # 200 + `accepted` quand elle croise une demande inverse (le serveur accepte alors tout
+    # seul). Le client `apiFetch` ne remonte QUE le corps, jamais le code HTTP — sans ce
+    # `required`, la codegen rend `status` optionnel et l'écran ne peut plus dire à
+    # l'utilisateur qu'il vient de devenir ami. La ligne est renvoyée par `.returning()`, donc
+    # les six champs sont TOUJOURS là.
     Friendship:
       type: object
+      required: [id, requesterId, addresseeId, status, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -371,7 +379,11 @@ components:
           type: string
           format: date-time
           description: createdAt de la ligne `blocks`.
-      required: [id, pseudo, since]
+      # Même raison que `FriendSummary` : le serveur envoie TOUJOURS les cinq (les deux
+      # nullables valent `null`, ils ne sont jamais absents — ce sont des colonnes de `users`).
+      # Sans ça la codegen les rend optionnels, et une entrée de blocage ne rentre plus dans
+      # la même ligne de personne que le reste du rail social.
+      required: [id, pseudo, displayName, avatarUrl, since]
 
     # ---------- Catalog (games + ladders) ----------
     Game:
@@ -1538,6 +1550,7 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [friendship]
                 properties:
                   friendship:
                     $ref: '#/components/schemas/Friendship'
@@ -1547,6 +1560,7 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [friendship]
                 properties:
                   friendship:
                     $ref: '#/components/schemas/Friendship'
@@ -1613,11 +1627,19 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [requests]
                 properties:
                   requests:
                     type: array
                     items:
                       type: object
+                      # `id` et `sentAt` sont TOUJOURS envoyés (les deux branches du handler
+                      # les projettent). Sans ce `required`, la codegen rend `id` optionnel —
+                      # or c'est le SEUL identifiant qu'acceptent `/friends/{id}/accept`,
+                      # `/reject` et `DELETE /friends/{id}` : chaque appelant paierait un `?.`
+                      # qui laisse croire à une donnée manquante. `from`/`to` restent
+                      # optionnels, eux : ils s'excluent selon `direction`.
+                      required: [id, sentAt]
                       properties:
                         id:
                           type: string

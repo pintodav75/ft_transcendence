@@ -872,6 +872,62 @@ donc **imputé à un ticket innocent**. `login()` fait maintenant suivre un
 `waitForLoadState('networkidle')` (sous `catch`, et **dans** la phase « login », donc hors
 périmètre). Concerne les 7 appels de `match-result`, `match-detail`, `teams-detail` et
 `teams-manage`.
+## 🚨 `awaitFocusRestored` est STRICTE — et un check « instable » cachait un vrai défaut
+
+`awaitFocusRestored` rendait la main **dès que le focus quittait `<body>`**. C'est ce qui a fait
+de `I6-bis` de `teams-invitations` une pièce à pile ou face pendant des semaines : rouge en
+campagne, vert en isolation. On avait déjà relevé son délai en croyant à de la lenteur.
+
+**Le mécanisme** : l'application posait bien le focus, puis un rendu **suivant** remplaçait
+l'élément et le focus retombait sur `<body>`. L'attente rendait la main sur le premier
+échantillon, et `focusLanding()` — un **instantané** — lisait tantôt le bon élément, tantôt le
+creux. Le hasard décidait.
+
+Elle exige désormais que le focus soit hors de `<body>` sur **trois frames consécutives**.
+Résultat immédiat : `I6-bis` est passé rouge **à tous les coups, y compris en isolation** — le
+défaut était **réel** depuis FT-INV, et il était grave (une personne au clavier repartait du haut
+de la page à chaque invitation acceptée). Corrigé en posant le focus **à la frame suivante**.
+
+🔑 **Ça ne masque aucun vrai défaut** : si l'application ne restaure jamais le focus, ou le perd
+durablement, le compteur n'atteint jamais 3, on atteint le délai, `focusLanding()` lit `<body>`
+et le check rougit — comme il le doit.
+
+🔑 **La leçon, plus large que ce check** : un check intermittent n'est pas forcément un problème
+de harnais. **Il peut cacher un vrai défaut à moitié observable.** Avant de relever un délai,
+se demander si l'état final est vraiment celui qu'on croit.
+
+## `fs5-add-friend` (FS-5) — compter les requêtes que les gardes doivent ÉVITER
+
+`scenarios/fs5-add-friend.mjs`, **6 checks**. C'est l'écran le plus exposé du rail à la console :
+une barre de recherche produit des saisies invalides **en permanence**.
+
+🔑 **`A2` et `A3` comptent les requêtes qui ne partent PAS.** Trois gardes doivent tenir sans
+jamais toucher le réseau — moins de 2 caractères (le serveur rend 400), soi-même (400), et une
+personne à qui on vient d'écrire (400). Asserter le message affiché ne prouverait rien : le
+message peut être juste **et** la requête partie quand même. On compte donc les envois.
+⚠️ **La route de recherche ne filtre PAS l'appelant** (vérifié dans le code serveur) : se
+chercher soi-même se retourne bien, la garde du front est le chemin **normal**, pas une
+ceinture morte.
+
+🚨 **`A4` garde le pire défaut trouvé sur tout le rail.** Sans abonnement au temps réel, la
+ligne « Requests sent » restait affichée quand l'autre acceptait — **avec son bouton
+« Annuler »**. Or le serveur accepte cette suppression même sur une amitié **acceptée** : le
+clic **détruisait l'amitié** en affichant « demande annulée », sans notifier personne. Le check
+fait accepter par l'autre compte, onglet resté ouvert, et exige que la ligne disparaisse seule.
+
+🚨 **`A5` GARDE UN DÉFAUT QU'UN CONTOURNEMENT AURAIT FAIT DISPARAÎTRE — c'est la leçon.**
+Le panneau de résultats, en se démontant sur `pointerdown`, faisait **remonter tout ce qui
+était en dessous** : le navigateur ne dispatchait alors plus aucun `click` sur le bouton visé
+(il le posait sur l'ancêtre commun de `mousedown` et `mouseup`). **Le premier clic ailleurs
+dans l'onglet était perdu**, sans rien à l'écran pour l'expliquer.
+La première version du check **vidait le champ de recherche avant de cliquer** — et le défaut
+disparaissait. Le check laisse maintenant les résultats affichés, ne clique **qu'une fois**, et
+asserte le **statut HTTP** de l'acceptation. Diagnostic qui a servi, à garder en tête : un vrai
+clic Playwright qui n'émet aucune requête sur un bouton **visible et actif**, alors qu'un
+`element.click()` programmatique au même instant fonctionne, signe un **problème de pointeur**,
+jamais un problème de React.
+⚠️ Le même défaut touchait `TeamInvitePlayer` (onglet Manage d'une équipe), corrigé au passage.
+
 ## `fs2-notifications` (FS-2) — les fixtures sont produites par de VRAIES actions
 
 `scenarios/fs2-notifications.mjs`, **8 checks**.

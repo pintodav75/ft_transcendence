@@ -8,6 +8,12 @@ import { useRealtimeStore } from '@/stores/realtime-store'
 const RECONNECT_BASE_DELAY_MS = 1_000
 const RECONNECT_MAX_DELAY_MS = 30_000
 const AUTH_POLICY_VIOLATION_CODE = 1008
+/**
+ * How long a deferred resynchronisation waits for a send to be acknowledged before going ahead
+ * anyway. Same 10 s as `ChatConversation`'s own send timeout: past it the composer has already
+ * declared the message lost, so there is nothing left to protect.
+ */
+const RESYNC_SEND_GRACE_MS = 10_000
 
 type EventListener = (event: RealtimeServerEvent) => void
 
@@ -19,6 +25,17 @@ class RealtimeClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private authRejected = false
   private listeners = new Set<EventListener>()
+  /**
+   * How many sends are still waiting for the server to answer them (`message_sent`, or an
+   * `error` frame). Read by `resynchronize()` only — see the comment there.
+   *
+   * A COUNTER and not a boolean: up to three conversations are on screen at once and each may
+   * have a send in flight. It is floored at 0 and reset whenever the socket goes, so a frame
+   * the server never sends cannot leave it stuck above zero for good.
+   */
+  private sendsAwaitingAck = 0
+  private resyncPending = false
+  private resyncGraceTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
     window.addEventListener('online', this.handleOnline)
@@ -71,15 +88,36 @@ class RealtimeClient {
     }
   }
 
+  /**
+   * Re-asks the server for the presence snapshot, by dropping and reopening the socket — the
+   * only way there is (see `refreshPresence` in `lib/friend-mutations.ts`).
+   *
+   * 🚨 IT WAITS FOR A SEND THAT IS STILL IN FLIGHT. Closing the socket makes `connectionState`
+   * go `reconnecting`, and an open conversation reacts to that by declaring its pending message
+   * lost and putting the text back in the composer — while the server has in fact received and
+   * STORED it. The user re-sends, and creates a real duplicate. So a resynchronisation asked for
+   * while the server still owes an answer is deferred until that answer lands (or until
+   * `RESYNC_SEND_GRACE_MS`, so a frame that never comes cannot cancel it altogether).
+   */
   resynchronize() {
     if (!this.userId || !this.accessToken || this.authRejected) {
       return
     }
 
-    this.clearReconnectTimer()
-    this.closeCurrentSocket()
-    this.reconnectAttempt = 0
-    this.openSocket(true)
+    if (this.sendsAwaitingAck > 0) {
+      this.resyncPending = true
+
+      if (this.resyncGraceTimer === null) {
+        this.resyncGraceTimer = setTimeout(() => {
+          this.resyncGraceTimer = null
+          this.performResynchronize()
+        }, RESYNC_SEND_GRACE_MS)
+      }
+
+      return
+    }
+
+    this.performResynchronize()
   }
 
   sendMessage(to: string, content: string): boolean {
@@ -88,6 +126,7 @@ class RealtimeClient {
     }
 
     this.socket.send(JSON.stringify({ to, content }))
+    this.sendsAwaitingAck += 1
     return true
   }
 
@@ -128,8 +167,17 @@ class RealtimeClient {
 
       try {
         const event = parseRealtimeServerEvent(messageEvent.data)
+
+        // The two frames that answer a send of mine — an acknowledgement, or a refusal.
+        if (event.type === 'message_sent' || event.type === 'error') {
+          this.sendsAwaitingAck = Math.max(0, this.sendsAwaitingAck - 1)
+        }
+
         this.applyPresenceEvent(event)
         this.listeners.forEach((listener) => listener(event))
+        // LAST: a deferred resynchronisation closes this very socket, so every listener must
+        // have seen the frame before it goes.
+        this.flushDeferredResync()
       } catch {
         // A malformed server event is ignored. It must not crash the authenticated shell.
       }
@@ -139,6 +187,12 @@ class RealtimeClient {
       if (this.socket !== socket) return
 
       this.socket = null
+      // Nothing will ever answer a send made over a socket that is gone, and the reconnection
+      // brings a fresh snapshot on its own — so a deferred resynchronisation has nothing left
+      // to wait for, and nothing left to do.
+      this.sendsAwaitingAck = 0
+      this.resyncPending = false
+      this.clearResyncGraceTimer()
 
       if (closeEvent.code === AUTH_POLICY_VIOLATION_CODE) {
         this.authRejected = true
@@ -184,9 +238,48 @@ class RealtimeClient {
     }, delayWithJitter)
   }
 
+  /** Whatever asked for it, this is the reopening itself. */
+  private performResynchronize() {
+    this.resyncPending = false
+    this.clearResyncGraceTimer()
+
+    if (!this.userId || !this.accessToken || this.authRejected) {
+      return
+    }
+
+    this.clearReconnectTimer()
+    this.closeCurrentSocket()
+    this.reconnectAttempt = 0
+    this.openSocket(true)
+  }
+
+  private flushDeferredResync() {
+    if (!this.resyncPending || this.sendsAwaitingAck > 0) return
+
+    this.performResynchronize()
+  }
+
+  private clearResyncGraceTimer() {
+    if (this.resyncGraceTimer === null) return
+
+    clearTimeout(this.resyncGraceTimer)
+    this.resyncGraceTimer = null
+  }
+
+  /**
+   * Closes the socket we hold, whoever asked — a session change, a logout, going offline, or a
+   * resynchronisation.
+   *
+   * ⚠️ IT ALSO DROPS THE SEND BOOKKEEPING. The answers to whatever was in flight died with the
+   * socket, and a resynchronisation still waiting for one must not outlive the socket (or the
+   * session) it was asked for: it would reopen a connection nobody wants any more.
+   */
   private closeCurrentSocket() {
     const socket = this.socket
     this.socket = null
+    this.sendsAwaitingAck = 0
+    this.resyncPending = false
+    this.clearResyncGraceTimer()
 
     if (
       socket?.readyState === WebSocket.CONNECTING ||
