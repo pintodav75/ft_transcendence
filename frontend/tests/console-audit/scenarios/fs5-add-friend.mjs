@@ -17,14 +17,20 @@
  *     défaut le plus grave trouvé sur tout le rail : sans l'abonnement au temps réel, la ligne
  *     restait avec son bouton « Annuler », et ce bouton **supprimait l'amitié** en affichant
  *     « demande annulée », sans prévenir personne ;
- *   - accepter une demande reçue la fait passer côté amis ;
- *   - annuler une demande envoyée et débloquer un compte marchent sans rechargement.
+ *   - accepter une demande reçue la fait passer côté amis.
  *
  * ⚠️ CE QUE CE SCÉNARIO NE PROUVE PAS.
+ *   - 🚨 **TROIS BOUTONS DE CET ÉCRAN NE SONT CLIQUÉS PAR AUCUN SCÉNARIO DU PROJET** :
+ *     « Refuser » une demande reçue (`POST /friends/{id}/reject`, un appel qu'aucun test
+ *     n'exerce), « Annuler » une demande envoyée, et « Débloquer ». Ils fonctionnent — vérifié
+ *     à la main le 01/08 — mais rien ne rougira le jour où ils cesseront de fonctionner.
+ *     ⚠️ **Cet en-tête AFFIRMAIT les couvrir** (« annuler une demande envoyée et débloquer un
+ *     compte marchent sans rechargement ») : phrase fausse depuis l'origine, corrigée le 01/08
+ *     après avoir induit en erreur une review qui la lisait pour savoir ce qui était gardé.
+ *     🔑 **Un scénario ne décrit que ce qu'il CLIQUE.** Carte à créer.
  *   - **L'acceptation automatique** (l'autre m'avait déjà écrit) : le chemin est couvert par
  *     le code, mais l'éprouver demande d'orchestrer deux demandes croisées au bon moment.
- *   - **Le blocage** lui-même : il se déclenche depuis l'onglet Amis (`fs1-friends` F7). Ici on
- *     ne vérifie que la liste et le déblocage.
+ *   - **Le blocage** lui-même : il se déclenche depuis l'onglet Amis (`fs1-friends` F7).
  *   - **Le rendu visuel** à 312 px avec un pseudo long et deux boutons : à l'œil.
  */
 export const name = 'fs5-add-friend';
