@@ -8,6 +8,7 @@ import { FormMessage } from '@/components/ui/form-message';
 import { Label } from '@/components/ui/label';
 import { PasswordInput } from '@/components/ui/password-input';
 import { SectionTitle } from '@/components/ui/section-title';
+import { SECTION_TITLE_SIZE } from '@/components/profile/section-title-size';
 import { passwordChangeSchema, type PasswordChangeFormValues } from '@/lib/password-schema';
 import { changePassword, changePasswordErrorMessage } from '@/lib/profile-mutations';
 import { useReturnFocus } from '@/lib/use-return-focus';
@@ -90,7 +91,7 @@ export function PasswordChange({ announce }: PasswordChangeProps) {
 
     return (
       <div className="flex flex-col gap-4">
-        <SectionTitle>Password</SectionTitle>
+        <SectionTitle headingClassName={SECTION_TITLE_SIZE}>Password</SectionTitle>
         <Callout>Managed by {provider}</Callout>
       </div>
     );
@@ -98,7 +99,9 @@ export function PasswordChange({ announce }: PasswordChangeProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionTitle headingRef={headingRef}>Password</SectionTitle>
+      <SectionTitle headingRef={headingRef} headingClassName={SECTION_TITLE_SIZE}>
+        Password
+      </SectionTitle>
 
       {success && !editing && <Callout tone="success">Password updated.</Callout>}
 

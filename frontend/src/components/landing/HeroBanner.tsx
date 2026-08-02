@@ -34,7 +34,7 @@ export function HeroBanner() {
         </h1>
         <p className="mt-5 max-w-115 text-xs label-caps leading-6 text-white/70 md:text-sm">
           Challenge any team, agree on a time, then settle the score with both sides confirming the
-          result — and climb an ELO ladder built for every game and format.
+          result. Climb an ELO ladder built for every game and format.
         </p>
 
         {/* CTA: links (they navigate), styled as buttons via buttonClasses. */}

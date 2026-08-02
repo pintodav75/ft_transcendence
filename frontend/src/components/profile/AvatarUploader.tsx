@@ -183,7 +183,10 @@ export function AvatarUploader({ announce }: AvatarUploaderProps) {
 
         {progress === null ? null : <ProgressBar value={progress} label="Uploading avatar" />}
 
-        {error ? <FormMessage>{error}</FormMessage> : null}
+        {/* ⚠️ Not while the dialog is open: it renders the SAME `error` itself, and mounting a
+            sentence twice means a screen reader can meet it twice — the copy behind a modal is
+            inert today, but that is the dialog's doing, not ours. One failure, one message. */}
+        {error && !confirmingRemoval ? <FormMessage>{error}</FormMessage> : null}
       </div>
 
       {/* Removal is irreversible — the MinIO object is destroyed — and the button sits a few

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ApiError, apiFetch, sharedApiErrorMessage } from '@/lib/api';
+import { ApiError, apiFetch, errorPayloadCode, sharedApiErrorMessage } from '@/lib/api';
 import { MY_INVITATIONS_KEY } from '@/lib/teams';
 import { NAME_MAX_LENGTH } from '@/lib/create-team-schema';
 import { ROSTER_LIMIT, teamMatchesKey } from '@/lib/team-detail';
@@ -88,27 +88,6 @@ const TEAM_GONE_MESSAGE = 'This team no longer exists.';
  * eight call sites below reading the way they did.
  */
 const sharedMessage = sharedApiErrorMessage;
-
-/**
- * Reads the STABLE `code` of an error payload — the five invitation routes, and the two
- * 409 of the member/team deletions.
- *
- * Those routes all answer `{ error, code }`: `error` is display prose the backend may
- * reword at any time, `code` is the contract — so this is what we test, and the prose is
- * never rendered. Narrowing rather than casting: a payload of another shape returns
- * `undefined` and the caller falls back on OUR wording instead of `undefined`.
- *
- * ⚠️ It used to live in the invitations section below, under the name `invitationErrorCode`.
- * It never knew anything about invitations — moved up here, unchanged, the day the team
- * deletions needed the same read.
- */
-function errorPayloadCode(payload: unknown): string | undefined {
-  if (typeof payload !== 'object' || payload === null) return undefined;
-  if (!('code' in payload)) return undefined;
-
-  const { code } = payload as Record<'code', unknown>;
-  return typeof code === 'string' ? code : undefined;
-}
 
 export type TeamUpdateError = {
   /** `'name'` when the message belongs under the name field, `null` for a form-level one. */

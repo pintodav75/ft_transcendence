@@ -7,6 +7,7 @@ import { FormMessage } from '@/components/ui/form-message';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SectionTitle } from '@/components/ui/section-title';
+import { SECTION_TITLE_SIZE } from '@/components/profile/section-title-size';
 import { Textarea } from '@/components/ui/textarea';
 import { profileSchema, type ProfileFormValues } from '@/lib/profile-schema';
 import { updateProfile, updateProfileErrorMessage } from '@/lib/profile-mutations';
@@ -111,7 +112,9 @@ export function ProfileForm({ announce }: ProfileFormProps) {
   if (!editing) {
     return (
       <div className="flex flex-col gap-4">
-        <SectionTitle headingRef={headingRef}>Details</SectionTitle>
+        <SectionTitle headingRef={headingRef} headingClassName={SECTION_TITLE_SIZE}>
+          Details
+        </SectionTitle>
         <ReadOnlyRow
           label="Bio"
           value={user.bio}
@@ -136,7 +139,9 @@ export function ProfileForm({ announce }: ProfileFormProps) {
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 @lg:min-w-[40ch]">
       {/* Le même titre dans les deux états : la section garde son nom quand on bascule en
           édition, et la ref de focus reste valide au retour. */}
-      <SectionTitle headingRef={headingRef}>Details</SectionTitle>
+      <SectionTitle headingRef={headingRef} headingClassName={SECTION_TITLE_SIZE}>
+        Details
+      </SectionTitle>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="displayName">Nickname</Label>

@@ -5,7 +5,6 @@ import { retryServerErrorsOnly } from '@/lib/ladders';
 import { useLadders } from '@/lib/games';
 
 import type { MatchOpponentView } from '@/lib/match-history';
-import type { RequiredProvider } from '@/lib/games';
 import type { paths } from '@/lib/api-types.gen';
 
 /**
@@ -22,14 +21,11 @@ import type { paths } from '@/lib/api-types.gen';
 
 type MyMatchesResponse =
   paths['/matches/me']['get']['responses'][200]['content']['application/json'];
-type ExternalAccountsResponse =
-  paths['/users/me/external-accounts']['get']['responses'][200]['content']['application/json'];
 
 /** One row of `GET /matches/me` — aligned on the team history's payload by B-SOLO. */
 export type SoloMatch = MyMatchesResponse['matches'][number];
 /** Discriminated by `type`: a player in 1v1, a team from 2v2 up, or `null`. */
 export type SoloMatchOpponent = SoloMatch['opponent'];
-export type ExternalAccount = ExternalAccountsResponse['externalAccounts'][number];
 
 // ------------------------------------------------------------------- ladders
 
@@ -91,40 +87,12 @@ export function useMyMatches(ladderId: string, enabled: boolean) {
 }
 
 // --------------------------------------------------------- external accounts
-
-/**
- * My linked in-game accounts (§5.1). Cached like the reference data it behaves as: it only
- * changes when the user links or unlinks one, which no screen can do yet — [F4B] owns that.
- */
-export function useExternalAccounts(enabled = true) {
-  return useQuery({
-    queryKey: ['external-accounts', 'me'],
-    queryFn: () => apiFetch<ExternalAccountsResponse>('/users/me/external-accounts'),
-    // ⚠️ Gated like every other query of the solo page: a malformed `ladderId` must render its
-    // error screen having spent NO request at all (DoD), and this one would otherwise fire
-    // regardless — it does not depend on the id.
-    enabled,
-    retry: retryServerErrorsOnly,
-  });
-}
-
-/**
- * May I open a slot on a ladder of this game — i.e. do I have the account §5.1 demands?
- *
- * 🚨 THREE-VALUED ON PURPOSE, and the third value is the point. `undefined` means the answer
- * is UNKNOWN (the request is in flight, or it failed), which is NOT the same as "no". The
- * screen must not offer the button in either the `false` or the `undefined` case: a
- * `POST /matches` with no linked account is answered 400 by `validateSide()`, and a 4xx
- * writes a red line in the Chrome console — a project-rejection criterion, not a rough edge.
- * Collapsing unknown into "linked" would gamble the console on a request in flight.
- */
-export function hasLinkedProvider(
-  accounts: ExternalAccount[] | undefined,
-  provider: RequiredProvider,
-): boolean | undefined {
-  if (!accounts) return undefined;
-  return accounts.some((account) => account.provider === provider);
-}
+//
+// ⚠️ MOVED OUT BY [F4B] → `lib/external-accounts.ts`. `useExternalAccounts` and
+// `hasLinkedProvider` were written here because `/solo` was their first consumer; they now
+// have three (`/home` and `/profile` too), and `/profile` adds the mutations that invalidate
+// their cache entry. The key, its reader and its writers had to end up in one module — see
+// the docblock there.
 
 // ------------------------------------------------------------------ opponent
 

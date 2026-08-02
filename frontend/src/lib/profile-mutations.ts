@@ -1,4 +1,4 @@
-import { ApiError, apiFetch, sharedApiErrorMessage } from '@/lib/api';
+import { ApiError, apiFetch, errorPayloadCode, sharedApiErrorMessage } from '@/lib/api';
 import { uploadFile } from '@/lib/upload';
 
 import type { components, paths } from '@/lib/api-types.gen';
@@ -261,4 +261,87 @@ export async function removeAvatar() {
   const { user } = await apiFetch<RemoveAvatarResponse>('/users/me/avatar', { method: 'DELETE' });
 
   return user ? toAuthUser(user) : null;
+}
+
+// ------------------------------------------------------------------ account deletion
+
+type DeleteAccountBody = paths['/users/me']['delete']['requestBody']['content']['application/json'];
+type DeleteAccountResponse =
+  paths['/users/me']['delete']['responses'][200]['content']['application/json'];
+type DeleteAccountConflictCode = components['schemas']['AccountDeletionError']['code'];
+
+/**
+ * The two refusals of `DELETE /users/me`, each with ITS OWN remedy — which is the whole reason
+ * the backend gives them distinct codes instead of one 409.
+ *
+ * A `Record` keyed by the generated union, so renaming a code backend-side breaks this build
+ * rather than silently degrading the dialog to its generic fallback (invariant #8).
+ */
+const DELETE_CONFLICT_MESSAGES: Record<DeleteAccountConflictCode, string> = {
+  engaged_in_match:
+    'You are still fielded in an ongoing match — play it or cancel it before deleting your account.',
+  captain_of_team:
+    'You are the captain of a team — dissolve it first, otherwise deleting your account would delete the team and its ranking for the whole roster.',
+};
+
+function deleteConflictMessage(payload: unknown) {
+  const code = errorPayloadCode(payload);
+  if (code === undefined || !(code in DELETE_CONFLICT_MESSAGES)) return undefined;
+
+  return DELETE_CONFLICT_MESSAGES[code as DeleteAccountConflictCode];
+}
+
+/** What the account forced the dialog to ask for — see the 401 below. */
+export type DeleteAccountAsked = { password: boolean; totpCode: boolean };
+
+export function deleteAccountErrorMessage(error: unknown, asked: DeleteAccountAsked) {
+  const shared = sharedApiErrorMessage(error);
+  if (shared) return shared;
+
+  if (error instanceof ApiError) {
+    // Tested on the `code`, never on the bare 409: the two refusals send the user to two
+    // different screens, and the route may well grow a third conflict later.
+    if (error.status === 409) {
+      return deleteConflictMessage(error.payload) ?? 'Your account cannot be deleted right now.';
+    }
+
+    // ⚠️ ONE STATUS, TWO CAUSES, AND THE RESPONSE CANNOT TELL THEM APART: the route checks the
+    // password first, then the TOTP code, and answers 401 with the same bare `{ error }` for
+    // both. When the dialog asked for both, the sentence therefore names both — guessing would
+    // send the user to re-read the wrong field.
+    if (error.status === 401) {
+      if (asked.password && asked.totpCode) return 'That password or that code is incorrect.';
+      if (asked.totpCode) return 'That code is not valid. Codes expire every 30 seconds.';
+      return WRONG_PASSWORD_MESSAGE;
+    }
+
+    if (error.status === 400) {
+      // Malformed `totpCode`. Caught client-side by the Zod resolver first; safety net.
+      if (isValidationError(error.payload)) return 'Enter the 6-digit code from your app.';
+      // `password required` / `totp code required`: the dialog asks for exactly what the
+      // account carries, so this only fires on a page left open while 2FA was turned on.
+      return 'Reload the page and confirm again.';
+    }
+
+    // The account is already gone — a second tab did it.
+    if (error.status === 404) return 'This account no longer exists.';
+  }
+
+  return 'Could not delete your account.';
+}
+
+/**
+ * Deletes the account for good. The server clears the refresh cookie itself.
+ *
+ * 🔑 `skipAuthRefresh` IS LOAD-BEARING HERE TOO, for the reason spelled out on `changePassword`:
+ * this route answers **401 for a wrong password**, and `lib/api.ts` reads a bare 401 as an
+ * expired token. Without the flag a typo would REPLAY the deletion request and then sign the
+ * user out — on the one screen where a silent replay is least acceptable.
+ */
+export function deleteAccount(body: DeleteAccountBody) {
+  return apiFetch<DeleteAccountResponse>('/users/me', {
+    method: 'DELETE',
+    body,
+    skipAuthRefresh: true,
+  });
 }

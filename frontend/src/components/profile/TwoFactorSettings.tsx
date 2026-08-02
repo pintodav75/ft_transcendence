@@ -7,6 +7,7 @@ import { FormMessage } from '@/components/ui/form-message';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SectionTitle } from '@/components/ui/section-title';
+import { SECTION_TITLE_SIZE } from '@/components/profile/section-title-size';
 import { twoFactorSchema, type TwoFactorFormValues } from '@/lib/login-schema';
 import {
   disableTwoFactor,
@@ -123,7 +124,9 @@ export function TwoFactorSettings({ announce }: TwoFactorSettingsProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <SectionTitle headingRef={headingRef}>Two-factor authentication</SectionTitle>
+        <SectionTitle headingRef={headingRef} headingClassName={SECTION_TITLE_SIZE}>
+          Two-factor authentication
+        </SectionTitle>
         <span className="text-text-primary">{user.totpEnabled ? 'Enabled' : 'Disabled'}</span>
       </div>
 

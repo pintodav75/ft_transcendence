@@ -61,6 +61,23 @@ export function sharedApiErrorMessage(error: unknown) {
   return undefined
 }
 
+/**
+ * The STABLE `code` of an error payload, for the routes answering `{ error, code }` — the
+ * invitations, the two team deletions, and `DELETE /users/me`. `error` is display prose the
+ * backend may reword at any time; `code` is the contract, so this is what gets tested.
+ *
+ * Narrowing rather than casting: a payload of another shape returns `undefined` and the caller
+ * falls back on its own wording. It lives here, not in a domain module, for the reason stated
+ * above `sharedApiErrorMessage` — it carries no domain knowledge.
+ */
+export function errorPayloadCode(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined
+  if (!('code' in payload)) return undefined
+
+  const { code } = payload as Record<'code', unknown>
+  return typeof code === 'string' ? code : undefined
+}
+
 function buildApiUrl(path: string) {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path

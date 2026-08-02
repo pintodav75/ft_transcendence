@@ -3,11 +3,11 @@ import { useState } from 'react';
 import { MIN_LEAD_MINUTES } from '@/lib/match-slots';
 import { matchLabeller, useMyMatchHistory } from '@/lib/history';
 import { sortGames, useGames } from '@/lib/games';
-import { useExternalAccounts } from '@/lib/solo';
+import { useExternalAccounts } from '@/lib/external-accounts';
 import { useMyTeamInvitations } from '@/lib/teams';
 import { useOpenSlots } from '@/lib/matchmaking';
 
-import type { ExternalAccount } from '@/lib/solo';
+import type { ExternalAccount } from '@/lib/external-accounts';
 import type { Game, RequiredProvider } from '@/lib/games';
 import type { HistoryMatch, MatchLabeller } from '@/lib/history';
 
@@ -21,7 +21,7 @@ import type { HistoryMatch, MatchLabeller } from '@/lib/history';
  * account has none of the six other blocks.
  *
  * 🔑 THE BUDGET IS FIVE REQUESTS, AND FOUR OF THE FIVE LAND ON A CACHE KEY ANOTHER SCREEN
- * ALREADY USES — `['games']` (`/games`), `['external-accounts','me']` (`/solo`),
+ * ALREADY USES — `['games']` (`/games`), `EXTERNAL_ACCOUNTS_KEY` (`/solo` and `/profile`),
  * `historyMatchesKey()` (`/history`) and `MY_INVITATIONS_KEY` (`/teams`). `/home` is a READER of
  * the app's caches, so arriving on it never makes a later page slower.
  *
