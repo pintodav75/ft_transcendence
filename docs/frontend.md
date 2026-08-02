@@ -1051,3 +1051,67 @@ piège à focus, Échap, nom accessible, `:modal`) · zoom **200 %** sans débor
 retirer `skipAuthRefresh` fait rougir 10.4, remonter le dialogue conditionnellement fait rougir
 10.2, rendre le message d'avatar hors garde fait rougir 2.8b. Campagne complète : **28 scénarios,
 467/467, 0 rouge**.
+
+---
+
+## [FIX-LANDING-RAIL] — retrait du rail latéral de la landing publique (branche `fix/landing-empty-rail`, 2 août)
+
+**Le défaut** : `components/landing/LandingNav.tsx` posait un `<aside>` de 30 % de large (max
+300 px) sur la landing anonyme, qui ne contenait que le wordmark en haut et les deux liens
+`Login` / `Sign up` d'`AuthNav` collés en bas — **entre les deux, une colonne vide sur toute la
+hauteur de l'écran**, soit ~1 000 px de vide sur la première page que voit un correcteur.
+
+**Le correctif**, en quatre gestes :
+
+1. **`LandingNav.tsx` supprimé** et retiré de `pages/index.tsx`. Le layout redevient une colonne
+   simple (`flex min-h-dvh flex-col p-4`), et la page **défile normalement** au lieu de la boîte
+   `h-dvh overflow-hidden` + conteneur à scroll interne qu'imposait le rail — le même modèle que
+   `AuthenticatedLayout`.
+2. 🚨 **LE WORDMARK EST REMIS EN HAUT DE PAGE**, dans un `<header>` sobre — même dosage que les
+   pages légales (`legal-page.tsx`), qui posaient déjà ce précédent. **C'est le rail qui le
+   portait** : le retirer laissait la page d'entrée du projet sans rien qui NOMME le site, un
+   correcteur arrivait sur une application anonyme. 🔑 `SiteLogo` et pas un titre écrit à la main :
+   il n'est délibérément **pas** un `<h1>`, donc il ne se place pas avant le vrai titre de la page
+   dans la liste des titres d'un lecteur d'écran.
+3. **Les deux CTA du hero se nomment par leur destination** : « Sign up » (→ `/register`) et
+   « Login » (→ `/login`). Ils s'appelaient « Join the arena » / « Enter the arena », deux formules
+   du même registre, **si proches qu'on ne savait pas laquelle créait un compte** ; depuis le
+   retrait du rail ce sont les seuls chemins vers ces deux pages. 🔑 **C'est une paire : on ne
+   renomme pas l'un sans l'autre** — l'état intermédiaire (« Join the arena » + « Login ») mélangeait
+   les deux registres. Le rendu reste en capitales (`uppercase` de `buttonClasses`).
+4. **`AuthNav` n'a plus de branche anonyme.** Ses deux seuls appelants (`LeftRail`, tiroir du
+   `MobileHeader`) sont montés par `AuthenticatedLayout` : depuis le retrait du rail de la landing,
+   les liens « Login / Sign up » qu'il portait **ne pouvaient plus s'afficher** et les gardes
+   `isLogged` étaient **toujours vraies**. Branche et gardes supprimées. ⚠️ **La connaissance, elle,
+   est conservée en tête de fichier** : remonter ce composant sur une page publique reposerait un
+   `<dialog>` « Log out » dans le DOM d'un visiteur anonyme, dont le `<h2>` redeviendrait le premier
+   titre de la landing — c'est le défaut qui avait imposé ces gardes.
+
+🔑 **Pourquoi c'était sans risque** : le rail était déjà `hidden … md:flex`, donc **la landing
+mobile vivait sans lui depuis toujours** — le retrait aligne le bureau sur un état déjà livré et
+déjà audité, il n'invente pas une mise en page.
+
+### Ce que la review a corrigé
+
+Le ticket, tel que proposé, **supprimait quatre blocs de commentaires d'`AuthNav`** — un fichier
+partagé, hors de son périmètre — dont deux documentaient des décisions **toujours vraies** (le
+landmark nommé « Account », le `cancelLabel="Stay signed in"`). Ils sont **restaurés**. La doc du
+ticket affirmait par ailleurs que le commentaire de la garde `isLogged` avait été « réécrit » : il
+était supprimé. 🔑 **Chez nous le commentaire EST la documentation** — un ticket qui en retire un
+doit dire lequel et pourquoi.
+
+### Vérifications
+
+- `npx tsc -b --noEmit` et `npm run lint` verts.
+- `npm run audit` → **landing-public 13/13**, `f-nav` 22/22, `auth-login` 6/6, `auth-register` 4/4,
+  `home` 18/18. Console 0, exit 0 partout. Trois checks touchés :
+  - `L1` est désormais **scopé au hero** (`section[aria-label="Welcome to VSMODE"]`) et `L11`
+    aussi. ⚠️ Sans ce scope, `a:has-text("Login")` matcherait n'importe quel futur lien de
+    connexion ailleurs dans le document et le check ne prouverait plus rien sur le hero.
+  - **`L1b` est nouveau** : la landing anonyme doit rendre **1 seul `<nav>`** (le pied de page
+    légal) et **0 `<aside>`**. C'est le garde-fou qui fera rougir une réintroduction du rail.
+  - **`L1c` est nouveau** : le wordmark doit être présent en haut de page. 🔑 **Vérifié en
+    remettant le défaut dans le code** — header retiré → `L1c` rouge (12/13), header remis → vert.
+    Un check qu'on n'a pas vu rougir ne garde rien.
+- **Aucun débordement horizontal** en 375 / 1280 / **1920 px**, et hiérarchie de titres intacte
+  (un seul `<h1>`, le wordmark n'en étant pas un).
