@@ -1,4 +1,6 @@
 import { AvatarUploader } from '@/components/profile/AvatarUploader';
+import { DeleteAccount } from '@/components/profile/DeleteAccount';
+import { LinkedAccounts } from '@/components/profile/LinkedAccounts';
 import { PasswordChange } from '@/components/profile/PasswordChange';
 import { ProfileForm } from '@/components/profile/ProfileForm';
 import { TwoFactorSettings } from '@/components/profile/TwoFactorSettings';
@@ -7,15 +9,15 @@ import { useAnnouncement } from '@/lib/use-announcement';
 import { useAuthStore } from '@/stores/auth-store';
 
 export function Profile() {
-  // Garanti non-null : la route est sous la garde `_authenticated`.
+  // Guaranteed non-null: the route sits behind the `_authenticated` guard.
   const user = useAuthStore((s) => s.user);
   /**
-   * 🔑 UNE SEULE région live pour toute la page, tenue ici et prêtée aux quatre sections.
+   * ONE live region for the whole page, held here and lent to every section.
    *
-   * Elle vit au niveau de la page et non dans chaque section parce que deux régions montées
-   * en même temps se disputent la lecture : le lecteur d'écran en annonce une, l'autre, ou
-   * les deux dans un ordre imprévisible. Les six actions de cette page (avatar, profil, mot
-   * de passe, 2FA) passent donc toutes par le même `announce`.
+   * It lives at page level rather than per section because two regions mounted at once compete
+   * for the reader: it announces one, the other, or both in an unpredictable order. Every action
+   * on this page — avatar, profile, password, 2FA, linking and unlinking a game account — goes
+   * through this single `announce`.
    */
   const announcement = useAnnouncement();
 
@@ -23,13 +25,12 @@ export function Profile() {
 
   return (
     <div className="flex h-full w-full flex-col">
-      {/* @container : le layout répond à la largeur de la CARTE, pas du viewport
-          (la colonne centrale est bien plus étroite que l'écran). */}
+      {/* @container: the layout responds to the width of the CARD, not the viewport — the
+          centre column is far narrower than the screen. */}
       <Card className="@container flex flex-1 flex-col gap-8 px-6 py-10 sm:px-8">
-        {/* Montée en permanence, et VIDE au départ : une région insérée en même temps que son
-            texte n'est pas annoncée de façon fiable — le lecteur d'écran doit déjà la
-            surveiller quand elle se remplit. `sr-only` est `position: absolute`, donc une
-            région vide ne coûte aucune place. */}
+        {/* Mounted at all times and EMPTY at first: a region inserted together with its text is
+            not reliably announced — the screen reader must already be watching it when it
+            fills. `sr-only` is `position: absolute`, so an empty region costs no space. */}
         <p role="status" className="sr-only">
           {announcement.message}
         </p>
@@ -37,10 +38,10 @@ export function Profile() {
         <h1 className="text-3xl label-caps-black">Profile</h1>
 
         <div className="flex flex-1 flex-col justify-around gap-12 @lg:gap-8">
-          {/* Ligne 1 : identité (gauche) | profil (droite) */}
+          {/* Row 1: identity (left) | profile (right) */}
           <div className="flex flex-col gap-8 @lg:flex-row @lg:items-start @lg:justify-evenly">
-            {/* <div> et non <aside> : c'est l'identité PRINCIPALE de la page, pas un contenu
-                annexe — `aside` la sortirait du flux de lecture principal. */}
+            {/* <div> and not <aside>: this is the page's PRIMARY identity, not side content —
+                `aside` would take it out of the main reading flow. */}
             <div className="flex flex-col items-center gap-4 text-center @lg:mt-6 @lg:w-56 @lg:shrink-0">
               <AvatarUploader announce={announcement.announce} />
               <div className="flex flex-col items-center">
@@ -53,15 +54,27 @@ export function Profile() {
             <ProfileForm announce={announcement.announce} />
           </div>
 
-          {/* <hr> plutôt qu'un <div> bordé : c'est une séparation thématique, et l'élément
-              natif la porte dans l'arbre d'accessibilité. */}
+          {/* <hr> rather than a bordered <div>: this is a thematic break, and the native
+              element carries it into the accessibility tree. */}
           <hr className="border-border-subtle" />
 
-          {/* Ligne 2 : sécurité (mot de passe | 2FA) */}
+          {/* Row 2: game accounts. Full width and NOT paired with a second section, unlike the
+              rows around it — it carries four form rows, which half a column would crush. */}
+          <LinkedAccounts announce={announcement.announce} />
+
+          <hr className="border-border-subtle" />
+
+          {/* Row 3: security (password | 2FA) */}
           <div className="flex flex-col gap-8 @lg:flex-row @lg:items-start @lg:justify-evenly">
             <PasswordChange announce={announcement.announce} />
             <TwoFactorSettings announce={announcement.announce} />
           </div>
+
+          <hr className="border-border-subtle" />
+
+          {/* Row 4: the way out. LAST and alone on its row, never paired — putting it beside an
+              ordinary form would place the most destructive button of the app next to a Save. */}
+          <DeleteAccount />
         </div>
       </Card>
     </div>

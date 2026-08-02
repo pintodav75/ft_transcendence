@@ -16,11 +16,25 @@ type SectionTitleProps = {
    * arrival — where a bare container would announce nothing at all.
    */
   headingRef?: Ref<HTMLHeadingElement>;
+  /**
+   * Classes merged INTO the `<h2>` — in practice a type size (`text-base`, `text-lg`).
+   *
+   * Separate from `className`, which dresses the CONTAINER: a font size set there would not
+   * win against the `text-xs` hard-coded on the `<h2>`. `cn` is tailwind-merge, so whatever
+   * comes through here REPLACES that default; omitting it changes nothing.
+   */
+  headingClassName?: string;
 };
 
 // Section heading of the "dossier" layout: small caps label followed by a hairline
 // that eats the remaining width.
-export function SectionTitle({ children, className, action, headingRef }: SectionTitleProps) {
+export function SectionTitle({
+  children,
+  className,
+  action,
+  headingRef,
+  headingClassName,
+}: SectionTitleProps) {
   return (
     // The action sits OUTSIDE the <h2>: nested in it, heading navigation announced
     // "Ladder — around this team See the full ladder" as one single heading label.
@@ -30,7 +44,10 @@ export function SectionTitle({ children, className, action, headingRef }: Sectio
       <h2
         ref={headingRef}
         tabIndex={-1}
-        className="focus-ring rounded-control text-xs label-caps text-text-muted"
+        className={cn(
+          'focus-ring rounded-control text-xs label-caps text-text-muted',
+          headingClassName,
+        )}
       >
         {children}
       </h2>

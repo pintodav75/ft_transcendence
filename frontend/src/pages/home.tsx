@@ -144,15 +144,9 @@ export function Home() {
   function dismissReminder() {
     dismiss();
     /**
-     * 🚨 THE ANNOUNCEMENT STATES WHAT HAPPENED AND STOPS THERE. It used to add « You can still
-     * link an account from your profile », which was simply FALSE: `/profile` renders a
-     * placeholder today, so a screen-reader user was being sent to an empty page by the one
-     * sentence he could not see was wrong. Confirming the action is the whole job of a live
-     * region here — same idiom as `slotRefusal`, which states a fact and stops.
-     *
-     * ⚠️ NOT THE SAME QUESTION AS THE BANNER'S `/profile` LINK, which deliberately stays (see
-     * `LinkAccountBanner`): a link is an invitation the reader can weigh, whereas this sentence
-     * ASSERTS that something can be done there — and it cannot, yet.
+     * The announcement states what happened and stops there — confirming the action is the whole
+     * job of a live region, same idiom as `slotRefusal`. Anything added here must be TRUE of the
+     * page it points at, and `home.mjs` asserts this exact string.
      */
     announcement.announce('Account linking reminder dismissed.');
     headingRef.current?.focus();

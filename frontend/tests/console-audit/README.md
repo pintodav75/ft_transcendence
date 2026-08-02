@@ -115,6 +115,15 @@ Trois garde-fous, parce que c'est le **seul** mécanisme capable de faire taire 
 Un motif déclaré mais **jamais déclenché** est signalé en fin de rapport : une faute de frappe
 ou une phase qui a bougé échoue du bon côté (rouge), mais ne doit pas le faire en silence.
 
+🚨 **LE MOTIF EST TESTÉ CONTRE `"url + texte"`, PAS CONTRE L'URL SEULE** (`record()` construit
+`${url} ${text}`). Deux conséquences :
+
+- **un motif ancré par `$` ne matche jamais** — `/\/api\/users\/me$/` échoue alors que l'URL
+  est bien celle-là, parce qu'un espace et le message la suivent dans la meule de foin ;
+- pour viser une route **sans** attraper ses filles, borner par la classe qui la suit :
+  `/\/api\/users\/me[\s:]/` couvre `/users/me` et `/users/me:0` (Chrome remonte la même
+  ressource sous les deux formes) sans jamais toucher `/users/me/avatar`.
+
 Ces entrées restent **comptées et affichées** (`6× raison`) : un motif trop large se voit au
 compteur. La dette héritée d'`OUT_OF_SCOPE`, elle, continue d'être comptée séparément.
 
@@ -155,6 +164,12 @@ ne déplace pas le focus, donc ne fausse pas la mesure.
 
 Ce piège a produit **2 faux rouges** (`ft1c` 4.1b, `teams-manage` B13c-bis) alors même que la
 règle était déjà écrite en prose : c'est pour ça qu'elle est maintenant **outillée**.
+
+🚨 **`focusLanding()` REND `label`, PAS `name`** — et un `.name` vaut `undefined`, donc tout
+test du genre `/Mon bouton/.test(landing.name ?? '')` est **vert par construction**, y compris
+quand le focus est tombé sur `<body>`. Le champ s'appelle `label` (il agrège `aria-label`,
+`aria-labelledby` puis `textContent`). Trois checks de `profile` sont nés faux verts sur cette
+seule lettre.
 
 ### Deux pièges à connaître avant d'écrire un scénario
 
@@ -1206,9 +1221,40 @@ Un saut dans la page n'est pas une navigation : un `<Link>` empilerait une entr�
 le bouton Précédent du navigateur se mettrait à remonter le document clause par clause. `L7` garde
 les deux moitiés — l'URL finit bien par `/terms#liability`, **et** la cible existe.
 
-## `profile` (F4) — deux garde-fous de teardown, et un piège de sélecteur
+## `profile` (F4 + F4B) — deux garde-fous de teardown, et un piège de sélecteur
 
-Ce scénario couvre les quatre sections de `/profile` : avatar, profil, mot de passe, 2FA.
+Ce scénario couvre les **six** sections de `/profile` : avatar, profil, comptes de jeu, mot de
+passe, 2FA, suppression de compte. **55 checks.**
+
+### F4B — §9 comptes de jeu, §10 suppression de compte
+
+Les deux phases ajoutées par F4B, et ce qu'elles gardent que rien d'autre ne voit :
+
+| Check | Ce qu'il attrape |
+| ----- | ---------------- |
+| **10.4** | La perte de `skipAuthRefresh` sur `DELETE /users/me`. La route répond **401 pour un mot de passe faux**, et `lib/api.ts` lit tout 401 comme « token expiré » : sans le drapeau, une faute de frappe envoie une **seconde demande de suppression** puis déconnecte. Le check compte les requêtes : `1` = corrigé, `2` = régression. Même piège qu'en **4.1**, sur la route la plus dangereuse de l'app. |
+| **9.7 / 10.2** | Un `ConfirmDialog` **démonté** au lieu d'être fermé. Le `<dialog>` est alors arraché du top layer, la plateforme n'a plus d'élément à qui rendre le focus, et annuler renvoie sur `<body>`. Ni `axe` ni aucun autre check ne voit ça. |
+| **9.3** | La borne des 30 caractères. Elle vient du **code** (`routes/external-accounts.ts`), pas du contrat : sans garde client, l'identifiant part et revient en 400 — donc une ligne rouge en console. |
+| **9.5** | Le nom du provider ne bouge pas d'un pixel entre l'état formulaire et l'état affichage. Décision de rendu, invisible à tout autre contrôle. |
+| **10.6 + 10.7** | **Deux 409, deux phrases.** `captain_of_team` et `engaged_in_match` mènent à deux écrans différents : le front doit mapper sur le `code`, jamais sur le 409 nu. 10.7 vérifie aussi que l'ancienne phrase a été **remplacée**. |
+| **10.8** | La validation par **Entrée depuis le champ** — un clic passerait même si le pli `<form>` de `ConfirmDialog` était défait. |
+| **2.8b** | Le même message monté **deux fois** dans la page (le dialogue *et* le bloc avatar derrière lui). ⚠️ Compté sur **toute la page** : un compte scopé au dialogue ne peut pas voir ce défaut. |
+
+🔑 **Ces checks ont été vérifiés en remettant le défaut dans le code**, pas seulement écrits :
+retirer `skipAuthRefresh` fait rougir 10.4, remonter le dialogue conditionnellement fait rougir
+10.2, rendre le message hors garde fait rougir 2.8b.
+
+🚨 **§10 travaille sur un compte JETABLE, enregistré hors des livres du runner.**
+`deleteAuditUser()` supprime chaque compte de `users` **par son token** : un compte que le
+scénario a lui-même supprimé lui répondrait 404, et le rapport annoncerait « compte(s) NON
+supprimé(s) » à **chaque** campagne — une fausse alerte permanente. Le compte de la phase 10 est
+donc créé par un `fetch` direct, et un `finally` le rattrape (avec son équipe) si le parcours
+échoue avant de l'avoir supprimé. Effet de bord utile : c'est le seul scénario de la campagne
+qui ne laisse **rien** derrière lui.
+
+⚠️ **Changer de compte impose de se déconnecter d'abord** : `/login` redirige vers `/home` dès
+qu'une session existe, et `login()` expire alors sur un `#email` qui n'existe pas. La phase 10
+passe par le bouton « Logout » du rail, comme `fs0-social`.
 
 ### 🚨 Ce qu'il ne doit JAMAIS laisser derrière lui
 

@@ -126,6 +126,21 @@ export function providerLabel(provider: RequiredProvider) {
   return providerLabels[provider];
 }
 
+/**
+ * Every provider the platform knows about, in display order.
+ *
+ * Derived from `providerLabels`, never written out as a literal: that record is keyed on the
+ * codegen union, so a provider added to `openapi.yaml` breaks the build until it gets a label,
+ * and `/profile` then lists it for free. A hand-written array would keep compiling and hide it.
+ *
+ * ⚠️ Not the same question as the `/home` banner, which lists only the providers the platform's
+ * GAMES require and the user has not linked (`lib/home.ts`, from `GET /games`). The settings
+ * page lists all of them — linking an account for a game with no ladder yet is harmless.
+ *
+ * `Object.keys` preserves insertion order for string keys, so the rows are stable without a sort.
+ */
+export const ALL_PROVIDERS = Object.keys(providerLabels) as RequiredProvider[];
+
 // Distinct ranking formats a game supports, derived from its ladders.
 export function formatsForGame(ladders: Ladder[], gameId: string): string[] {
   const formats = ladders.filter((l) => l.gameId === gameId).map((l) => l.format);

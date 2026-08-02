@@ -443,3 +443,44 @@ hors fichiers générés : **David 138 commits, Walid 28, William 10, Adrien 2**
 ⚠️ Et ces chiffres **ne mesurent pas les contributions** : Adrien et William ont travaillé avec
 David, qui a tout committé. C'est le chapitre I du sujet (savoir expliquer son code, modification en
 direct possible) qui reste le risque, pas le `git log`.
+
+## 2 août (soir) — [F4B] : liaison de compte externe et suppression de compte
+
+Le dernier vrai développement du produit. `/profile` passe de quatre à six sections : un joueur
+peut enfin lier son compte Steam/Riot/Epic/chess.com — donc être aligné en match — et supprimer
+son compte. Récit complet, décisions et plis de composants → `docs/frontend.md`.
+
+**Ce que le ticket a trouvé et qui dépasse son périmètre :**
+
+1. 🚨 **Le variant `danger` partagé était sous WCAG AA** — 3,41:1, blanc sur `arena-red`, là où
+   un texte de 14 px gras exige 4,5:1. Il équipe « Dissolve team », « Disable 2FA », « Unlink ».
+   S'il a survécu à trois campagnes et au module `[A11Y-AA]`, c'est qu'il ne vivait que dans des
+   `<dialog>` **fermés** (`display:none`, invisibles à `axe`) ou derrière un état que les comptes
+   d'audit n'avaient pas. Le bouton « Delete account » est le premier à le rendre visible sans
+   condition. Corrigé en gardant la couleur de marque et en passant le **texte** en
+   `text-surface-card` — ce qui a imposé de remplacer le survol : `hover:bg-arena-red/90` fondait
+   le rouge vers la carte et faisait retomber le texte sombre à 4,44:1, sous le seuil, à
+   l'instant où l'utilisateur vise le bouton. `hover:brightness-110` remonte à 5,3.
+2. 🚨 **Deux dialogues sur treize étaient démontés au lieu d'être fermés** (les deux du ticket) :
+   le `<dialog>` arraché du top layer ne peut plus rendre le focus, et annuler renvoyait sur
+   `<body>`. Trouvé par la passe manuelle, jamais par `axe`.
+3. ✅ La dette `ui/textarea.tsx` annoncée par `CLAUDE.md` était **périmée** : master portait déjà
+   `border-border-control`. La ligne a été corrigée.
+
+**Deux checks de la sonde d'accessibilité ont menti avant d'être corrigés**, et les deux méritent
+d'être connus : un test du focus par `activeElement.textContent.includes(…)` est **toujours vrai**
+quand le focus est perdu (le `textContent` de `<body>` contient toute la page), et « le focus
+est-il dans le dialogue ? » sort **faussement rouge** parce qu'en dépassant le dernier élément
+d'une modale, Chrome donne le focus à son propre chrome et `activeElement` retombe sur `<body>`.
+Le vrai critère est : aucun contrôle **derrière le scrim** ne prend le focus.
+
+**Trois pièges du harnais d'audit**, désormais écrits dans `frontend/tests/console-audit/README.md` :
+`focusLanding()` rend **`label`**, pas `name` (un `.name` vaut `undefined`, donc le check est vert
+par construction) · `expectHttp` teste `"url + texte"`, donc un motif ancré par `$` ne matche
+**jamais** · `/login` redirige vers `/home` quand une session existe, changer de compte impose de
+se déconnecter d'abord.
+
+**Vérifications** : `axe` 16/16 sur `/profile` (3 largeurs, boîte ouverte et fermée), passe
+manuelle 10/10, zoom 200 %, `scenarios/profile.mjs` **37 → 55 checks**, campagne complète
+**28 scénarios / 467 checks / 0 rouge**. 🔑 Les trois checks les plus précieux ont été **vérifiés
+en remettant le défaut dans le code**.

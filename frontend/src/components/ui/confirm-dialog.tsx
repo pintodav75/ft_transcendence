@@ -3,7 +3,7 @@ import { useEffect, useId, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { FormMessage } from '@/components/ui/form-message';
 
-import type { MouseEvent, ReactNode, RefObject } from 'react';
+import type { FormEvent, MouseEvent, ReactNode, RefObject } from 'react';
 
 type ConfirmDialogProps = {
   open: boolean;
@@ -30,6 +30,14 @@ type ConfirmDialogProps = {
    * the heading of the list, or the panel that contains it — and give it `tabIndex={-1}`.
    */
   returnFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * Controls the confirmation itself requires (a password, a TOTP code), rendered under
+   * the description. Their presence wraps the dialog in a `<form>`: the confirm button
+   * becomes its submit, so Enter from inside a field confirms.
+   */
+  children?: ReactNode;
+  /** Focused on open in place of Cancel — the first field of `children`, typically. */
+  initialFocusRef?: RefObject<HTMLElement | null>;
 };
 
 /**
@@ -53,6 +61,8 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   returnFocusRef,
+  children,
+  initialFocusRef,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -74,7 +84,7 @@ export function ConfirmDialog({
         dialog.showModal();
         // The browser would otherwise focus the first tabbable child. Landing on the
         // DESTRUCTIVE button means a stray Enter kicks a player; Cancel is the safe default.
-        cancelRef.current?.focus();
+        (initialFocusRef?.current ?? cancelRef.current)?.focus();
       }
       return;
     }
@@ -96,7 +106,7 @@ export function ConfirmDialog({
     openerRef.current = null;
     if (opener && opener.isConnected) return; // la plateforme a de quoi restaurer : on la laisse
     returnFocusRef?.current?.focus();
-  }, [open, returnFocusRef]);
+  }, [open, returnFocusRef, initialFocusRef]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -137,6 +147,48 @@ export function ConfirmDialog({
     onCancel();
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    // NOT `method="dialog"`: the platform would close the box on submit, while the whole
+    // point of a form here is a mutation that can FAIL and render its error inside.
+    event.preventDefault();
+    if (pending) return;
+
+    onConfirm();
+  }
+
+  const body = (
+    <div className="flex flex-col gap-4 p-6">
+      <h2 id={titleId} className="label-caps-black text-lg">
+        {title}
+      </h2>
+
+      {/* A <div>, not a <p>: `description` is a ReactNode and callers pass markup
+          (a team name in <strong>, a list) — a block element inside a <p> is invalid
+          nesting and Chrome says so in the console. */}
+      <div id={descriptionId} className="text-sm text-text-secondary">
+        {description}
+      </div>
+
+      {children}
+
+      {error ? <FormMessage>{error}</FormMessage> : null}
+
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <Button ref={cancelRef} variant="secondary" disabled={pending} onClick={onCancel}>
+          {cancelLabel}
+        </Button>
+        <Button
+          variant={tone}
+          type={children ? 'submit' : 'button'}
+          disabled={pending}
+          onClick={children ? undefined : onConfirm}
+        >
+          {pending ? 'Working…' : confirmLabel}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <dialog
       ref={dialogRef}
@@ -147,29 +199,7 @@ export function ConfirmDialog({
       // on every element, which would pin the dialog to the top-left of the top layer.
       className="m-auto w-[calc(100vw-2rem)] max-w-md rounded-card border border-border-subtle bg-surface-card p-0 text-text-primary shadow-card backdrop:bg-scrim"
     >
-      <div className="flex flex-col gap-4 p-6">
-        <h2 id={titleId} className="label-caps-black text-lg">
-          {title}
-        </h2>
-
-        {/* A <div>, not a <p>: `description` is a ReactNode and callers pass markup
-            (a team name in <strong>, a list) — a block element inside a <p> is invalid
-            nesting and Chrome says so in the console. */}
-        <div id={descriptionId} className="text-sm text-text-secondary">
-          {description}
-        </div>
-
-        {error ? <FormMessage>{error}</FormMessage> : null}
-
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Button ref={cancelRef} variant="secondary" disabled={pending} onClick={onCancel}>
-            {cancelLabel}
-          </Button>
-          <Button variant={tone} disabled={pending} onClick={onConfirm}>
-            {pending ? 'Working…' : confirmLabel}
-          </Button>
-        </div>
-      </div>
+      {children ? <form onSubmit={handleSubmit}>{body}</form> : body}
     </dialog>
   );
 }

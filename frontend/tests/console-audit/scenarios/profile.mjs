@@ -1,11 +1,12 @@
 import { createHmac } from 'node:crypto';
 
 /**
- * F4 — page de réglages `/profile`.
+ * F4 + F4B — page de réglages `/profile`.
  *
- * Surface auditée : les quatre sections de la page (avatar, profil, mot de passe, 2FA), la
- * règle d'image partagée `lib/image-file.ts`, le mapping d'erreurs de `lib/profile-mutations.ts`,
- * la région live unique et la restauration du focus.
+ * Surface auditée : les six sections de la page (avatar, profil, comptes de jeu, mot de passe,
+ * 2FA, suppression de compte), la règle d'image partagée `lib/image-file.ts`, le mapping
+ * d'erreurs de `lib/profile-mutations.ts` et `lib/external-accounts.ts`, la région live unique
+ * et la restauration du focus.
  *
  * 🚨 DEUX PIÈGES DE TEARDOWN, tous deux imposés par `deleteAuditUser` du runner :
  *
@@ -26,7 +27,8 @@ import { createHmac } from 'node:crypto';
  *     et c'est le MÊME `ui/progress-bar.tsx` alimenté par le MÊME `lib/upload.ts`.
  */
 export const name = 'profile';
-export const surface = '/profile — avatar, profil, mot de passe, 2FA';
+export const surface =
+  '/profile — avatar, profil, mot de passe, 2FA, comptes de jeu, suppression de compte';
 
 // ------------------------------------------------------------------------------- TOTP
 
@@ -87,6 +89,9 @@ export async function run({
   awaitFocusRestored,
   focusLanding,
   expectHttp,
+  login,
+  awaitRegisterSlot,
+  pressEnterOn,
 }) {
   // ------------------------------------------------------------ §1 chargement
   setPhase('1. chargement de /profile (sans avatar)');
@@ -228,10 +233,14 @@ export async function run({
     await page.waitForTimeout(400);
     const removeMapped = await dialog.locator('text=Could not remove your avatar.').count();
     const avatarKept = await avatarBlock.locator('img[src^="/media/"]').count();
+    // 🔑 Compté sur TOUTE la page, pas seulement dans le dialogue : le même `error` alimente
+    // la boîte ET le bloc avatar derrière elle, qui montaient donc la même phrase deux fois.
+    // Un compte scopé au dialogue ne peut pas voir ce défaut — il faut le compter au-dessus.
+    const mountedTwice = await page.locator('text=Could not remove your avatar.').count();
     step(
       '2.8b',
-      removeMapped === 1 && avatarKept === 1,
-      `message mappé dans le dialogue=${removeMapped === 1} (jamais la prose serveur), avatar conservé=${avatarKept === 1}`,
+      removeMapped === 1 && avatarKept === 1 && mountedTwice === 1,
+      `message mappé dans le dialogue=${removeMapped === 1} (jamais la prose serveur), avatar conservé=${avatarKept === 1}, monté ${mountedTwice} fois dans la page (1 attendue)`,
     );
   } finally {
     await page.unroute(avatarRoute);
@@ -642,5 +651,368 @@ export async function run({
     );
   } finally {
     await page.unroute(profileRoute);
+  }
+
+  // ------------------------------------------------------ §9 comptes de jeu (F4B)
+  /**
+   * 🚨 CETTE SECTION EST LE DERNIER VERROU DE LA FONCTION CENTRALE DU SITE : `validateSide()`
+   * refuse en 400 une composition contenant un joueur sans ligne dans `user_external_accounts`.
+   * Un défaut ici ne casse pas un réglage, il empêche un joueur d'entrer en match.
+   *
+   * Le fil : le champ est offert d'emblée → la validation client garde le réseau → la liaison
+   * bascule la ligne SANS la redessiner → la déliaison passe par une confirmation.
+   */
+  setPhase('9. comptes de jeu — le champ est offert sans clic préalable');
+  await page.goto(`${ORIGIN}/profile`, { waitUntil: 'networkidle' });
+
+  const steamRow = page.locator('li').filter({ hasText: 'Steam' });
+  const steamField = page.getByLabel('Steam');
+  await steamField.waitFor({ timeout: 10000 });
+  // Pas de bouton « Link an account » à cliquer d'abord, contrairement à `PasswordChange` :
+  // c'est une décision produit, le bandeau `/home` envoie ici pour faire exactement ça.
+  const rows = await page.locator('ul >> li').filter({ hasText: 'Link' }).count();
+  step(
+    '9.1',
+    (await steamField.isVisible()) && rows >= 1,
+    `champ Steam visible sans clic = ${await steamField.isVisible()}, ${rows} ligne(s) en état formulaire`,
+  );
+
+  setPhase('9.2 validation client — rien ne part au réseau');
+  // 🔑 DEUX BORNES, DEUX RAISONS. Le vide est évident ; les 31 caractères gardent une
+  // divergence réelle entre le contrat et le code (`openapi.yaml` ne documente que
+  // `minLength: 1`, la route valide `max(30)`). Sans la borne CLIENT, l'identifiant part et
+  // revient en 400 — donc une ligne rouge en console, motif de rejet du projet.
+  const emptyReqs = await countRequests(
+    async () => {
+      await steamRow.getByRole('button', { name: 'Link', exact: true }).click();
+      await page.waitForTimeout(400);
+    },
+    (url) => url.includes('/api/users/me/external-accounts'),
+  );
+  const emptyMsg = await steamRow.locator('text=Enter your account ID.').count();
+  step(
+    '9.2',
+    emptyReqs === 0 && emptyMsg === 1,
+    `identifiant vide : ${emptyReqs} requête(s) (0 attendue), message affiché = ${emptyMsg === 1}`,
+  );
+
+  const longReqs = await countRequests(
+    async () => {
+      await steamField.fill('S'.repeat(31));
+      await steamRow.getByRole('button', { name: 'Link', exact: true }).click();
+      await page.waitForTimeout(400);
+    },
+    (url) => url.includes('/api/users/me/external-accounts'),
+  );
+  const longMsg = await steamRow.locator('text=Use no more than 30 characters.').count();
+  step(
+    '9.3',
+    longReqs === 0 && longMsg === 1,
+    `31 caractères : ${longReqs} requête(s) (0 attendue), message affiché = ${longMsg === 1}`,
+  );
+
+  setPhase('9.4 liaison nominale');
+  // 🔑 La position du NOM du provider est relevée AVANT, puis comparée APRÈS : la ligne doit
+  // changer d'état sans se redessiner. C'est une décision de rendu, invisible à tout autre
+  // check — une refonte qui déplacerait le titre passerait inaperçue jusqu'à la soutenance.
+  const nameBefore = await steamRow.locator('text=Steam').first().boundingBox();
+  const urlBefore = page.url();
+  await steamField.fill('STEAM_76561198000000000');
+  await steamRow.getByRole('button', { name: 'Link', exact: true }).click();
+  await awaitAnnouncement('Steam account linked.');
+  await steamRow.getByRole('button', { name: 'Unlink Steam' }).waitFor({ timeout: 10000 });
+
+  const idShown = await steamRow.locator('text=STEAM_76561198000000000').count();
+  step(
+    '9.4',
+    idShown === 1 && page.url() === urlBefore,
+    `identifiant affiché = ${idShown === 1}, aucune navigation = ${page.url() === urlBefore}`,
+  );
+
+  const nameAfter = await steamRow.locator('text=Steam').first().boundingBox();
+  step(
+    '9.5',
+    nameBefore !== null &&
+      nameAfter !== null &&
+      Math.abs(nameBefore.x - nameAfter.x) <= 1 &&
+      Math.abs(nameBefore.y - nameAfter.y) <= 1,
+    `le nom du provider ne bouge pas entre les deux états : (${Math.round(nameBefore?.x ?? -1)},${Math.round(nameBefore?.y ?? -1)}) -> (${Math.round(nameAfter?.x ?? -1)},${Math.round(nameAfter?.y ?? -1)})`,
+  );
+
+  // Le bouton « Link » qui portait le focus vient d'être démonté : sans rattrapage, le focus
+  // tombe sur <body> et le clavier repart en haut de page.
+  await awaitFocusRestored();
+  const afterLink = await focusLanding();
+  step(
+    '9.6',
+    afterLink.tag !== 'BODY',
+    `focus après liaison : <${afterLink.tag}> ${afterLink.role ?? ''} « ${afterLink.label ?? ''} » (jamais BODY)`,
+  );
+
+  setPhase('9.7 déliaison — Escape annule et rend le focus');
+  /**
+   * 🚨 LE CHECK QUI GARDE LA CORRECTION DE F4B. Les deux boîtes de cette page étaient les
+   * seules des treize appelants à être DÉMONTÉES au lieu d'être fermées : le `<dialog>` était
+   * arraché du top layer, la plateforme n'avait plus d'élément à qui rendre le focus, et
+   * annuler renvoyait sur `<body>`. Ni `axe` ni aucun autre check ne voit ça.
+   */
+  await steamRow.getByRole('button', { name: 'Unlink Steam' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  const dialogClosed = (await page.locator('dialog[open]').count()) === 0;
+  const afterEscape = await focusLanding();
+  step(
+    '9.7',
+    dialogClosed && afterEscape.tag === 'BUTTON' && /Unlink Steam/.test(afterEscape.label ?? ''),
+    `boîte fermée = ${dialogClosed}, focus rendu à <${afterEscape.tag}> « ${afterEscape.label ?? ''} » (le bouton « Unlink Steam » attendu)`,
+  );
+
+  setPhase('9.8 déliaison confirmée');
+  await steamRow.getByRole('button', { name: 'Unlink Steam' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Unlink', exact: true }).click();
+  await awaitAnnouncement('Steam account unlinked.');
+  // ⚠️ Ciblé DANS la ligne : tant que la boîte est montée, `getByLabel('Steam')` résout AUSSI
+  // le `<dialog aria-labelledby>` dont le titre contient « Steam ».
+  const backToField = await steamRow.locator('input').count();
+  step('9.8', backToField === 1, `la ligne redevient un champ = ${backToField === 1}`);
+
+  setPhase('9.9 panne serveur — le message est mappé, jamais la prose brute');
+  const linkRoute = '**/api/users/me/external-accounts';
+  expectHttp(/\/api\/users\/me\/external-accounts/, 'liaison volontairement refusée -> 500 attendu');
+  await page.route(linkRoute, (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+      : route.continue(),
+  );
+  try {
+    await steamRow.locator('input').fill('STEAM_AFTER_FAILURE');
+    await steamRow.getByRole('button', { name: 'Link', exact: true }).click();
+    await page.waitForTimeout(600);
+    const linkMapped = await steamRow.locator('text=Could not link your Steam account.').count();
+    // 🔑 Un échec ne doit pas jeter la saisie : l'utilisateur réessaie sans retaper son id.
+    const kept = await steamRow.locator('input').inputValue();
+    step(
+      '9.9',
+      linkMapped === 1 && kept === 'STEAM_AFTER_FAILURE',
+      `message mappé = ${linkMapped === 1} (jamais la prose serveur), saisie conservée = ${kept === 'STEAM_AFTER_FAILURE'}`,
+    );
+  } finally {
+    await page.unroute(linkRoute);
+  }
+
+  // -------------------------------------------------- §10 suppression de compte (F4B)
+  /**
+   * 🚨 CETTE PHASE TRAVAILLE SUR UN COMPTE JETABLE, PAS SUR `user`, ET C'EST STRUCTUREL.
+   * Le teardown du runner supprime chaque compte de `users` avec son token ; un compte que le
+   * scénario a déjà supprimé lui répondrait 404 et le rapport annoncerait « compte(s) NON
+   * supprimé(s) » à chaque campagne — une fausse alerte permanente. Ce compte-ci est donc
+   * enregistré ici, hors des livres du runner, et le `finally` le rattrape si le parcours
+   * échoue avant de l'avoir supprimé lui-même.
+   *
+   * 🔑 EFFET DE BORD UTILE : c'est le seul scénario de la campagne qui exerce une suppression,
+   * donc le seul qui ne laisse rien derrière lui même en cas de succès complet.
+   */
+  setPhase('10. suppression de compte — préparation');
+  await awaitRegisterSlot();
+  const doomed = {
+    pseudo: `audit${Date.now().toString().slice(-9)}d`.slice(0, 30),
+    email: `audit${Date.now().toString().slice(-9)}d@example.com`,
+    password: 'Audit-Console-2026!',
+  };
+  const registered = await fetch(`${ORIGIN}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(doomed),
+  });
+  if (registered.status !== 201) {
+    throw new Error(`register (compte jetable) a répondu ${registered.status}`);
+  }
+  const doomedToken = (await registered.json()).accessToken;
+  const doomedAuth = { 'content-type': 'application/json', authorization: `Bearer ${doomedToken}` };
+
+  // Une équipe dont il est capitaine : c'est l'état qui produit le 409 `captain_of_team`,
+  // testé plus bas EN VRAI plutôt que simulé.
+  const ladders = await (await fetch(`${ORIGIN}/api/ladders`, { headers: doomedAuth })).json();
+  const teamLadder = (ladders.ladders ?? ladders).find((l) => l.format !== '1v1');
+  const teamRes = await fetch(`${ORIGIN}/api/teams`, {
+    method: 'POST',
+    headers: doomedAuth,
+    body: JSON.stringify({
+      ladderId: teamLadder.id,
+      name: `Audit del ${Date.now().toString().slice(-6)}`,
+    }),
+  });
+  if (teamRes.status !== 201) throw new Error(`POST /teams a répondu ${teamRes.status}`);
+  const doomedTeamId = (await teamRes.json()).team.id;
+
+  let deletedByUi = false;
+  try {
+    // ⚠️ SE DÉCONNECTER D'ABORD, sinon `login()` ne peut rien faire : `/login` redirige vers
+    // `/home` dès qu'une session existe, et son `page.fill('#email')` expire sur une page qui
+    // ne porte pas ce champ. Même enchaînement que `fs0-social` pour changer de compte.
+    await page.getByRole('button', { name: 'Logout' }).first().click();
+    await page
+      .getByRole('dialog', { name: 'Log out' })
+      .getByRole('button', { name: 'Log out' })
+      .click();
+    await page.waitForURL(`${ORIGIN}/`, { timeout: 15000 });
+    await login(doomed);
+    setPhase('10.1 la boîte s’ouvre et le focus atterrit dans le champ');
+    await page.goto(`${ORIGIN}/profile`, { waitUntil: 'networkidle' });
+
+    const deleteButton = page.getByRole('button', { name: 'Delete account' });
+    await deleteButton.click();
+    const dialog = page.getByRole('dialog');
+    await dialog.waitFor({ timeout: 10000 });
+    const passwordField = dialog.locator('input[type="password"]');
+
+    // 🔑 Le focus va DANS le champ, pas sur « Cancel » comme dans les autres boîtes : ici la
+    // confirmation exige une saisie, et obliger un utilisateur au clavier à tabuler jusqu'au
+    // seul champ qu'on lui demande de remplir est un défaut d'accessibilité, pas un détail.
+    const onOpen = await focusLanding();
+    step(
+      '10.1',
+      onOpen.tag === 'INPUT',
+      `focus à l'ouverture : <${onOpen.tag}> (le champ mot de passe attendu, jamais « Cancel »)`,
+    );
+
+    setPhase('10.2 annulation — le focus revient au bouton qui a ouvert la boîte');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await page.waitForTimeout(400);
+    const afterCancel = await focusLanding();
+    step(
+      '10.2',
+      afterCancel.tag === 'BUTTON' && /Delete account/.test(afterCancel.label ?? ''),
+      `focus rendu à <${afterCancel.tag}> « ${afterCancel.label ?? ''} » (le bouton « Delete account » attendu)`,
+    );
+
+    setPhase('10.3 champ vide — rien ne part au réseau');
+    await deleteButton.click();
+    await dialog.waitFor({ timeout: 10000 });
+    const emptyDeleteReqs = await countRequests(
+      async () => {
+        await dialog.getByRole('button', { name: 'Delete my account' }).click();
+        await page.waitForTimeout(400);
+      },
+      (url) => url.endsWith('/api/users/me'),
+    );
+    const emptyPwdMsg = await dialog.locator('text=Enter your password.').count();
+    step(
+      '10.3',
+      emptyDeleteReqs === 0 && emptyPwdMsg === 1,
+      `mot de passe vide : ${emptyDeleteReqs} requête(s) (0 attendue), message affiché = ${emptyPwdMsg === 1}`,
+    );
+
+    setPhase('10.4 mauvais mot de passe');
+    /**
+     * 🔑 LE MÊME PIÈGE QU'EN 4.1, SUR LA ROUTE LA PLUS DANGEREUSE DE L'APP. `DELETE /users/me`
+     * répond 401 pour un mot de passe faux, et `lib/api.ts` lit tout 401 comme « token
+     * expiré » : sans `skipAuthRefresh`, il rafraîchit et REJOUE — une seconde demande de
+     * SUPPRESSION partie sur une faute de frappe. Une requête = corrigé. Deux = régression.
+     */
+    expectHttp(/\/api\/users\/me[\s:]/, 'mauvais mot de passe à la suppression -> 401 attendu');
+    const wrongPwdReqs = await countRequests(
+      async () => {
+        await passwordField.fill('Wrong-Password-1!');
+        await dialog.getByRole('button', { name: 'Delete my account' }).click();
+        await page.waitForTimeout(1200);
+      },
+      (url) => url.endsWith('/api/users/me'),
+    );
+    const wrongPwdMsg = await dialog.locator('text=Your current password is incorrect.').count();
+    const dialogStillOpen = (await page.locator('dialog[open]').count()) === 1;
+    step(
+      '10.4',
+      wrongPwdReqs === 1 && wrongPwdMsg === 1 && dialogStillOpen,
+      `${wrongPwdReqs} requête(s) DELETE (1 attendue, JAMAIS 2), message mappé = ${wrongPwdMsg === 1}, boîte restée ouverte = ${dialogStillOpen}`,
+    );
+    step(
+      '10.5',
+      page.url().includes('/profile'),
+      `toujours connecté sur /profile après le 401 = ${page.url().includes('/profile')}`,
+    );
+
+    setPhase('10.6 refus 409 — capitaine d’une équipe');
+    /**
+     * 🔑 DEUX REFUS, DEUX REMÈDES, ET C'EST TOUT L'INTÉRÊT DU CHECK. Le serveur distingue
+     * `captain_of_team` et `engaged_in_match` par un `code` stable ; le front doit mapper
+     * DESSUS et jamais sur le 409 nu, sinon les deux situations donnent la même phrase et
+     * l'utilisateur ne sait pas quoi faire. Celui-ci est produit EN VRAI (le compte est
+     * capitaine) ; le second est simulé, fabriquer un match engagé coûterait un adversaire,
+     * un créneau et une acceptation pour tester la même ligne de mapping.
+     */
+    expectHttp(/\/api\/users\/me[\s:]/, 'suppression refusée : capitaine d’une équipe -> 409 attendu');
+    await passwordField.fill(doomed.password);
+    await dialog.getByRole('button', { name: 'Delete my account' }).click();
+    await page.waitForTimeout(1200);
+    const captainMsg = await dialog.locator('text=/dissolve it first/i').count();
+    step('10.6', captainMsg === 1, `le remède « dissolve it first » est nommé = ${captainMsg === 1}`);
+
+    setPhase('10.7 refus 409 — engagé dans un match');
+    const deleteRoute = '**/api/users/me';
+    expectHttp(/\/api\/users\/me[\s:]/, 'suppression refusée : match en cours -> 409 attendu');
+    await page.route(deleteRoute, (route) =>
+      route.request().method() === 'DELETE'
+        ? route.fulfill({
+            status: 409,
+            contentType: 'application/json',
+            body: '{"error":"finish or cancel your ongoing matches","code":"engaged_in_match"}',
+          })
+        : route.continue(),
+    );
+    try {
+      await dialog.getByRole('button', { name: 'Delete my account' }).click();
+      await page.waitForTimeout(600);
+      const engagedMsg = await dialog.locator('text=/play it or cancel it/i').count();
+      const stillCaptainMsg = await dialog.locator('text=/dissolve it first/i').count();
+      step(
+        '10.7',
+        engagedMsg === 1 && stillCaptainMsg === 0,
+        `phrase DIFFÉRENTE du 409 précédent : « play it or cancel it » = ${engagedMsg === 1}, ancienne phrase remplacée = ${stillCaptainMsg === 0}`,
+      );
+    } finally {
+      await page.unroute(deleteRoute);
+    }
+
+    setPhase('10.8 suppression réelle, validée par Entrée depuis le champ');
+    // L'obstacle levé côté serveur : le compte n'est plus capitaine.
+    await fetch(`${ORIGIN}/api/teams/${doomedTeamId}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${doomedToken}` },
+    });
+
+    // 🔑 ENTRÉE DEPUIS LE CHAMP, pas un clic : c'est le seul formulaire de l'app vivant dans un
+    // `<dialog>` modal, et le `<form>` qui le rend possible n'existe que si `ConfirmDialog`
+    // reçoit des `children`. Un clic sur le bouton passerait même si ce pli était défait.
+    await passwordField.fill(doomed.password);
+    await pressEnterOn(passwordField);
+    await page.waitForURL(`${ORIGIN}/`, { timeout: 15000 });
+    deletedByUi = true;
+    step('10.8', page.url() === `${ORIGIN}/`, `renvoyé sur la landing publique (url = ${page.url()})`);
+
+    // Le compte a réellement disparu, pas seulement la session : le serveur refuse les mêmes
+    // identifiants.
+    const relogin = await fetch(`${ORIGIN}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: doomed.email, password: doomed.password }),
+    });
+    step('10.9', relogin.status === 401, `re-login avec les mêmes identifiants -> ${relogin.status} (401 attendu)`);
+  } finally {
+    // Filet : si le parcours a échoué avant 10.8, le compte jetable et son équipe existent
+    // encore et personne d'autre ne les connaît.
+    if (!deletedByUi) {
+      await fetch(`${ORIGIN}/api/teams/${doomedTeamId}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${doomedToken}` },
+      }).catch(() => {});
+      await fetch(`${ORIGIN}/api/users/me`, {
+        method: 'DELETE',
+        headers: doomedAuth,
+        body: JSON.stringify({ password: doomed.password }),
+      }).catch(() => {});
+    }
   }
 }

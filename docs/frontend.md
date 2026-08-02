@@ -960,7 +960,94 @@ premier composant de saisie ajouté après la campagne AA a immédiatement rouve
 
 ### Ce qui reste, non bloquant
 
-`AvatarUploader` monte **deux fois la même phrase** quand la suppression d'avatar échoue (dans le
-`ConfirmDialog` et sous les boutons). Invisible en pratique — la modale masque la seconde, et le
-contenu inerte sort de l'arbre d'accessibilité. À reprendre par le prochain ticket qui touche la
-page, c'est-à-dire **[F4B]**.
+~~`AvatarUploader` monte deux fois la même phrase quand la suppression d'avatar échoue.~~
+✅ **Réglé par [F4B]** (`{error && !confirmingRemoval}`), avec le check qui l'empêche de revenir.
+
+---
+
+## [F4B] — liaison de compte externe + suppression de compte (branche `feature/f4b-extern-accounts-delete-account`)
+
+Les deux derniers trous front qui empêchaient un joueur réel d'utiliser la fonction centrale du
+site : `GET`/`POST`/`DELETE /users/me/external-accounts` existaient, le front ne les appelait
+jamais en écriture, et `validateSide()` refuse en 400 une composition contenant un joueur sans
+compte lié. Sans cette section, **un joueur cs2 ne peut aligner personne**.
+
+`/profile` passe de quatre à **six sections**. Deux fichiers `lib/` neufs, deux composants neufs,
+et trois plis de composants `ui/` existants.
+
+### Ce que la carte disait de faux
+
+Trois affirmations de la carte étaient périmées, vérifiées dans le code avant de commencer :
+« réécrire la copie de `LinkAccountBanner` » (déjà fait et monté sur `/home`), « le front
+n'appelle jamais ces routes » (la **lecture** existait, via `useExternalAccounts`, lue par
+`/home` et `/solo/$ladderId` — seules les écritures manquaient), et « confirmation via
+`confirm-dialog.tsx` », qui sous-estimait la suppression : `DELETE /users/me` **exige un corps**.
+
+### Les décisions qui méritent d'être connues ailleurs
+
+🚨 **UN `ConfirmDialog` SE FERME, IL NE SE DÉMONTE PAS.** Le `<dialog>` natif rend le focus à
+l'élément qui l'a ouvert **à condition qu'on appelle `close()`**. Un appelant qui rend la boîte
+conditionnellement (`{ouvert && <ConfirmDialog open …>}`) l'arrache du top layer : la plateforme
+n'a plus d'élément à qui rendre le focus, et annuler renvoie l'utilisateur au clavier sur
+`<body>`, donc en haut de la page. Sur 13 appelants, **11 passaient déjà un booléen** ; les 2
+qui démontaient étaient ceux de ce ticket. Mesuré contre un témoin resté monté (« Logout »), qui
+lui rend bien le focus. → check **9.7 / 10.2** de `scenarios/profile.mjs`.
+
+🚨 **AVEC DU TEXTE SOMBRE SUR UNE COULEUR, TOUT SURVOL DOIT ÉCLAIRCIR.** Le variant `danger`
+partagé était à **3,41:1** (blanc sur `arena-red`), sous le 4,5:1 exigé d'un texte de 14 px gras
+— le seuil de 3:1 ne vaut que pour du grand texte (≥ 24 px, ou ≥ 18,66 px en gras). Retenu :
+garder la couleur de marque et passer le **texte** en `text-surface-card` (**5,26:1**). Mais
+`hover:bg-arena-red/90` fondait le rouge **vers la carte**, donc l'assombrissait : le texte
+sombre y retombait à **4,44:1**, sous le seuil, à l'instant précis où l'utilisateur vise le
+bouton. D'où `hover:brightness-110`, qui remonte à 5,3 — un filtre, donc aucune couleur ajoutée
+à la palette.
+
+🔑 **`axe` NE VOIT PAS `filter: brightness()`** : il lit les couleurs calculées, juge donc l'état
+de repos et ne dira **jamais** rien du survol. Cet état ne se mesure qu'en échantillonnant les
+**pixels rendus**.
+
+🔑 **POURQUOI CE DÉFAUT A SURVÉCU À TROIS CAMPAGNES ET À `[A11Y-AA]`** : le variant `danger` ne
+vivait que dans des `<dialog>` **fermés** (`display:none`, hors du champ d'`axe`) ou derrière un
+état que les comptes d'audit n'avaient pas (« Disable 2FA » exige la 2FA active, « Dissolve »
+d'être capitaine). Le bouton « Delete account » est le premier à le rendre visible sans
+condition. **Un outil ne voit que ce qui est rendu.**
+
+🔑 **`skipAuthRefresh` EST OBLIGATOIRE SUR `DELETE /users/me`**, exactement comme sur
+`PATCH /users/me/password` : la route répond **401 pour un mot de passe faux**, et `lib/api.ts`
+lit tout 401 comme « token expiré » — sans le drapeau, une faute de frappe envoie une **seconde
+demande de suppression** puis déconnecte.
+
+🔑 **DEUX 409, DEUX REMÈDES.** `engaged_in_match` et `captain_of_team` envoient l'utilisateur sur
+deux écrans différents : le mapping se fait sur le **`code`**, jamais sur le 409 nu. Le `Record`
+est typé sur l'union générée, donc un renommage côté back casse le build ici plutôt que de
+dégrader la boîte en message générique.
+
+⚠️ **La copie de ce dialogue est décrite par `/privacy` §8** (« l'app vous dit laquelle des deux
+conditions bloque », messages effacés aussi chez le correspondant, matchs joués conservés, aucun
+retour en arrière). Reformuler l'un sans relire l'autre est la façon dont ils se mettent à se
+contredire.
+
+### Les plis de composants `ui/` (aucune réécriture)
+
+| Composant | Pli | Pourquoi |
+| --------- | --- | -------- |
+| `confirm-dialog.tsx` | `children` + `initialFocusRef`, `<form onSubmit>` **seulement si `children`** | `DELETE /users/me` exige un corps : la boîte devait porter des champs. **Jamais `method="dialog"`**, qui fermerait la boîte avant la réponse du serveur — or l'erreur s'affiche dedans. Les 12 autres appelants rendent exactement ce qu'ils rendaient. |
+| `password-input.tsx` | `ComponentPropsWithRef` | Le `ref` atteignait déjà le champ à l'exécution (`...props` → `Input`) ; seul le **type** le refusait, donc aucun appelant ne pouvait y poser le focus. 3ᵉ après `Button` et `Input`. |
+| `section-title.tsx` | `headingClassName` | ~50 appels dans 39 fichiers, rail social compris : changer le défaut est une décision de design system, pas un réglage de ticket. |
+
+`errorPayloadCode` a été remonté de `team-mutations.ts` vers `lib/api.ts` — second consommateur,
+et il ne porte aucune connaissance de domaine : même déménagement que `sharedApiErrorMessage`,
+dont le commentaire raconte déjà l'arbitrage.
+
+### Vérifications
+
+`axe` **16/16** sur `/profile` (1280 / 375 / **320 px**, boîte **ouverte ET fermée**, `/home` en
+témoin pour écarter le décor) · passe manuelle **10/10** (contraste non textuel des bordures,
+piège à focus, Échap, nom accessible, `:modal`) · zoom **200 %** sans débordement · `tsc` 0 ·
+`eslint` 0 · `vite build` ✓.
+
+`scenarios/profile.mjs` passe de **37 à 55 checks** (§9 comptes de jeu, §10 suppression).
+🔑 **Les trois checks les plus précieux ont été vérifiés en remettant le défaut dans le code** —
+retirer `skipAuthRefresh` fait rougir 10.4, remonter le dialogue conditionnellement fait rougir
+10.2, rendre le message d'avatar hors garde fait rougir 2.8b. Campagne complète : **28 scénarios,
+467/467, 0 rouge**.
