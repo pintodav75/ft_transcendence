@@ -20,7 +20,7 @@
 | 2FA TOTP                                       | Minor | 1      | ✅                                     |
 | File upload                                    | Minor | 1      | ✅ **complet** — back (T1, 24/07) + puces front (FT-2B, 27/07) |
 | Notification system                            | Minor | 1      | ✅ **B9 + #53 + B11** (match, dispute, amis, équipe) |
-| **Advanced search**                            | Minor | **1**  | ✅ **vérifié PDF 22/07** — `GET /search` (filtres + tri + pagination) |
+| **Advanced search**                            | Minor | **1**  | ✅ **vérifié PDF 22/07** — `GET /search` (filtre par type + pagination, tri alphabétique global) |
 | **Accessibilité WCAG 2.1 AA**                  | Major | **2**  | ✅ **VALIDÉ le 01/08** — voir ci-dessous |
 | **TOTAL**                                      |       | **18** |                                        |
 

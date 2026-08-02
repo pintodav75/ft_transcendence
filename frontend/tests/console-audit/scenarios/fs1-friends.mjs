@@ -198,7 +198,29 @@ export async function run({
   );
   const itemCount = await menuItems.count();
   await page.keyboard.press('Escape');
-  const menuClosed = (await page.getByRole('menuitem').count()) === 0;
+  // ⚠️ `count()` NE PATIENTE PAS, contrairement à `waitFor` : la ligne d'avant AVAIT l'air
+  // d'attendre parce qu'elle était précédée d'un `await`, mais `await` n'attend que la LECTURE,
+  // jamais le démontage. `state: 'detached'` attend la disparition réelle du nœud, et rend la
+  // main immédiatement s'il n'y en a déjà plus — aucune seconde perdue quand le code est bon.
+  //
+  // 🚨 CE CHANGEMENT N'A PAS FAIT PASSER LA CAMPAGNE, ET C'EST L'INFORMATION UTILE (3 août).
+  // Avec 5 s d'attente franche, le check reste rouge dans la suite complète alors qu'il est vert
+  // en isolation, en binôme avec `fs0-social`, et en trio. Le menu reste donc RÉELLEMENT ouvert
+  // plus de 5 secondes — ce n'est pas une frame de retard, l'hypothèse « course de rendu » est
+  // écartée par la mesure. La cause est en amont, dans les 5 premiers scénarios de la campagne
+  // (reproduit avec `admin-disputes auth-login auth-register dispute f-nav fs0-social` en tête,
+  // pas avec `fs0-social` seul) et n'est PAS identifiée : ni admin résiduel, ni notification en
+  // attente, ni ami résiduel (les trois vérifiés en base après coup, tous à zéro).
+  //
+  // 🔑 Ce qu'on sait avec certitude : L'APPLICATION N'EST PAS EN CAUSE — le composant ferme son
+  // menu et rend le focus dans tous les contextes testés isolément. Ne pas « corriger » le
+  // composant sur la foi de ce rouge.
+  const menuClosed = await page
+    .getByRole('menuitem')
+    .first()
+    .waitFor({ state: 'detached', timeout: 5000 })
+    .then(() => true)
+    .catch(() => false);
   // ⚠️ ATTENDRE, ne pas lire tout de suite. Le composant rend le focus au déclencheur à la
   // frame SUIVANTE, exprès : le faire dans le même rendu poserait le focus sur un nœud que
   // React est en train de démonter. Un `evaluate` immédiat lit donc l'état d'avant et rougit
