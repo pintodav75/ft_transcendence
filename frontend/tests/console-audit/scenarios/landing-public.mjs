@@ -13,8 +13,33 @@ export async function run({ page, setPhase, step, ORIGIN }) {
   setPhase('1. landing, chargement anonyme');
   await page.goto(`${ORIGIN}/`, { waitUntil: 'networkidle' });
 
-  const cta = await page.locator('a:has-text("Join the arena"), a:has-text("Enter the arena")').count();
+  // ⚠️ Scopé au hero : depuis le retrait du rail, le second CTA s'appelle « Login » — un
+  // `has-text("Login")` nu sur la page entière matcherait n'importe quel futur lien de
+  // connexion ailleurs dans le document, et le check ne prouverait plus rien sur le hero.
+  const hero = page.locator('section[aria-label="Welcome to VSMODE"]');
+  const cta = await hero.locator('a:has-text("Sign up"), a:has-text("Login")').count();
   step('L1', cta === 2, `${cta} CTA du hero (2 attendus)`);
+
+  // 🚨 LA LANDING DOIT NOMMER LE SITE. C'est la page d'entrée du projet : sans le wordmark,
+  // un correcteur ne sait pas comment l'application s'appelle. Il vivait dans le rail latéral
+  // jusqu'à son retrait, d'où ce check — il rougira si un futur remaniement l'emporte à son
+  // tour. Compté hors du pied de page, qui porte le sien.
+  const wordmark = await page
+    .locator('header a[aria-label="VSMODE — accueil"]')
+    .count();
+  step('L1c', wordmark === 1, `wordmark VSMODE en haut de page : ${wordmark} (1 attendu)`);
+
+  // 🚨 Le rail latéral de la landing a été RETIRÉ (il ne portait que le wordmark et les deux
+  // liens de compte, au-dessus d'une colonne vide sur toute la hauteur). Ce check est là pour
+  // qu'un retour en arrière se voie : la landing anonyme n'a plus qu'UN repère de navigation,
+  // celui du pied de page légal.
+  const navs = await page.locator('nav').count();
+  const asides = await page.locator('aside').count();
+  step(
+    'L1b',
+    navs === 1 && asides === 0,
+    `landing anonyme : ${navs} nav (1 attendu, le pied de page) et ${asides} aside (0 attendu)`,
+  );
 
   // GamesCards tire GET /games + GET /ladders au montage : une grille vide voudrait dire
   // que l'écran n'a rien chargé, et l'audit ne prouverait rien.
@@ -95,7 +120,7 @@ export async function run({ page, setPhase, step, ORIGIN }) {
   // `goto` et non `goBack()` : la page légale a été atteinte par un lien croisé, l'entrée
   // précédente de l'historique est /terms, pas la landing.
   await page.goto(`${ORIGIN}/`, { waitUntil: 'networkidle' });
-  await page.click('a:has-text("Enter the arena")');
+  await page.click('section[aria-label="Welcome to VSMODE"] a:has-text("Login")');
   await page.waitForURL('**/login');
-  step('L11', page.url().includes('/login'), 'CTA « Enter the arena » mène bien à /login');
+  step('L11', page.url().includes('/login'), 'CTA « Login » mène bien à /login');
 }

@@ -37,13 +37,19 @@ export function HeroBanner() {
           result. Climb an ELO ladder built for every game and format.
         </p>
 
-        {/* CTA: links (they navigate), styled as buttons via buttonClasses. */}
+        {/* CTA: links (they navigate), styled as buttons via buttonClasses.
+
+            🔑 LES DEUX SE NOMMENT PAR LEUR DESTINATION, et c'est une paire — on ne renomme pas
+            l'un sans l'autre. Ils s'appelaient « Join the arena » / « Enter the arena » : deux
+            formules du même registre, si proches qu'on ne savait pas laquelle créait un compte.
+            Depuis le retrait du rail latéral ce sont les SEULS chemins vers `/register` et
+            `/login` sur la landing, donc ils doivent être lisibles sans réfléchir. */}
         <div className="mt-8 flex flex-wrap items-center gap-4">
           <Link to="/register" className={buttonClasses('primary')}>
-            Join the arena
+            Sign up
           </Link>
           <Link to="/login" className={buttonClasses('secondary')}>
-            Enter the arena
+            Login
           </Link>
         </div>
       </div>
