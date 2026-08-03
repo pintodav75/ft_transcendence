@@ -46,3 +46,8 @@ coverage/
 # ignoring it in dev, it's generated all the time anyway and it prevents me from switching
 # between branches -william
 frontend/src/routeTree.gen.ts
+# Tests — gardés sur disque en local, jamais livrés dans le dépôt
+# (e2e Python, Vitest, harnais d'audit console). Retirés le 03/08 : le sujet
+# ne les demande pas et ils ne servent aucun module.
+backend/tests/
+frontend/tests/

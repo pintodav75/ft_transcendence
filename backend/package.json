@@ -10,8 +10,6 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node src/server.js",
-    "test": "vitest run",
-    "test:watch": "vitest",
     "seed:dev": "tsx src/scripts/seed-dev.ts",
     "seed:social": "tsx src/scripts/seed-social.ts",
     "seed:demo": "tsx src/scripts/seed-demo.ts"

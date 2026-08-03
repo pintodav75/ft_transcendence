@@ -374,6 +374,85 @@ Conséquences directes, toutes voulues :
 
 ---
 
+## [TESTS-OUT] — les tests sortent du dépôt (03/08)
+
+**Décision de David.** Les trois blocs de test sont retirés du dépôt par `git rm --cached` puis
+`.gitignore` : ils **restent sur le disque** et sont relançables, mais un `git clone` ne les
+contient plus.
+
+| Bloc | Lignes retirées | Pourquoi |
+| --- | --- | --- |
+| e2e Python (`backend/tests/*.py`, 28 fichiers) | 6 471 | Exige base + serveur, personne ne les lancera |
+| Vitest (`backend/tests/unit/`, 5 fichiers) | 472 | Suit le même sort par cohérence |
+| Harnais d'audit console (`frontend/tests/console-audit/`) | ~15 000 | — |
+
+**Le raisonnement** : le sujet n'exige aucun test, aucun module n'en dépend, et c'était ~22 000
+lignes que **seul David pouvait expliquer** — or la grille de correction demande à chacun
+d'expliquer son code (chap. I). 🔑 **La console sans warning reste un motif de rejet**, mais
+c'est **l'inspecteur du correcteur qui fait foi** : il ouvre les DevTools et navigue, il ne
+lancera aucun script. Le harnais servait à *nous* prémunir pendant le développement — or le
+développement est terminé, il n'a plus rien à surveiller.
+
+⚠️ **Ce qui a été retiré des `package.json`** : `test` et `test:watch` côté back, `audit` côté
+front. Sans ça un `npm test` sur un clone neuf échouerait faute de fichiers. Les dépendances
+(`vitest`, `playwright-core`) restent déclarées, pour que David puisse relancer en local via
+`npx`.
+
+### La dernière campagne, avant retrait — le constat à citer dans le README
+
+Base de dev fraîchement resemée (`seed:dev` + `seed:social`), **aucun compte admin en base** :
+
+> **28 scénarios · 472 checks verts sur 473 · console 0 entrée à corriger sur les 28.**
+
+✅ **Le rouge historique de `fs1-friends` `F4` n'est PAS réapparu.** `CLAUDE.md` le disait
+« cause non identifiée » depuis le 03/08 et faisait sortir la campagne en `exit 2` : sur une
+base propre il est vert. C'était bien une pollution de la base de dev par les campagnes
+précédentes, pas un défaut de l'application ni une course de rendu.
+
+### 🚨 Le seul rouge restant est un VRAI défaut, connu et NON corrigé
+
+`admin-disputes` check **A9**, mesuré le 03/08 :
+
+> `arbitrage : confirmation demandée true, annonce « Dispute settled » true, focus rendu sur
+> <BODY> (H1 attendu — le panneau disparaît sous l'utilisateur, FX-FOCUS)`
+
+**Ce qui se passe** : l'admin tranche un litige, tout aboutit correctement (le litige est réglé,
+l'annonce vocale part, le dossier passe en lecture seule, le badge du rail se décrémente) — mais
+le **curseur clavier repart en haut de la page** au lieu de rester sur le titre du dossier.
+
+**La mécanique**, pour qui reprendrait le sujet : `DisputeArbitration.settle()` appelle
+`setStaged(null)` **puis** `onSettled()`, qui pose synchroniquement le focus sur le `<h1>`. Le
+commentaire du code affirme qu'« à ce moment-là l'invalidation a déjà atterri, donc le bouton
+déclencheur a disparu » — **c'est faux**. Le bouton est encore connecté quand l'effet de
+`ConfirmDialog` s'exécute ; le garde `opener.isConnected` rend donc la main à la plateforme,
+`dialog.close()` renvoie le focus sur ce bouton, et le panneau se démonte **juste après** avec
+le refetch → le focus retombe sur `<body>`. Le focus posé par `onSettled` est écrasé parce
+qu'il arrive **trop tôt**.
+
+**Le correctif si on le reprend un jour** : ne pas poser le focus au clic, mais **quand le
+dossier passe réellement à `resolved`** (un effet sur le statut, pas un délai) — le panneau a
+alors disparu et le `<h1>` est une ancre stable. ~6 lignes dans
+`pages/disputes/dispute-detail.tsx`.
+
+**Pourquoi c'est resté** : aucun warning console, aucun impact à la souris, et il faut être
+admin, au clavier, sur l'écran d'arbitrage, **après** avoir tranché, pour le rencontrer. Coût
+réel nul face au risque de toucher du code gelé la veille de la soutenance. ⚠️ Ne pas le
+présenter comme un défaut d'accessibilité « corrigé » : si la question tombe, la réponse
+honnête est qu'il est connu, mesuré, et jugé non bloquant.
+
+### Ce qu'on perd, et qui doit être su
+
+- **On ne peut plus recalculer** les mesures d'accessibilité (17 routes × 320 px, 0 violation
+  `axe`, zoom 200 %, espacement de texte). Les chiffres restent cités dans ce fichier, section
+  `[A11Y-AA]` — mais ils ne sont plus reproductibles depuis le dépôt.
+- **La méthode qui a débusqué les cinq faux verts survit ici** et nulle part ailleurs :
+  *remettre le défaut dans le code et regarder le check rougir*. Un check qui reste vert quand
+  on casse volontairement ce qu'il prétend garder ne teste rien.
+- **Tout écran modifié après le 03/08 n'est plus gardé par rien.** La vérification redevient
+  manuelle : DevTools ouverts, parcours à la main, sur les écrans qu'on montrera.
+
+---
+
 ## [F-DISPUTE] — `/disputes/$disputeId` (mergé le 31/07, commit `fbcc356`, merge `f6345c8`)
 
 **Le problème** : un litige était un cul-de-sac. FT-4B permet d'en ouvrir un depuis la fiche de match, puis **aucun écran n'existait** — le mot « dispute » n'apparaissait dans le front que comme badge. Or le job B7 annule un litige **24 h après son ouverture** faute d'arbitrage : qui ne peut pas déposer sa preuve perd son match par forfait de fait.
