@@ -1,12 +1,13 @@
 # Modules 42 — détail
 
-> Extrait de CLAUDE.md (refacto 25/07). Détail complet des 12 modules revendiqués, du module le plus fragile et des candidats de réserve.
+> Extrait de CLAUDE.md (refacto 25/07). Détail complet des 14 modules revendiqués, du module le plus fragile et des candidats de réserve.
 
-> ⚠️ **Mis à jour le 1er août 2026** : le tableau passe à **18 points** (ajout de l'accessibilité
-> WCAG 2.1 AA, validée ce jour-là), et 🚨 **le plafond de notation est 19** — voir la note sous le
-> tableau.
+> ⚠️ **Mis à jour le 4 août 2026** : le tableau passe à **21 points revendiqués** — le README livré
+> ce jour-là ajoute les **2 modules qui ne coûtaient aucun code** (custom design system, et le
+> cycle compétitif en *module of choice*). 🚨 **Le plafond de notation reste 19** : les 2 points
+> au-dessus sont une **marge**, pas un gain — voir la note sous le tableau.
 
-## 🧩 Modules choisis (18 points)
+## 🧩 Modules choisis (21 points revendiqués, 19 comptabilisables)
 
 | Module                                         | Type  | Points | État                                   |
 | ---------------------------------------------- | ----- | ------ | -------------------------------------- |
@@ -22,13 +23,15 @@
 | Notification system                            | Minor | 1      | ✅ **B9 + #53 + B11** (match, dispute, amis, équipe) |
 | **Advanced search**                            | Minor | **1**  | ✅ **vérifié PDF 22/07** — `GET /search` (filtre par type + pagination, tri alphabétique global) |
 | **Accessibilité WCAG 2.1 AA**                  | Major | **2**  | ✅ **VALIDÉ le 01/08** — voir ci-dessous |
-| **TOTAL**                                      |       | **18** |                                        |
+| **Custom design system**                       | Minor | **1**  | ✅ **revendiqué le 04/08 par le README** — 26 composants dans `components/ui/` (le sujet en demande 10) + tokens couleurs/polices/radius/ombres dans `index.css` + icônes lucide. **Aucun code écrit pour ce module.** |
+| **Module of choice — le cycle compétitif**     | Major | **2**  | ✅ **revendiqué le 04/08 par le README** — challenge/accept + Elo transactionnel + litiges + jobs 24 h, qu'**aucun** module de la liste ne couvre. Les **4 justifications exigées** (pourquoi ce module, difficultés techniques, valeur, pourquoi Major) sont rédigées dans le README, section 8. |
+| **TOTAL**                                      |       | **21** | plafond comptabilisable : **19**       |
 
 ### 🚨 Le plafond de notation est 19 points, pas plus
 
 Chapitre VII du sujet : le bonus n'est compté que **jusqu'à 5 points au-dessus des 14** requis.
-**19 est donc le maximum comptabilisable.** À 18, un module de plus ne rapporte plus qu'**un seul**
-point — mais viser au-delà reste utile comme **marge** si un module n'est pas validé en
+**19 est donc le maximum comptabilisable.** À 21 revendiqués, les **2 derniers points ne rapportent
+rien** — mais viser au-delà reste utile comme **marge** si un module n'est pas validé en
 soutenance, ce que le sujet conseille explicitement (« aiming for more than 14 points may be a
 good idea, especially if some modules aren't validated »).
 
@@ -105,7 +108,7 @@ Il est remplacé par **Organization system** (Major, 2 pts) : créer/éditer/sup
 
 - **Advanced permissions / roles** (Major, 2 pts) — ❌ **PLUS quasi gratuit : le PDF a tranché (22/07), `is_admin` NE SUFFIT PAS.** Le sujet exige *« Roles management (admin, user, guest, moderator, etc.) »*, *« different views and actions based on user role »* **et** un CRUD complet sur les users (view/edit/delete). Il faudrait de vrais rôles assignables + les vues associées → **vrai chantier**, pas un bonus.
 - **Public API** (Major, 2 pts) — 20+ endpoints, rate-limit et `openapi.yaml` déjà là ; il manquerait une **clé d'API**. ⚠️ Le seul qui coûte du **vrai code neuf** → à ne prendre que s'il reste du temps.
-- **Custom design system** (1) — 🎯 **le candidat le moins cher qui reste** : le sujet demande **10 composants réutilisables minimum** + palette, typographie et icônes. `components/ui/` en compte déjà 9-10 (avatar, button, card, form-message, icon-menu-item, input, label, menu-item, password-input) et `index.css` porte tokens de couleurs, polices, radius et shadows ; lucide fournit les icônes. **Surtout à documenter dans le README**, quasi rien à coder.
+- ~~**Custom design system** (1)~~ — ✅ **REVENDIQUÉ le 04/08**, il est passé dans le tableau ci-dessus. Historique de la décision : c'était **le candidat le moins cher qui restait** : le sujet demande **10 composants réutilisables minimum** + palette, typographie et icônes. `components/ui/` en compte déjà 9-10 (avatar, button, card, form-message, icon-menu-item, input, label, menu-item, password-input) et `index.css` porte tokens de couleurs, polices, radius et shadows ; lucide fournit les icônes. **Surtout à documenter dans le README**, quasi rien à coder.
 - GDPR (1) — ⚠️ **plus loin qu'il n'y paraît** : la suppression de compte existe, mais le sujet exige AUSSI l'**export des données dans un format lisible**, la demande de ses données, et des **emails de confirmation** (aucune infra mail dans le projet).
 - i18n (1) — 3 langues complètes + sélecteur ; les sélecteurs EN/FR/ES existent dans l'UI mais **ne sont pas câblés**. *(Advanced search est **compté dans le tableau** depuis le 22/07, il n'est plus en réserve.)*
 
