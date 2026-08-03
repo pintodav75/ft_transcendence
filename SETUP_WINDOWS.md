@@ -503,7 +503,7 @@ git push origin master
 ```
 
 ⚠️ **Ne push jamais de code non relu directement sur `master`.** Toujours branche → review locale → merge.
-⚠️ **Lance les tests avant de pusher / merger** : `docker compose exec backend npm test`.
+⚠️ **Avant de pusher / merger** : `npm run build` et `npm run lint` doivent passer, et la console Chrome doit rester vide sur les écrans touchés (DevTools ouverts — c'est un motif de rejet du projet).
 
 ---
 

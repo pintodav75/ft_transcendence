@@ -51,3 +51,4 @@ frontend/src/routeTree.gen.ts
 # ne les demande pas et ils ne servent aucun module.
 backend/tests/
 frontend/tests/
+backend/vitest.config.ts

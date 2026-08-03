@@ -57,7 +57,7 @@
 │   ├── Dockerfile, docker-entrypoint.sh, package.json, tsconfig.json
 │   ├── certs/               # point de montage du volume backend_certs (généré automatiquement)
 │   ├── openapi.yaml         # contrat d'API (à jour : auth, users, social, teams, matches)
-│   ├── tests/               # tests e2e Python (run_all.py — 14 suites, 501 cas) + unit/ (Vitest) + README
+│   ├── (tests/)             # RETIRÉ DU DÉPÔT le 03/08 — gitignoré, conservé en local seulement → docs/frontend.md [TESTS-OUT]
 │   ├── drizzle/             # migrations 0000 → 0019 (20 migrations) + meta
 │   └── src/
 │       ├── server.ts        # entry Fastify (HTTPS, registre plugins/routes)
