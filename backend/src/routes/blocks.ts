@@ -18,21 +18,26 @@ export const blocksRoutes: FastifyPluginAsync = async (server) => {
           return reply.code(400).send({ error: 'cannot block yourself' });
         const [user] = await db.select().from(usersTable).where(eq(usersTable.id, blockedId));
         if (!user) return reply.code(404).send({ error: 'user not found' });
-        await db
-          .delete(friendshipsTable)
-          .where(
-            or(
-              and(
-                eq(friendshipsTable.requesterId, blockerId),
-                eq(friendshipsTable.addresseeId, blockedId),
+        // Blocking has two database effects but one business meaning: sever every friendship
+        // or pending request, then create the block. They must commit together; otherwise an
+        // insert failure after the delete would leave the users unrelated but not blocked.
+        await db.transaction(async (tx) => {
+          await tx
+            .delete(friendshipsTable)
+            .where(
+              or(
+                and(
+                  eq(friendshipsTable.requesterId, blockerId),
+                  eq(friendshipsTable.addresseeId, blockedId),
+                ),
+                and(
+                  eq(friendshipsTable.requesterId, blockedId),
+                  eq(friendshipsTable.addresseeId, blockerId),
+                ),
               ),
-              and(
-                eq(friendshipsTable.requesterId, blockedId),
-                eq(friendshipsTable.addresseeId, blockerId),
-              ),
-            ),
-          );
-        await db.insert(blocksTable).values({ blockerId: blockerId, blockedId: blockedId });
+            );
+          await tx.insert(blocksTable).values({ blockerId, blockedId });
+        });
         return reply.code(201).send({ ok: true });
       } catch (error) {
         if (error instanceof z.ZodError) return reply.code(400).send({ errors: error.issues });

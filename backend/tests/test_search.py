@@ -25,7 +25,7 @@ exactement ce qu'un tri « par source » ne peut pas produire.
 
 import uuid
 
-from helpers import Suite, ladder_id, register, req
+from helpers import Suite, ladder_id, register, req, sql
 
 # ladders non-1v1 (une team = un ladder par capitaine) — assez pour tous les cas
 L = [
@@ -173,6 +173,28 @@ def run():
     s.check("…et alice disparaît de celle de bob (sens inverse)", b["results"], [])
     st, b = req("GET", f"/search?q={pA}&type=team", tokB)
     s.check("les teams, elles, restent visibles", labels(b), [pA, pA + "Mid", pA + "Zeta"])
+
+    # Le blocage est déjà présent. On force directement une relation incohérente pour que le
+    # prochain POST supprime cette relation puis échoue sur l'unicité du blocage. Sans transaction,
+    # le DELETE resterait validé malgré le 400 ; avec transaction, PostgreSQL le rollback.
+    sql(
+        "insert into friendships (requester_id, addressee_id) values "
+        f"('{idA}', '{idB}');"
+    )
+    st, b = req("POST", f"/blocks/{idB}", tokA)
+    s.check("re-bloquer → 400 already blocked", (st, b.get("error")), (400, "already blocked"))
+    relation_count = sql(
+        "select count(*) from friendships "
+        f"where (requester_id='{idA}' and addressee_id='{idB}') "
+        f"or (requester_id='{idB}' and addressee_id='{idA}');"
+    )
+    s.check("échec du blocage → rollback de la suppression de relation", relation_count, "1")
+    # Retour à l'état métier normal avant de poursuivre le scénario de recherche.
+    sql(
+        "delete from friendships "
+        f"where (requester_id='{idA}' and addressee_id='{idB}') "
+        f"or (requester_id='{idB}' and addressee_id='{idA}');"
+    )
     req("DELETE", f"/blocks/{idB}", tokA)
     st, b = req("GET", f"/search?q={pB}", tokA)
     s.check("déblocage → bob réapparaît", labels(b), [pB])

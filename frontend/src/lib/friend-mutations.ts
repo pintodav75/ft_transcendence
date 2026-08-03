@@ -4,6 +4,7 @@ import { ApiError, apiFetch, sharedApiErrorMessage } from '@/lib/api';
 import { BLOCKS_KEY } from '@/lib/blocks';
 import { FRIEND_REQUESTS_KEY, friendRequestsKey } from '@/lib/friend-requests';
 import { FRIENDS_KEY } from '@/lib/friends';
+import { markPlayerProfileBlocked, PLAYER_PROFILES_KEY } from '@/lib/player-detail';
 import { resynchronizeRealtime } from '@/lib/realtime-client';
 
 import type { QueryClient } from '@tanstack/react-query';
@@ -95,6 +96,17 @@ function refreshFriends(queryClient: QueryClient) {
 
 function refreshRequests(queryClient: QueryClient, direction: 'received' | 'sent') {
   return queryClient.invalidateQueries({ queryKey: friendRequestsKey(direction) });
+}
+
+/**
+ * A public profile embeds the relationship between its player and the viewer. The social rail
+ * remains mounted next to that profile and uses these same mutations, so refreshing only the
+ * rail's lists leaves the profile button one action behind (for example, "Add friend" after a
+ * request was sent). The prefix covers whichever profile is currently active without making
+ * mutation callers know its pseudo.
+ */
+function refreshPlayerProfiles(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: PLAYER_PROFILES_KEY });
 }
 
 /**
@@ -251,10 +263,14 @@ export function useRemoveFriend() {
       apiFetch<RemoveFriendResponse>(`/friends/${encodeURIComponent(friendshipId)}`, {
         method: 'DELETE',
       }),
-    onSuccess: () => refreshFriends(queryClient),
+    onSuccess: () =>
+      Promise.all([refreshFriends(queryClient), refreshPlayerProfiles(queryClient)]),
     // The friendship was already broken from the other tab / the other account: showing the
     // failure over a row that should have vanished is worse than the row vanishing.
-    onError: (error) => (isStaleRowError(error) ? refreshFriends(queryClient) : undefined),
+    onError: (error) =>
+      isStaleRowError(error)
+        ? Promise.all([refreshFriends(queryClient), refreshPlayerProfiles(queryClient)])
+        : undefined,
   });
 }
 
@@ -276,8 +292,14 @@ export function useBlockUser() {
   return useMutation({
     mutationFn: (userId: string) =>
       apiFetch<BlockUserResponse>(`/blocks/${encodeURIComponent(userId)}`, { method: 'POST' }),
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: async (_, userId) => {
+      // A blocked profile cannot be refetched: the endpoint deliberately answers 404. Cancel
+      // any older request first, then mark the matching cached profile so a block triggered
+      // from the rail updates an already-open page too.
+      await queryClient.cancelQueries({ queryKey: PLAYER_PROFILES_KEY });
+      markPlayerProfileBlocked(queryClient, userId);
+
+      await Promise.all([
         refreshFriends(queryClient),
         queryClient.invalidateQueries({ queryKey: BLOCKS_KEY }),
         /**
@@ -287,7 +309,8 @@ export function useBlockUser() {
          * button that can only ever answer 404.
          */
         queryClient.invalidateQueries({ queryKey: FRIEND_REQUESTS_KEY }),
-      ]),
+      ]);
+    },
     onError: (error) => (isStaleRowError(error) ? refreshFriends(queryClient) : undefined),
   });
 }
@@ -334,12 +357,17 @@ export function useSendFriendRequest() {
       return friendship.status === 'accepted' ? 'auto-accepted' : 'sent';
     },
     onSuccess: (outcome) => {
-      if (outcome === 'sent') return refreshRequests(queryClient, 'sent');
+      if (outcome === 'sent')
+        return Promise.all([
+          refreshRequests(queryClient, 'sent'),
+          refreshPlayerProfiles(queryClient),
+        ]);
 
       refreshPresence();
       return Promise.all([
         refreshFriends(queryClient),
         refreshRequests(queryClient, 'received'),
+        refreshPlayerProfiles(queryClient),
       ]);
     },
   });
@@ -364,11 +392,17 @@ export function useAcceptFriendRequest() {
       return Promise.all([
         refreshFriends(queryClient),
         refreshRequests(queryClient, 'received'),
+        refreshPlayerProfiles(queryClient),
       ]);
     },
     // The request was cancelled or answered elsewhere: the row must go, message or no message.
     onError: (error) =>
-      isStaleRequestError(error) ? refreshRequests(queryClient, 'received') : undefined,
+      isStaleRequestError(error)
+        ? Promise.all([
+            refreshRequests(queryClient, 'received'),
+            refreshPlayerProfiles(queryClient),
+          ])
+        : undefined,
   });
 }
 
@@ -387,9 +421,18 @@ export function useRejectFriendRequest() {
         `/friends/${encodeURIComponent(friendshipId)}/reject`,
         { method: 'POST' },
       ),
-    onSuccess: () => refreshRequests(queryClient, 'received'),
+    onSuccess: () =>
+      Promise.all([
+        refreshRequests(queryClient, 'received'),
+        refreshPlayerProfiles(queryClient),
+      ]),
     onError: (error) =>
-      isStaleRequestError(error) ? refreshRequests(queryClient, 'received') : undefined,
+      isStaleRequestError(error)
+        ? Promise.all([
+            refreshRequests(queryClient, 'received'),
+            refreshPlayerProfiles(queryClient),
+          ])
+        : undefined,
   });
 }
 
@@ -408,12 +451,18 @@ export function useCancelFriendRequest() {
       apiFetch<RemoveFriendResponse>(`/friends/${encodeURIComponent(friendshipId)}`, {
         method: 'DELETE',
       }),
-    onSuccess: () => refreshRequests(queryClient, 'sent'),
+    onSuccess: () =>
+      Promise.all([refreshRequests(queryClient, 'sent'), refreshPlayerProfiles(queryClient)]),
     // 400 as well as 404 — see `isStaleRequestError`. On this route the 400 is "pending request
     // RECEIVED, use reject", which this list cannot produce; it costs nothing to refetch on it
     // and it keeps the three request actions behaving identically.
     onError: (error) =>
-      isStaleRequestError(error) ? refreshRequests(queryClient, 'sent') : undefined,
+      isStaleRequestError(error)
+        ? Promise.all([
+            refreshRequests(queryClient, 'sent'),
+            refreshPlayerProfiles(queryClient),
+          ])
+        : undefined,
   });
 }
 
@@ -421,10 +470,9 @@ export function useCancelFriendRequest() {
  * Unblocks a user. TAKES THE ACCOUNT ID (`BlockEntry.id`) — there is no relation id on this
  * route at all.
  *
- * ⚠️ IT DOES NOT RESTORE ANYTHING. Blocking destroyed the friendship, and unblocking only
- * removes the block row: the two have to become friends again from scratch. That is why only
- * the block list is invalidated here — claiming the friends list changed would be a lie the
- * refetch would then have to walk back.
+ * ⚠️ IT DOES NOT RESTORE THE FRIENDSHIP. The profiles still have to be invalidated, though:
+ * `GET /users/{pseudo}` becomes readable again after the unblock. In particular, a profile
+ * left open on its local "Player blocked" screen needs that successful refetch to recover.
  */
 export function useUnblockUser() {
   const queryClient = useQueryClient();
@@ -432,6 +480,10 @@ export function useUnblockUser() {
   return useMutation({
     mutationFn: (userId: string) =>
       apiFetch<UnblockUserResponse>(`/blocks/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: BLOCKS_KEY }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: BLOCKS_KEY }),
+        refreshPlayerProfiles(queryClient),
+      ]),
   });
 }

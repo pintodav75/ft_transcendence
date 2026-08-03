@@ -4,7 +4,6 @@
 import { useState } from 'react';
 import { Ban, SmilePlus, UserCheck, UserMinus, X } from 'lucide-react';
 import { Link, useParams } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
 
 import { BackButton } from '@/components/ui/back-link';
 import { Button } from '@/components/ui/button';
@@ -25,7 +24,6 @@ import {
   formatJoinDate,
   friendCta,
   getViewerRole,
-  playerQueryKey,
   usePlayer,
 } from '@/lib/player-detail';
 // 🔑 THE MUTATIONS COME FROM THE SOCIAL RAIL'S LAYER, not from a copy of it. Every one of
@@ -105,16 +103,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
   // that undoes a mutual relationship. WITHDRAWING a request you sent does not — that is
   // undone by clicking once more.
   const [unfriendConfirming, setUnfriendConfirming] = useState(false);
-  // 🚨 SET ONCE THE BLOCK HAS GONE THROUGH, and it ends the page. From that moment
-  // `GET /users/{pseudo}` answers 404 TO THE BLOCKER TOO, so there is no version of this
-  // profile left to show: every button would be a click towards a 404, and the fiche itself
-  // is a snapshot of something the account may no longer look at. The page collapses onto its
-  // own dead-end panel instead — no navigation to pick (this page has no parent, see the
-  // `BackButton` note below), no refetch of a URL that is now forbidden, and it can name
-  // where the block is undone, which a redirect could not.
-  const [blocked, setBlocked] = useState(false);
-
-  const queryClient = useQueryClient();
   const playerQuery = usePlayer(pseudo);
   const sendFriendRequest = useSendFriendRequest();
   const blockUser = useBlockUser();
@@ -127,16 +115,27 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
   const rejectRequest = useRejectFriendRequest();
 
   const friendship = playerQuery.data?.friendship;
+  // The mutation writes this marker into the shared query cache, whichever component started
+  // the block. A successful refetch after unblocking replaces the response and removes it.
+  const blocked = playerQuery.data?.__clientBlocked === true;
 
-  /**
-   * The profile itself carries the friendship (`GET /users/{pseudo}`), so it is stale after
-   * every one of these acts — the rail's hooks refresh the rail, never this page.
-   *
-   * ⚠️ NOT AFTER A BLOCK: that URL answers 404 from then on, and refetching it would print
-   * "Failed to load resource" in the console, which is a project-rejection criterion.
-   */
-  function refreshProfile() {
-    return queryClient.invalidateQueries({ queryKey: playerQueryKey(pseudo) });
+  // This guard intentionally precedes the query error guard. Another social action may refetch
+  // every active profile while this player is still blocked; its expected 404 must not replace
+  // the more useful screen that explains the block and where to undo it.
+  if (blocked) {
+    return (
+      <div className="flex flex-col gap-6 py-6">
+        {/* The live region STAYS MOUNTED across this switch: unmounting it with the profile
+            would drop the "is now blocked" announcement before a screen reader ever read it. */}
+        <p role="status" className="sr-only">
+          {announcement.message}
+        </p>
+        <PlayerErrorPanel
+          title="Player blocked"
+          message={`You blocked ${playerQuery.data?.user.displayName ?? playerQuery.data?.user.pseudo ?? pseudo}. You will no longer see each other's profiles or messages, and any friendship between you was removed. You can undo this from the Friends panel, under "Add friend".`}
+        />
+      </div>
+    );
   }
 
   if (playerQuery.isError) {
@@ -210,7 +209,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
       // `outcome`, not the raw payload: `POST /friends` ACCEPTS when the other side had
       // already asked, and the hook reads which of the two happened off `friendship.status`.
       onSuccess: (outcome) => {
-        refreshProfile();
         announcement.announce(
           outcome === 'auto-accepted'
             ? `You are now friends with ${name}.`
@@ -231,9 +229,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
       onSuccess: () => {
         announcement.announce(`${name} is now blocked. You will no longer see each other.`);
         setBlockConfirming(false);
-        // No `refreshProfile()` here — see its docblock. The page stops showing the profile
-        // altogether rather than keeping a copy it can never refresh.
-        setBlocked(true);
       },
       onError: (error) => announcement.announce(blockUserErrorMessage(error)),
     });
@@ -251,7 +246,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
 
     unfriend.mutate(relation.id, {
       onSuccess: () => {
-        refreshProfile();
         announcement.announce(`${name} is no longer in your friends.`);
         setUnfriendConfirming(false);
       },
@@ -270,7 +264,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
 
     rejectRequest.mutate(relation.id, {
       onSuccess: () => {
-        refreshProfile();
         announcement.announce(`${name}'s friend request was refused.`);
       },
       onError: (error) => announcement.announce(rejectFriendRequestErrorMessage(error)),
@@ -283,7 +276,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
 
     cancelRequest.mutate(relation.id, {
       onSuccess: () => {
-        refreshProfile();
         announcement.announce(`Friend request to ${name} withdrawn.`);
       },
       onError: (error) => announcement.announce(cancelFriendRequestErrorMessage(error)),
@@ -408,25 +400,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
   // `?.trim()` and not just a null check: `bio` is a free-text column, so " " is a value
   // the API will happily store and the page must still treat as "nothing written".
   const bio = user.bio?.trim();
-
-  // 🚨 THE PAGE ENDS HERE ONCE THE BLOCK WENT THROUGH. Not a redirect: this page has no parent
-  // to go back to, and going back could land on the very list the blocked player has just left.
-  // A dead-end panel says what happened, and — unlike a redirect — says where to undo it.
-  if (blocked) {
-    return (
-      <div className="flex flex-col gap-6 py-6">
-        {/* The live region STAYS MOUNTED across this switch: unmounting it with the profile
-            would drop the "is now blocked" announcement before a screen reader ever read it. */}
-        <p role="status" className="sr-only">
-          {announcement.message}
-        </p>
-        <PlayerErrorPanel
-          title="Player blocked"
-          message={`You blocked ${name}. You will no longer see each other's profiles or messages, and any friendship between you was removed. You can undo this from the Friends panel, under "Add friend".`}
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-w-0 flex-col gap-6 py-6">

@@ -23,6 +23,12 @@
  * `P7` garde la conséquence la moins visible : la fiche appelle les mutations du RAIL
  * (`lib/friend-mutations.ts`). Avec la copie privée qu'elle portait au départ, bloquer depuis
  * un profil laissait la personne dans l'onglet Amis et hors des bloqués jusqu'au rechargement.
+ * `P2R` garde l'autre direction du même contrat : envoyer puis annuler depuis le RAIL doit
+ * changer le bouton de la fiche déjà ouverte, sans rechargement.
+ * `P2B` garde le cycle demande → blocage → déblocage → nouvelle demande depuis le rail : la
+ * garde anti-double-clic ne doit pas survivre à la suppression serveur de la première demande.
+ * `P7U` vérifie enfin que débloquer depuis ce rail libère aussi l'écran local « Player blocked ».
+ * `P7R` garde le sens qui manquait : bloquer depuis le rail doit fermer la fiche déjà ouverte.
  *
  * ⚠️ CE QUE CE SCÉNARIO NE PROUVE PAS.
  *   - Le RANG et la taille du ladder (`#2 / 23`) : ça demande des matchs joués, c'est la suite
@@ -93,7 +99,9 @@ export async function run({
 
   const stranger = await createUser();
   const mate = await createUser();
+  const railMate = await createUser();
   await befriend(user, mate, ORIGIN);
+  await befriend(user, railMate, ORIGIN);
 
   // ------------------------------------------------ §1 la fiche d'un inconnu, compte neuf
   setPhase('1. fiche d’un inconnu');
@@ -125,6 +133,85 @@ export async function run({
     'P2',
     noRanked === 1 && noTeam === 1 && privateSections === 0,
     `état vide des classements : ${noRanked} (1 attendu — un compte neuf n'a PAS de ligne, ce n'est pas une anomalie), état vide des équipes : ${noTeam} (1 attendu), sections « historique de matchs » ou « comptes liés » : ${privateSections} (0 attendue — décision produit du 31/07, ça se lit sur SON PROPRE compte)`,
+  );
+
+  // --------------------- §1b le rail et la fiche partagent l'état de la relation
+  setPhase('1b. le rail actualise la fiche ouverte');
+  await page.getByRole('tab', { name: 'Add friend' }).click();
+  const railSearch = page.getByPlaceholder('Search a player by pseudo…');
+  await railSearch.fill(stranger.pseudo);
+  const strangerAdd = page.getByRole('button', { name: `Add @${stranger.pseudo}` });
+  await strangerAdd.waitFor({ timeout: 10000 });
+  await strangerAdd.click();
+
+  // The profile query embeds `friendship`; refreshing only "Requests sent" leaves this button
+  // on "Add friend", and the next click then produces the server's "already requested" 400.
+  const railSendUpdatedProfile = await main
+    .getByRole('button', { name: 'Cancel request' })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+
+  // ---------- §1c une demande supprimée par un blocage peut être renvoyée après déblocage
+  setPhase('1c. redemander après blocage et déblocage');
+  await main.getByRole('button', { name: 'Block' }).click();
+  await page.getByRole('button', { name: 'Block player' }).click();
+  const blockedAfterRequest = await main
+    .getByRole('heading', { name: 'Player blocked' })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+
+  const earlyBlockedList = page.getByRole('list', { name: 'Blocked players' });
+  const earlyUnblock = earlyBlockedList.getByRole('button', {
+    name: `Unblock @${stranger.pseudo}`,
+  });
+  await earlyUnblock.waitFor({ timeout: 10000 });
+  await earlyUnblock.click();
+  const recoveredAfterUnblock = await main
+    .getByRole('button', { name: 'Add friend' })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+
+  await railSearch.clear();
+  await railSearch.fill(stranger.pseudo);
+  await strangerAdd.waitFor({ timeout: 10000 });
+  await strangerAdd.click();
+  const requestedAgain = await main
+    .getByRole('button', { name: 'Cancel request' })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+
+  // Restore a stranger with no pending request so P3 can exercise the profile's own action.
+  let railCancelUpdatedProfile = false;
+  if (requestedAgain) {
+    const sentRow = page
+      .getByRole('list', { name: 'Friend requests sent' })
+      .getByRole('listitem')
+      .filter({ hasText: stranger.pseudo });
+    const railCancel = sentRow.getByRole('button', {
+      name: `Cancel the friend request to @${stranger.pseudo}`,
+    });
+    await railCancel.waitFor({ timeout: 10000 });
+    await railCancel.click();
+    railCancelUpdatedProfile = await main
+      .getByRole('button', { name: 'Add friend' })
+      .waitFor({ timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+  }
+  await railSearch.clear();
+  step(
+    'P2R',
+    railSendUpdatedProfile && railCancelUpdatedProfile,
+    `envoi depuis le rail → bouton « Cancel request »=${railSendUpdatedProfile}, annulation depuis le rail → retour à « Add friend »=${railCancelUpdatedProfile} (les deux sans rechargement de la fiche)`,
+  );
+  step(
+    'P2B',
+    blockedAfterRequest && recoveredAfterUnblock && requestedAgain,
+    `demande suivie d'un blocage → écran bloqué=${blockedAfterRequest}, profil revenu après déblocage=${recoveredAfterUnblock}, nouvelle demande réellement envoyée depuis le rail=${requestedAgain}`,
   );
 
   // ------------------------------------------------------- §2 envoyer une demande d'ami
@@ -259,6 +346,76 @@ export async function run({
     nowBlocked && stillFriend === 0,
     `apparu dans « Blocked players » SANS rouvrir l'onglet=${nowBlocked} (l'onglet est ouvert depuis §4 : seule une invalidation peut le faire bouger), encore listé dans l'onglet Amis après refetch : ${stillFriend} (0 attendu — bloquer SUPPRIME l'amitié côté serveur)`,
   );
+
+  // ---------------------- §6b débloquer rend la fiche courante à nouveau lisible
+  setPhase('6b. débloquer libère la fiche ouverte');
+  await page.getByRole('tab', { name: 'Add friend' }).click();
+  const unblock = blockedList.getByRole('button', { name: `Unblock @${mate.pseudo}` });
+  await unblock.waitFor({ timeout: 10000 });
+  await unblock.click();
+  const profileRecovered = await main
+    .getByRole('heading', { level: 1, name: mate.pseudo })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  const canRequestAgain = await main
+    .getByRole('button', { name: 'Add friend' })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  step(
+    'P7U',
+    profileRecovered && canRequestAgain,
+    `fiche revenue après déblocage depuis le rail=${profileRecovered}, action « Add friend » disponible=${canRequestAgain} (sans navigation ni rechargement)`,
+  );
+
+  // ---------------- §6c bloquer DEPUIS LE RAIL ferme aussi une fiche déjà ouverte
+  setPhase('6c. bloquer depuis le rail actualise la fiche ouverte');
+  await page.goto(`${ORIGIN}/players/${railMate.pseudo}`, { waitUntil: 'networkidle' });
+  await main.getByRole('heading', { level: 1, name: railMate.pseudo }).waitFor({ timeout: 10000 });
+  await main.getByText('Friends', { exact: true }).waitFor({ timeout: 10000 });
+
+  await page.getByRole('tab', { name: 'Friends' }).click();
+  const railMateActions = page.getByRole('button', {
+    name: `Actions for @${railMate.pseudo}`,
+  });
+  await railMateActions.waitFor({ timeout: 10000 });
+  await railMateActions.click();
+  await page.getByRole('menuitem', { name: 'Block player' }).click();
+  const railBlockDialog = page.getByRole('dialog', { name: 'Block this player?' });
+  await railBlockDialog.getByRole('button', { name: 'Block player' }).click();
+
+  const railBlockClosedProfile = await main
+    .getByRole('heading', { name: 'Player blocked' })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  const railBlockActionsLeft = await main
+    .getByRole('button', { name: /add friend|remove friend|block/i })
+    .count();
+
+  await page.getByRole('tab', { name: 'Add friend' }).click();
+  const railMateUnblock = blockedList.getByRole('button', {
+    name: `Unblock @${railMate.pseudo}`,
+  });
+  await railMateUnblock.waitFor({ timeout: 10000 });
+  await railMateUnblock.click();
+  const railBlockRecovered = await main
+    .getByRole('button', { name: 'Add friend' })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  step(
+    'P7R',
+    railBlockClosedProfile && railBlockActionsLeft === 0 && railBlockRecovered,
+    `blocage depuis le rail → écran « Player blocked »=${railBlockClosedProfile}, actions de relation restantes=${railBlockActionsLeft} (0 attendue), déblocage depuis le rail → fiche utilisable=${railBlockRecovered} (le tout sans rechargement)`,
+  );
+
+  // Remettre l'état bloqué pour conserver le contrôle de confidentialité P8 ci-dessous.
+  await page.goto(`${ORIGIN}/players/${mate.pseudo}`, { waitUntil: 'networkidle' });
+  await main.getByRole('button', { name: 'Block' }).click();
+  await page.getByRole('button', { name: 'Block player' }).click();
+  await main.getByRole('heading', { name: 'Player blocked' }).waitFor({ timeout: 10000 });
 
   // ------------------------------------------- §7 le profil bloqué n'est plus lisible
   setPhase('7. le profil bloqué rend 404');

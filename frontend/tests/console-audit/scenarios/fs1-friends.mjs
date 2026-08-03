@@ -191,6 +191,24 @@ export async function run({
   await menuTrigger.click();
   const menuItems = page.getByRole('menuitem');
   await menuItems.first().waitFor({ timeout: 5000 });
+  // Opening moves focus on the next animation frame. Waiting for the node to exist is not
+  // enough: on a fast run Escape could otherwise still target the trigger, which only handles
+  // ArrowUp/ArrowDown, and the test would leave the menu open although the component is sound.
+  const focusEnteredMenu = await menuItems
+    .first()
+    .evaluate(
+      (element) =>
+        new Promise((resolve) => {
+          const deadline = Date.now() + 2000;
+          const check = () => {
+            if (element === document.activeElement) return resolve(true);
+            if (Date.now() > deadline) return resolve(false);
+            requestAnimationFrame(check);
+          };
+          check();
+        }),
+    )
+    .catch(() => false);
   // Le motif APG demande UN seul arrêt de tabulation pour tout le menu : les items non actifs
   // portent `tabindex="-1"`. Sans ça, Tab circule dans le menu au lieu d'en sortir.
   const tabStops = await menuItems.evaluateAll(
@@ -198,23 +216,6 @@ export async function run({
   );
   const itemCount = await menuItems.count();
   await page.keyboard.press('Escape');
-  // ⚠️ `count()` NE PATIENTE PAS, contrairement à `waitFor` : la ligne d'avant AVAIT l'air
-  // d'attendre parce qu'elle était précédée d'un `await`, mais `await` n'attend que la LECTURE,
-  // jamais le démontage. `state: 'detached'` attend la disparition réelle du nœud, et rend la
-  // main immédiatement s'il n'y en a déjà plus — aucune seconde perdue quand le code est bon.
-  //
-  // 🚨 CE CHANGEMENT N'A PAS FAIT PASSER LA CAMPAGNE, ET C'EST L'INFORMATION UTILE (3 août).
-  // Avec 5 s d'attente franche, le check reste rouge dans la suite complète alors qu'il est vert
-  // en isolation, en binôme avec `fs0-social`, et en trio. Le menu reste donc RÉELLEMENT ouvert
-  // plus de 5 secondes — ce n'est pas une frame de retard, l'hypothèse « course de rendu » est
-  // écartée par la mesure. La cause est en amont, dans les 5 premiers scénarios de la campagne
-  // (reproduit avec `admin-disputes auth-login auth-register dispute f-nav fs0-social` en tête,
-  // pas avec `fs0-social` seul) et n'est PAS identifiée : ni admin résiduel, ni notification en
-  // attente, ni ami résiduel (les trois vérifiés en base après coup, tous à zéro).
-  //
-  // 🔑 Ce qu'on sait avec certitude : L'APPLICATION N'EST PAS EN CAUSE — le composant ferme son
-  // menu et rend le focus dans tous les contextes testés isolément. Ne pas « corriger » le
-  // composant sur la foi de ce rouge.
   const menuClosed = await page
     .getByRole('menuitem')
     .first()
@@ -241,8 +242,12 @@ export async function run({
     .catch(() => false);
   step(
     'F4',
-    itemCount === 2 && tabStops === 1 && menuClosed && focusBackOnTrigger,
-    `items=${itemCount} (2 attendus), arrêts de tabulation=${tabStops} (1 attendu — tabindex glissant), Escape referme=${menuClosed}, focus rendu au déclencheur=${focusBackOnTrigger}`,
+    itemCount === 2 &&
+      tabStops === 1 &&
+      focusEnteredMenu &&
+      menuClosed &&
+      focusBackOnTrigger,
+    `items=${itemCount} (2 attendus), arrêts de tabulation=${tabStops} (1 attendu — tabindex glissant), focus entré dans le menu=${focusEnteredMenu}, Escape referme=${menuClosed}, focus rendu au déclencheur=${focusBackOnTrigger}`,
   );
 
   // --------------------------------------------- §5 annulation : rien ne part, focus visible

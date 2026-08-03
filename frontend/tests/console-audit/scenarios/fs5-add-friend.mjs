@@ -12,6 +12,7 @@
  * Ce qu'il vérifie encore :
  *   - les trois listes ne se chargent **pas** tant que l'onglet n'est pas ouvert (le rail est
  *     monté sur toutes les pages authentifiées) ;
+ *   - la recherche réutilise l'unique région live du rail au lieu d'en monter une seconde ;
  *   - envoyer une demande la fait apparaître dans « Requests sent » sans rechargement ;
  *   - 🚨 **quand l'autre accepte, la ligne « Requests sent » DISPARAÎT en direct** — c'est le
  *     défaut le plus grave trouvé sur tout le rail : sans l'abonnement au temps réel, la ligne
@@ -115,29 +116,36 @@ export async function run({
   // Se chercher soi-même : la route ne filtre PAS l'appelant, on se retrouve donc bien dans
   // les résultats — c'est la garde du front qui doit empêcher l'envoi.
   const postsBefore = tabCalls.filter((c) => c === 'POST /friends').length;
+  const searchingAnnounced = awaitAnnouncement('Searching…');
   await search.fill(user.pseudo);
-  const selfResult = page.getByRole('button', { name: new RegExp(user.pseudo) });
-  const selfShown = await selfResult
-    .first()
+  const socialRail = page.getByRole('complementary', { name: 'Social' });
+  const liveRegionsDuringSearch = await socialRail.locator('[role="status"]').count();
+  const searchingHeard = await searchingAnnounced;
+  const selfAdd = page.getByRole('button', { name: `You cannot add @${user.pseudo}` });
+  const selfShown = await selfAdd
     .waitFor({ timeout: 10000 })
     .then(() => true)
     .catch(() => false);
-  if (selfShown) await selfResult.first().click();
+  const selfDisabled = selfShown ? await selfAdd.isDisabled() : false;
   await page.waitForTimeout(600);
   const postsAfterSelf = tabCalls.filter((c) => c === 'POST /friends').length;
   step(
     'A2',
-    afterOneChar === searchesBefore && postsAfterSelf === postsBefore,
-    `recherche à 1 caractère : ${afterOneChar - searchesBefore} requête(s) (0 attendue — en dessous de 2 caractères le serveur rend 400) ; clic sur SOI-MÊME dans les résultats (retourné=${selfShown}, la route ne filtre pas l'appelant) : ${postsAfterSelf - postsBefore} envoi(s) (0 attendu — le serveur rendrait 400)`,
+    afterOneChar === searchesBefore &&
+      liveRegionsDuringSearch === 1 &&
+      searchingHeard &&
+      selfDisabled &&
+      postsAfterSelf === postsBefore,
+    `recherche à 1 caractère : ${afterOneChar - searchesBefore} requête(s) (0 attendue — en dessous de 2 caractères le serveur rend 400) ; pendant une recherche valide : régions live dans le rail=${liveRegionsDuringSearch} (1 attendue), « Searching… » annoncé=${searchingHeard} ; action Add sur SOI-MÊME affichée=${selfShown}, désactivée=${selfDisabled} : ${postsAfterSelf - postsBefore} envoi(s) (0 attendu — le serveur rendrait 400)`,
   );
 
   // -------------------------------------------- §3 envoyer une demande
   setPhase('3. envoyer une demande');
   await search.fill(target.pseudo);
-  const targetResult = page.getByRole('button', { name: new RegExp(target.pseudo) });
-  await targetResult.first().waitFor({ timeout: 10000 });
+  const targetAdd = page.getByRole('button', { name: `Add @${target.pseudo}` });
+  await targetAdd.waitFor({ timeout: 10000 });
   const sentAnnounced = awaitAnnouncement('Friend request sent');
-  await targetResult.first().click();
+  await targetAdd.click();
   const heard = await sentAnnounced;
   const appeared = await sentList
     .getByRole('listitem')
@@ -145,17 +153,20 @@ export async function run({
     .waitFor({ timeout: 10000 })
     .then(() => true)
     .catch(() => false);
-  // Recliquer la même personne : la garde « déjà demandé » doit tenir, toujours sans réseau.
+  // Une fois envoyée, l'action explique l'état et ne peut plus produire de second POST.
   const postsBeforeRepeat = tabCalls.filter((c) => c === 'POST /friends').length;
   await search.fill(target.pseudo);
-  await targetResult.first().waitFor({ timeout: 10000 });
-  await targetResult.first().click();
+  const pendingAction = page.getByRole('button', {
+    name: `Friend request to @${target.pseudo} is pending`,
+  });
+  await pendingAction.waitFor({ timeout: 10000 });
+  const pendingDisabled = await pendingAction.isDisabled();
   await page.waitForTimeout(600);
   const postsAfterRepeat = tabCalls.filter((c) => c === 'POST /friends').length;
   step(
     'A3',
-    appeared && heard && postsAfterRepeat === postsBeforeRepeat,
-    `demande apparue dans « Requests sent » sans rechargement=${appeared}, annonce lue=${heard}, second clic sur la même personne : ${postsAfterRepeat - postsBeforeRepeat} envoi(s) (0 attendu — le serveur rendrait 400 « déjà demandé »)`,
+    appeared && heard && pendingDisabled && postsAfterRepeat === postsBeforeRepeat,
+    `demande apparue dans « Requests sent » sans rechargement=${appeared}, annonce lue=${heard}, action devenue « Sent » et désactivée=${pendingDisabled} : ${postsAfterRepeat - postsBeforeRepeat} nouvel envoi (0 attendu)`,
   );
 
   // ---------- §4 🚨 L'AUTRE ACCEPTE : la ligne doit DISPARAÎTRE, onglet resté ouvert
@@ -271,6 +282,28 @@ export async function run({
     'A5',
     incomingShown && resultsVisible && acceptResponses.includes(200) && acceptedGone && nowFriend,
     `demande reçue apparue EN DIRECT sans rechargement=${incomingShown} ; résultats de recherche encore affichés au moment du clic=${resultsVisible} (c'est la condition du défaut) ; UN SEUL clic sur « Accepter » → réponses du serveur : [${acceptResponses.join(', ') || 'AUCUNE — le premier clic a été avalé'}], ligne partie=${acceptedGone}, la personne est dans l'onglet Amis=${nowFriend}`,
+  );
+
+  // -------------------------- §5b le résultat ouvre le profil, l'action reste séparée
+  setPhase('5b. ouvrir le profil depuis un résultat');
+  await addTab.click();
+  await search.fill(target.pseudo);
+  const friendAction = page.getByRole('button', {
+    name: `@${target.pseudo} is already your friend`,
+  });
+  await friendAction.waitFor({ timeout: 10000 });
+  const friendActionDisabled = await friendAction.isDisabled();
+  const profileResult = page.getByRole('link').filter({ hasText: target.pseudo }).first();
+  await profileResult.click();
+  const profileOpened = await page
+    .waitForURL(`**/players/${target.pseudo}`, { timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  const searchPreserved = (await search.inputValue()) === target.pseudo;
+  step(
+    'A5P',
+    friendActionDisabled && profileOpened && searchPreserved,
+    `état « Friends » séparé et désactivé=${friendActionDisabled}, clic sur l'identité → profil ouvert=${profileOpened}, recherche conservée=${searchPreserved}`,
   );
 
   // ------------------------------------------------------------ §6 filets transverses
