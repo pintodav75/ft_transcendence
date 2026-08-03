@@ -122,6 +122,62 @@ Tests re-vérifiés après tous les correctifs : `tsc` propre, Vitest **19/19** 
 
 ---
 
+## [SEED-DEMO] — la base de démonstration de la soutenance (03/08, aucune migration)
+
+`backend/src/scripts/seed-demo.ts`, lancé par **`npm run seed:demo`**. C'est le seul script à
+exécuter devant le correcteur, et il est **autonome** : il ne dépend ni de `seed:dev` ni de
+`seed:social`.
+
+**Ce qu'il produit** — 120 joueurs · 124 équipes · **les 9 ladders des 5 jeux remplis** (16 à
+20 équipes sur les 7 ladders d'équipe, 60 joueurs classés sur chacun des 2 ladders 1v1) ·
+80 matchs terminés avec Elo **réellement calculé** par `completeMatchWithElo` · 6 matchs en
+cours (2 créneaux ouverts, 1 score à confirmer, 2 litiges, 1 annulé) · 1 invitation d'équipe ·
+7 amis, 2 demandes reçues, 1 envoyée, 1 blocage, 13 messages, 6 notifications.
+
+**Les 6 comptes connectables** (`admin`, `correcteur`, `david`, `walid`, `william`, `adrien`,
+tous en `@demo.local`) partagent le mot de passe **`Demo1234!`**. 🔑 Il **respecte la politique
+serveur** (8 caractères, majuscule, minuscule, chiffre, spécial) — un `admin/admin` est rejeté
+par l'API elle-même, ce n'est pas une option. Les 114 figurants n'ont **pas** de mot de passe.
+
+### Les 5 décisions qui tiennent le script
+
+1. 🚨 **L'admin n'appartient à AUCUNE équipe.** Un arbitre également partie prenante du litige
+   qu'il arbitre voit **deux zones de saisie au lieu d'une** et l'écran devient illisible en
+   démonstration. Son litige oppose deux équipes de figurants sur LoL. Le script exclut son
+   pseudo du vivier de tirage, et une requête de contrôle le vérifie (0 litige impliquant
+   l'admin).
+2. 🚨 **`team_members_user_ladder_unique` impose un joueur dans UNE seule équipe par ladder.**
+   C'est cette contrainte qui plafonne tout : un ladder 5v5 à 16 équipes consomme **80 joueurs
+   distincts**. Elle impose aussi que les 3 équipes du correcteur soient sur **3 ladders
+   distincts** — et on en a profité pour prendre 3 **formats** différents (5v5, 2v2, 3v3), ce
+   qui montre au passage que le cycle n'est pas écrit en dur pour le 5v5.
+3. 🔑 **Les comptes nommés sont EXCLUS du tirage aléatoire des figurants.** Première version
+   sans cette exclusion : ils étaient repêchés comme capitaines sur d'autres ladders, le
+   correcteur se retrouvait capitaine de **5** équipes, et le récapitulatif affiché en fin de
+   seed devenait faux. `FORCED_CAPTAINS` est désormais la **seule** source de leurs équipes.
+4. 🔑 **Tous les tirages sont déterministes** (mulberry32 à graine fixe). Sans ça, aucune
+   consigne de démonstration écrite à l'avance (« ouvre l'équipe X ») ne survit à une relance.
+5. 🔑 **Les matchs terminés apparient les équipes DEUX À DEUX sans jamais en réutiliser une.**
+   C'est ce qui garantit qu'aucun ne chevauche un autre (§5.2, fenêtres strictes) sans avoir à
+   recalculer les conflits. Les duels solo suivent la même règle.
+
+**Détails de rendu** : l'Elo porte un **bruit déterministe** (une suite arithmétique parfaite
+saute aux yeux dès qu'on fait défiler un classement) ; victoires et défaites sont
+proportionnelles au rang (plus de dernier à 0 victoire) ; pseudos et noms d'équipe sont
+**croisés depuis deux pools** (152 pseudos, 192 noms) plutôt que listés un par un.
+
+⚠️ **Il fait table rase** : matchs, équipes, classements, amitiés, messages, blocages,
+notifications, comptes externes, et les comptes `@dev.local` / `@demo.local` / `audit*`. Un
+compte réel créé à la main n'est jamais touché. Conséquence directe : **`npm run audit`
+échoue tant que la base est en mode démo** (les scénarios se connectent en `alice`, qui
+n'existe plus). Retour à la base de travail : `npm run seed:dev` puis `npm run seed:social`.
+
+⚠️ **Pas d'avatars ni de logos d'équipe** — décision de David : tout reste en initiales, on ne
+branche pas MinIO pour un seed. Le correcteur qui veut éprouver l'envoi de fichier le fait sur
+son propre compte.
+
+---
+
 ## [F-DISPUTE] — extension de `GET /disputes/{id}` (31/07, commit `fbcc356`, merge `f6345c8`, aucune migration)
 
 Écrite **avant** de lancer le ticket front qui la consomme. La carte annonçait « front pur, zéro back » : **c'était faux**, vérifié dans le handler.

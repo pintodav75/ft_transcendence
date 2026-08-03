@@ -179,6 +179,7 @@ docker compose down                     # arrêter (garde les données)
 docker compose down -v                  # supprime cert/node_modules ; garde ./data
 docker compose exec backend npm run seed:dev     # fixtures JEU (joueurs, équipes, 8 matchs de démo)
 docker compose exec backend npm run seed:social  # fixtures RAIL SOCIAL sur alice@dev.local (amis, demandes, blocage, messages, notifs) — exige seed:dev
+docker compose exec backend npm run seed:demo    # 🎓 fixtures SOUTENANCE : 120 joueurs, 124 équipes, les 9 ladders remplis, comptes nommés (Demo1234!). 🚨 ÉCRASE tout l'état de jeu et les comptes @dev.local/@demo.local/audit* → `npm run audit` rougit ensuite (revenir par seed:dev + seed:social). → docs/backend.md
 cd backend && npm test                  # Vitest (helpers purs)
 cd backend/tests && python3 run_all.py  # e2e (vraie base de dev)
 ```
