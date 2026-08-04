@@ -764,10 +764,14 @@ async function main() {
 
   // ------------------------------------------------------------------------- 10. social
   const me = uid('correcteur');
-  const FRIENDS = ['david', 'walid', 'william', 'adrien', FILLERS[0]!, FILLERS[1]!, FILLERS[2]!];
-  const INCOMING = [FILLERS[3]!, FILLERS[4]!];
-  const OUTGOING = [FILLERS[5]!];
-  const BLOCKED = [FILLERS[6]!];
+  // Volumes volontairement supérieurs à la hauteur du rail : la soutenance doit aussi
+  // permettre de vérifier son scroll, pas seulement l'état nominal de chaque ligne.
+  // Les tranches sont disjointes : une même personne ne peut pas être simultanément amie,
+  // en attente et bloquée.
+  const FRIENDS = ['david', 'walid', 'william', 'adrien', ...FILLERS.slice(0, 32)];
+  const INCOMING = FILLERS.slice(32, 42);
+  const OUTGOING = FILLERS.slice(42, 52);
+  const BLOCKED = FILLERS.slice(52, 58);
 
   await db.insert(friendshipsTable).values([
     ...FRIENDS.map((pseudo, i) => ({
@@ -817,6 +821,21 @@ async function main() {
     { with: 'walid', from: 'correcteur', content: 'merci, c’était serré' },
     { with: 'william', from: 'william', content: 'tu montes en 2v2 ce week-end ?' },
     { with: 'adrien', from: 'adrien', content: "je t'ai envoyé une invitation pour l'équipe" },
+    // Une conversation de deux messages par ami figurant : la liste « Messages » dépasse
+    // largement la hauteur du rail, tandis que la conversation détaillée avec David garde
+    // son historique réaliste.
+    ...FRIENDS.slice(4).flatMap((pseudo, i) => [
+      {
+        with: pseudo,
+        from: pseudo,
+        content: `message de test ${i + 1} pour vérifier le défilement du rail`,
+      },
+      {
+        with: pseudo,
+        from: 'correcteur',
+        content: `réponse de test ${i + 1}`,
+      },
+    ]),
   ];
   await db.insert(messagesTable).values(
     CHAT.map((m, i) => {
@@ -910,7 +929,9 @@ async function main() {
   console.log('\n🌱 Base de démonstration prête.\n');
   console.log(`   ${dbUsers.length} joueurs · ${totalTeams} équipes · ${allLadders.length} ladders remplis`);
   console.log(`   ${completedCount} matchs terminés · 6 matchs en cours · 2 litiges ouverts`);
-  console.log(`   ${notifications.length} notifications dont ${unread} non lues · ${CHAT.length} messages`);
+  console.log(
+    `   ${notifications.length} notifications dont ${unread} non lues · ${CHAT.length} messages dans ${new Set(CHAT.map((message) => message.with)).size} conversations`,
+  );
 
   console.log(`\n🔑 Comptes (mot de passe : ${DEMO_PASSWORD})\n`);
   console.log(`   correcteur@${DOMAIN}   LE COMPTE À UTILISER — capitaine de 3 équipes`);
@@ -926,7 +947,9 @@ async function main() {
   console.log(`   Confirmer un score      ${thirdCs2.name} a déjà soumis le sien (CS2 5v5)`);
   console.log(`   Suivre un litige        contre ${fourthCs2.name} — dossier ${live.disputeId}`);
   console.log(`   Répondre à 1 invitation  d'${adrienTeam.name} (CS2 2v2)`);
-  console.log(`   Répondre à 2 demandes d'ami, débloquer 1 compte, lire 4 conversations`);
+  console.log(
+    `   Parcourir ${FRIENDS.length} amis, répondre à ${INCOMING.length} demandes reçues, annuler ${OUTGOING.length} demandes envoyées, débloquer ${BLOCKED.length} comptes`,
+  );
   console.log(`   Il est aussi classé en solo sur Chess 1v1 et Rocket League 1v1\n`);
 
   process.exit(0);

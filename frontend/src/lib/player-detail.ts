@@ -4,6 +4,7 @@ import { apiFetch } from '@/lib/api';
 import { retryServerErrorsOnly } from '@/lib/ladders';
 
 import type { components, paths } from '@/lib/api-types.gen';
+import type { QueryClient } from '@tanstack/react-query';
 
 export type PublicUser = components['schemas']['PublicUser'];
 export type Friendship = components['schemas']['Friendship'];
@@ -14,6 +15,16 @@ export type PlayerTeam = components['schemas']['PlayerTeam'];
 
 type PublicUserResponse =
   paths['/users/{pseudo}']['get']['responses'][200]['content']['application/json'];
+
+/**
+ * Client-only state attached to an already cached profile.
+ *
+ * Blocking makes the profile endpoint return 404, so refetching cannot tell an open page why
+ * it disappeared. The successful block mutation marks the cached response instead. A later
+ * successful refetch after unblocking replaces the whole response and therefore clears this
+ * marker without a second store or any manual cleanup.
+ */
+export type PlayerProfile = PublicUserResponse & { __clientBlocked?: true };
 
 export const ViewerRole = {
   Guest: 0,
@@ -77,13 +88,29 @@ export function formatFriendsSince(friendship: Friendship | null | undefined) {
 }
 
 /**
+ * Prefix shared by every cached public profile.
+ *
+ * Friendship mutations can be triggered from the profile itself or from the social rail that
+ * stays mounted beside it. Invalidating this prefix is what keeps an already-open profile in
+ * sync when the action came from the rail.
+ */
+export const PLAYER_PROFILES_KEY = ['player'] as const;
+
+/**
  * Cache key of one public profile.
  *
  * Lowered: two spellings of one pseudo must not
  * become two cache entries holding the same user.
  */
 export function playerQueryKey(pseudo: string) {
-  return ['player', pseudo.toLowerCase()] as const;
+  return [...PLAYER_PROFILES_KEY, pseudo.toLowerCase()] as const;
+}
+
+/** Marks whichever cached profile belongs to `userId` as blocked, without issuing a GET. */
+export function markPlayerProfileBlocked(queryClient: QueryClient, userId: string) {
+  queryClient.setQueriesData<PlayerProfile>({ queryKey: PLAYER_PROFILES_KEY }, (profile) =>
+    profile?.user.id === userId ? { ...profile, __clientBlocked: true } : profile,
+  );
 }
 
 /**
@@ -99,7 +126,7 @@ export function playerQueryKey(pseudo: string) {
 export function usePlayer(pseudo: string) {
   return useQuery({
     queryKey: playerQueryKey(pseudo),
-    queryFn: () => apiFetch<PublicUserResponse>(`/users/${encodeURIComponent(pseudo)}`),
+    queryFn: () => apiFetch<PlayerProfile>(`/users/${encodeURIComponent(pseudo)}`),
     retry: retryServerErrorsOnly,
   });
 }

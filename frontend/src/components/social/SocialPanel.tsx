@@ -439,7 +439,10 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
       // disparaissait de l'écran, exactement le défaut corrigé deux fois ailleurs sur ce rail
       // (le garage de focus `sr-only` de FS-1, le retour à la cloche de FS-2).
       // `focus-ring` n'agit qu'au `focus-visible` : un clic souris ne dessine rien.
-      className: 'min-h-0 flex-1 overflow-y-auto focus-ring focus-visible:outline-offset-[-2px]',
+      // `overscroll-contain` empêche la molette de continuer sur la page quand le panneau
+      // atteint sa première ou sa dernière ligne : le rail garde son propre défilement.
+      className:
+        'min-h-0 flex-1 overflow-y-auto overscroll-contain focus-ring focus-visible:outline-offset-[-2px]',
     }
   }
 

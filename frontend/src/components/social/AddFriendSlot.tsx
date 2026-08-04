@@ -101,27 +101,6 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
 
   /** The answer to the last click on a search hit — sent, auto-accepted, or refused. */
   const [notice, setNotice] = useState<Notice | null>(null);
-  /**
-   * People I have just sent a request to, this session.
-   *
-   * 🚨 THE CACHE IS NOT FAST ENOUGH ON ITS OWN. `useSendFriendRequest` invalidates the sent list,
-   * but the refetch is a round trip: between the success and its landing, the very same hit is
-   * still on screen and a second click would fire a second `POST /friends` — answered 400
-   * "already requested", i.e. a red line in the console. This closes that window.
-   */
-  const [justRequestedIds, setJustRequestedIds] = useState<string[]>([]);
-  /**
-   * People I became friends with in this session WITHOUT accepting anything — the auto-accept
-   * that answers a request they had already sent me (see `SendRequestOutcome`).
-   *
-   * 🚨 A SEPARATE LIST FROM THE ONE ABOVE, and that is the whole point: the two outcomes of one
-   * click need two different sentences. Recording an auto-accept as a "request sent" told the
-   * user "you already sent them a friend request" about two people who had just become friends.
-   * It still has to block the second click — a second `POST /friends` is answered 400 "already
-   * friends", i.e. the red console line this screen exists to avoid — hence a list rather than
-   * nothing at all, until the friends list refetch lands.
-   */
-  const [justFriendedIds, setJustFriendedIds] = useState<string[]>([]);
 
   /**
    * Landing points for the focus when a confirmed action destroys the row that carried it.
@@ -179,12 +158,8 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
   const blockedPlayers = blocks.data?.blocks ?? [];
 
   const friendIds = useMemo(
-    () =>
-      new Set([
-        ...justFriendedIds,
-        ...(friends.data?.friends ?? []).map((friend) => friend.id),
-      ]),
-    [friends.data, justFriendedIds],
+    () => new Set((friends.data?.friends ?? []).map((friend) => friend.id)),
+    [friends.data],
   );
   /**
    * Everyone who already has a request from me — server-side, or since the last refetch.
@@ -194,13 +169,13 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
    * and defeat the memo entirely (eslint's `exhaustive-deps` says exactly this).
    */
   const alreadyRequestedIds = useMemo(() => {
-    const ids = new Set(justRequestedIds);
+    const ids = new Set<string>();
     for (const request of sent.data?.requests ?? []) {
       const person = counterpartOf(request);
       if (person) ids.add(person.id);
     }
     return ids;
-  }, [justRequestedIds, sent.data]);
+  }, [sent.data]);
 
   /**
    * The FIRST list failure, spoken once. The three `FormMessage`s below carry
@@ -285,14 +260,11 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
     send.mutate(id, {
       onSuccess: (outcome) => {
         /**
-         * 🚨 WHICH LIST THE ID GOES IN DEPENDS ON WHAT THE SERVER ACTUALLY DID. Filing an
-         * auto-accept under "requests I sent" made the next click answer "you already sent them
-         * a friend request" about somebody who had just become a friend — a false sentence, over
-         * a request that never existed. Both lists still block that second click; they simply
-         * say the truth about it. Each is emptied by its own list refetch landing.
+         * The mutation does not become successful until it has refreshed the authoritative
+         * sent/friends list, and `SearchBar` stays disabled while that happens. Do not keep a
+         * second, session-long copy of the id here: blocking deletes the friendship row, and a
+         * stale local id would keep claiming "already requested" after an unblock.
          */
-        if (outcome === 'auto-accepted') setJustFriendedIds((current) => [...current, id]);
-        else setJustRequestedIds((current) => [...current, id]);
         /**
          * 🚨 THE TWO OUTCOMES OF ONE CLICK. If @pseudo had already sent me a request, the server
          * accepted it there and then (200 + `accepted`) instead of creating a new one — so the
@@ -309,6 +281,47 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
       },
       onError: (error) => report(sendFriendRequestErrorMessage(error, pseudo), 'danger'),
     });
+  }
+
+  function renderSearchAction(result: SearchResult) {
+    if (result.type !== 'user') return null;
+
+    const isSelf = result.id === meId;
+    const isFriend = friendIds.has(result.id);
+    const isRequested = alreadyRequestedIds.has(result.id);
+    const busy = send.isPending || friends.isPending || sent.isPending;
+
+    const visibleLabel = isSelf ? 'You' : isFriend ? 'Friends' : isRequested ? 'Sent' : 'Add';
+    const accessibleLabel = isSelf
+      ? `You cannot add @${result.pseudo}`
+      : isFriend
+        ? `@${result.pseudo} is already your friend`
+        : isRequested
+          ? `Friend request to @${result.pseudo} is pending`
+          : `Add @${result.pseudo}`;
+
+    return (
+      <InlineButton
+        disabled={busy || isSelf || isFriend || isRequested}
+        onClick={() => handleSelect(result)}
+        aria-label={accessibleLabel}
+      >
+        {visibleLabel}
+      </InlineButton>
+    );
+  }
+
+  function renderSearchResult(result: SearchResult) {
+    if (result.type !== 'user') return null;
+
+    return (
+      <PersonRow
+        person={result}
+        backFrom={backFrom}
+        onNavigate={onNavigate}
+        actions={renderSearchAction(result)}
+      />
+    );
   }
 
   function handleAccept(request: FriendRequest, pseudo: string) {
@@ -335,9 +348,6 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
     cancel.mutate(request.id, {
       onSuccess: () => {
         sentHeadingRef.current?.focus();
-        // Dropped from the local guard as well, otherwise searching for the same person again
-        // would answer "you already sent them a request" about a request that no longer exists.
-        setJustRequestedIds((current) => current.filter((id) => id !== counterpartOf(request)?.id));
         report(`Friend request to @${pseudo} cancelled.`);
       },
       onError: (error) => report(cancelFriendRequestErrorMessage(error), 'danger'),
@@ -361,7 +371,7 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
             nothing written says which tab is open. */}
         <SectionTitle>Add friend</SectionTitle>
         <p className="text-xs text-text-muted">
-          Search a player by pseudo, then pick them to send a friend request.
+          Search a player by pseudo. Open their profile or use Add to send a friend request.
         </p>
 
         {/* 🔑 THE SEARCH IS `SearchBar`, NOT A SECOND ONE. It already carries everything this
@@ -371,16 +381,16 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
             `type="user"` also means blocked accounts — in BOTH directions — never appear, which
             is what keeps "this player is not available" from ever revealing a block.
 
-            ⚠️ `disabled` covers three things, all of them "we do not know enough to click yet":
-            a send already in flight, and the two lists the guards in `handleSelect` read. */}
+            The identity remains navigable while relation data loads; only the separate Add
+            action is disabled until the two lists used by `handleSelect` are known. */}
         <SearchBar
           type="user"
           limit={SEARCH_RESULT_LIMIT}
           panel="inline"
           placeholder="Search a player by pseudo…"
           label="Search a player to add as a friend"
-          disabled={send.isPending || friends.isPending || sent.isPending}
-          onSelect={handleSelect}
+          announce={announce}
+          renderResult={renderSearchResult}
         />
 
         {notice &&

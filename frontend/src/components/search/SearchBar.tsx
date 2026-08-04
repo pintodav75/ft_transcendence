@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { ApiError, apiFetch } from '@/lib/api';
 import { useLadders } from '@/lib/games';
 
+import { Fragment, type ReactNode } from 'react';
 import type { paths } from '@/lib/api-types.gen';
 
 // PREFIX search over players and teams, backed by GET /search.
@@ -24,6 +25,11 @@ type SearchBarProps = {
   small?: boolean;
   /** Appelé au clic sur une ligne. Par défaut : navigation vers la fiche. */
   onSelect?: (result: SearchResult) => void;
+  /**
+   * Rendu optionnel d'une ligne complète. Sans cette option, le bouton historique ci-dessous
+   * reste strictement inchangé.
+   */
+  renderResult?: (result: SearchResult) => ReactNode;
   placeholder?: string;
   /** `aria-label` du champ. Par défaut le placeholder. */
   label?: string;
@@ -37,6 +43,8 @@ type SearchBarProps = {
    * avant que `excludeIds` ait eu le temps de se rafraîchir.
    */
   disabled?: boolean;
+  /** Publie le statut dans la région live permanente du parent, quand il en possède une. */
+  announce?: (message: string) => void;
   /**
    * `overlay` fait flotter le panneau au-dessus de la page (LeftRail : la nav en dessous ne
    * doit pas sauter) ; `inline` le pousse dans le flux (onglet Manage : il vit dans un
@@ -52,6 +60,11 @@ const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 50;
 const RESULT_LIMIT = 10;
 
+function isSearchableQuery(value: string): boolean {
+  const length = value.trim().length;
+  return length >= MIN_QUERY_LENGTH && length <= MAX_QUERY_LENGTH;
+}
+
 function defaultPlaceholder(type: SearchBarProps['type']): string {
   if (type === 'user') return 'Search a player by pseudo…';
   if (type === 'team') return 'Search a team by name…';
@@ -63,15 +76,21 @@ export function SearchBar({
   limit = RESULT_LIMIT,
   small = false,
   onSelect,
+  renderResult,
   placeholder,
   label,
   excludeIds,
   disabled = false,
+  announce,
   panel = 'overlay',
 }: SearchBarProps) {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  // `null` = aucune recherche exploitable n'a encore abouti ; `[]` = le serveur a bien
+  // répondu, mais sans résultat. Cette distinction permet de garder « No result found »
+  // pendant la vérification de la saisie suivante, au lieu de le faire clignoter avec
+  // « Searching… ».
+  const [results, setResults] = useState<SearchResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   // Fermeture EXPLICITE du panneau. Elle ne peut pas se déduire du seul texte saisi : sinon
@@ -122,7 +141,7 @@ export function SearchBar({
       const trimmed = query.trim();
 
       if (trimmed.length < MIN_QUERY_LENGTH || trimmed.length > MAX_QUERY_LENGTH) {
-        setResults([]);
+        setResults(null);
         setError(undefined);
         setLoading(false);
         return;
@@ -141,7 +160,7 @@ export function SearchBar({
         .catch((searchError: unknown) => {
           if (controller.signal.aborted || requestId !== latestRequest.current) return;
           setError(searchError instanceof ApiError ? searchError.message : 'Search failed.');
-          setResults([]);
+          setResults(null);
         })
         .finally(() => {
           if (requestId === latestRequest.current) setLoading(false);
@@ -158,10 +177,19 @@ export function SearchBar({
 
   const trimmed = query.trim();
   const tooShort = trimmed.length > 0 && trimmed.length < MIN_QUERY_LENGTH;
+  const hasCompletedSearch = results !== null;
+  const settledResults = results ?? [];
   const visible = excludeIds
-    ? results.filter((result) => !excludeIds.includes(result.id))
-    : results;
+    ? settledResults.filter((result) => !excludeIds.includes(result.id))
+    : settledResults;
+  const hasVisibleResults = visible.length > 0;
   const showPanel = trimmed.length > 0 && !dismissed;
+
+  // The social rail already owns one permanent live region. It passes this callback so the
+  // search can reuse it; standalone consumers instead use the permanent region rendered below.
+  useEffect(() => {
+    if (loading && isSearchableQuery(query)) announce?.('Searching…');
+  }, [announce, loading, query]);
 
   // Fermeture au clic extérieur.
   //
@@ -200,6 +228,12 @@ export function SearchBar({
 
   return (
     <div ref={containerRef} className="relative w-full">
+      {!announce && (
+        <p role="status" className="sr-only">
+          {loading && isSearchableQuery(query) ? 'Searching…' : ''}
+        </p>
+      )}
+
       <Input
         // Dans le rail, le champ générique (`h-12`, 48 px) était PLUS HAUT que les items de
         // nav (~42 px) : il écrasait visuellement la navigation qu'il surplombe. La maquette
@@ -210,7 +244,13 @@ export function SearchBar({
         type="search"
         value={query}
         onChange={(event) => {
-          setQuery(event.target.value);
+          const nextQuery = event.target.value;
+          setQuery(nextQuery);
+          // `loading` était auparavant activé seulement APRÈS les 300 ms de débounce. Quand
+          // la recherche précédente n'avait rien trouvé, « No result found » restait donc
+          // affiché sous la nouvelle saisie jusqu'au départ de la requête. Le mettre à jour
+          // dans le même rendu que `query` évite cet état mensonger, même pendant une frame.
+          setLoading(isSearchableQuery(nextQuery));
           // On vient peut-être de fermer au clic extérieur : retaper doit rouvrir.
           setDismissed(false);
         }}
@@ -254,7 +294,24 @@ export function SearchBar({
             </p>
           )}
 
-          {!tooShort && loading && <p className="px-3 py-2 text-sm text-text-muted">Searching…</p>}
+          {/*
+            Une nouvelle saisie conserve volontairement les résultats précédents pendant le
+            débounce et la requête. Les remplacer par cette seule ligne faisait s'effondrer le
+            panneau `inline`, puis remonter et redescendre tout le rail social en une frame.
+
+            Quand un résultat précédent existe déjà — liste ou « No result found » — le statut
+            reste annoncé aux technologies d'assistance mais ne prend aucune place visuelle.
+            Pour la toute première recherche, il reste visible afin que le panneau ne paraisse
+            pas vide pendant l'aller-retour réseau.
+          */}
+          {!tooShort && loading && !hasCompletedSearch && (
+            <p
+              className="px-3 py-2 text-sm text-text-muted"
+              aria-hidden="true"
+            >
+              Searching…
+            </p>
+          )}
 
           {!tooShort && !loading && error && (
             <p className="px-3 py-2 text-sm text-arena-red" role="alert">
@@ -262,67 +319,78 @@ export function SearchBar({
             </p>
           )}
 
-          {!tooShort && !loading && !error && visible.length === 0 && (
+          {!tooShort && !error && hasCompletedSearch && !hasVisibleResults && (
             <p className="px-3 py-2 text-sm text-text-muted">No result found.</p>
           )}
 
-          {!tooShort && !loading && !error && visible.length > 0 && (
+          {!tooShort && !error && hasVisibleResults && (
             // role="list" explicite : `list-style: none` (preflight Tailwind) fait perdre à
             // Safari la sémantique de liste dans l'arbre d'accessibilité.
             <ul role="list" className="flex flex-col gap-1">
-              {visible.map((result) => (
-                <li key={`${result.type}-${result.id}`}>
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => handleSelect(result)}
-                    className={
-                      small ? 'w-full justify-start gap-3 px-2' : 'w-full justify-start gap-3 px-3'
-                    }
-                  >
-                    {!small && (
-                      <Avatar
-                        src={
-                          (result.type === 'user' ? result.avatarUrl : result.logoUrl) ?? undefined
-                        }
-                        fallback={(result.type === 'user' ? result.pseudo : result.name)
-                          .slice(0, 2)
-                          .toUpperCase()}
-                        className="size-8"
-                      />
-                    )}
+              {visible.map((result) => {
+                const key = `${result.type}-${result.id}`;
 
-                    {/* `normal-case` annule le `uppercase` de `buttonClasses` : un pseudo est
-                        un identifiant sensible à la casse, et afficher « @AUDIT185031 » pour
-                        `audit185031` induit en erreur au moment précis où l'utilisateur doit
-                        reconnaître la bonne personne. */}
-                    <span className="min-w-0 normal-case">
-                      <span className="block truncate text-sm">
-                        {result.type === 'user'
-                          ? (result.displayName ?? result.pseudo)
-                          : result.name}
-                      </span>
-                      <span className="block truncate text-xs text-text-muted">
-                        {result.type === 'user'
-                          ? `@${result.pseudo}`
-                          : (() => {
-                              const info = gameByLadder.get(result.ladderId);
-                              return info ? `${info.game.toUpperCase()} · ${info.format}` : '';
-                            })()}
-                      </span>
-                    </span>
+                if (renderResult) {
+                  return <Fragment key={key}>{renderResult(result)}</Fragment>;
+                }
 
-                    {/* Sans `type`, les deux sortes de résultats se mélangent : la ligne doit
-                        dire laquelle on s'apprête à ouvrir. */}
-                    {!type && (
-                      <span className="ml-auto label-caps text-xs text-action-primary-card-foreground">
-                        {result.type === 'user' ? 'PLAYER' : 'TEAM'}
+                return (
+                  <li key={key}>
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => handleSelect(result)}
+                      className={
+                        small
+                          ? 'w-full justify-start gap-3 px-2'
+                          : 'w-full justify-start gap-3 px-3'
+                      }
+                    >
+                      {!small && (
+                        <Avatar
+                          src={
+                            (result.type === 'user' ? result.avatarUrl : result.logoUrl) ??
+                            undefined
+                          }
+                          fallback={(result.type === 'user' ? result.pseudo : result.name)
+                            .slice(0, 2)
+                            .toUpperCase()}
+                          className="size-8"
+                        />
+                      )}
+
+                      {/* `normal-case` annule le `uppercase` de `buttonClasses` : un pseudo est
+                          un identifiant sensible à la casse, et afficher « @AUDIT185031 » pour
+                          `audit185031` induit en erreur au moment précis où l'utilisateur doit
+                          reconnaître la bonne personne. */}
+                      <span className="min-w-0 normal-case">
+                        <span className="block truncate text-sm">
+                          {result.type === 'user'
+                            ? (result.displayName ?? result.pseudo)
+                            : result.name}
+                        </span>
+                        <span className="block truncate text-xs text-text-muted">
+                          {result.type === 'user'
+                            ? `@${result.pseudo}`
+                            : (() => {
+                                const info = gameByLadder.get(result.ladderId);
+                                return info ? `${info.game.toUpperCase()} · ${info.format}` : '';
+                              })()}
+                        </span>
                       </span>
-                    )}
-                  </Button>
-                </li>
-              ))}
+
+                      {/* Sans `type`, les deux sortes de résultats se mélangent : la ligne doit
+                          dire laquelle on s'apprête à ouvrir. */}
+                      {!type && (
+                        <span className="ml-auto label-caps text-xs text-action-primary-card-foreground">
+                          {result.type === 'user' ? 'PLAYER' : 'TEAM'}
+                        </span>
+                      )}
+                    </Button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
