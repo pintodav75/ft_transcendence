@@ -469,12 +469,12 @@ export function SocialPanel({ onClose }: SocialPanelProps) {
         {announcement}
       </p>
 
-      <div className="relative flex items-center gap-3 border-b border-border-subtle p-3">
+      <div className="relative flex items-center justify-between gap-3 border-b border-border-subtle p-3">
         <Link
           to="/profile"
           onClick={onClose}
           aria-label="Open my profile"
-          className="group focus-ring -m-1 flex min-w-0 flex-1 items-center gap-3 rounded-control p-1 transition hover:bg-surface-card-strong"
+          className="group focus-ring -m-1 flex w-40 min-w-0 shrink-0 items-center gap-2 rounded-control p-1 transition hover:bg-surface-card-strong"
         >
           <div className="relative shrink-0">
             <Avatar
