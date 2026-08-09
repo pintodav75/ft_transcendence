@@ -4498,6 +4498,8 @@ export interface paths {
                     limit?: number;
                     /** @description Décalage dans la liste fusionnée et triée. */
                     offset?: number;
+                    /** @description Sens du tri **alphabétique** (`asc` = A→Z, `desc` = Z→A). Le **critère** n'est pas paramétrable : c'est le nom (`pseudo` ou `name`), seule donnée que les deux sources ont en commun. S'applique à la liste **fusionnée**, avant découpe par `limit`/`offset`. Les ex æquo restent départagés par `type` puis `id` dans les deux sens — l'ordre reste **total**, donc la pagination reste stable. */
+                    order?: "asc" | "desc";
                 };
                 header?: never;
                 path?: never;

@@ -13,6 +13,10 @@ const querySearchSchema = z.object({
   // ("10"), jamais en nombre. Les défauts reproduisent le comportement d'avant.
   limit: z.coerce.number().int().min(1).max(50).default(10),
   offset: z.coerce.number().int().min(0).default(0),
+  // TRI : sens du classement alphabétique. Le critère, lui, n'est PAS négociable — c'est le
+  // nom (`sortKey`), seule colonne que les deux sources ont en commun. Le défaut `asc`
+  // reproduit le comportement d'avant, donc aucun appelant existant ne change de résultat.
+  order: z.enum(['asc', 'desc']).default('asc'),
 });
 
 // Union discriminée : le champ `type` permet au consommateur (le front) de distinguer
@@ -58,7 +62,7 @@ function escapeLike(input: string): string {
 export const searchRoutes: FastifyPluginAsync = async (server) => {
   server.get('/', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
-      const { q, type, limit, offset } = querySearchSchema.parse(request.query);
+      const { q, type, limit, offset, order } = querySearchSchema.parse(request.query);
       // ⚠️ La mise en minuscules est faite par POSTGRES des DEUX côtés, jamais par JS.
       // `toLowerCase()` en JS et `lower()` en SQL ne donnent pas le même résultat sur
       // tout l'Unicode (review : JS transforme 'İ' en 'i' + point combinant, Postgres
@@ -120,7 +124,20 @@ export const searchRoutes: FastifyPluginAsync = async (server) => {
       // qui porte sur un UNION). `kind` puis `id` départagent les ex æquo : sans cet
       // ordre TOTAL, deux lignes de même nom pourraient permuter entre deux appels et
       // la pagination par offset sauterait ou dupliquerait des résultats.
-      const order = sql`sort_key asc, kind asc, id asc`;
+      //
+      // 🚨 DEUX BRANCHES LITTÉRALES, PAS UNE INTERPOLATION. Un `sql\`sort_key ${dir}\``
+      // marcherait, mais une direction de tri ne peut PAS être un paramètre lié : elle
+      // finit forcément concaténée dans le texte SQL. Écrire les deux ORDER BY en toutes
+      // lettres rend l'injection structurellement impossible, sans rien devoir à la
+      // validation Zod en amont.
+      //
+      // ⚠️ Seul `sort_key` s'inverse : les départageurs restent `asc` dans les deux sens.
+      // Ils ne servent qu'à rendre l'ordre TOTAL (donc la pagination stable) ; les inverser
+      // aussi serait tout aussi valable et n'apporterait rien de visible.
+      const orderBy =
+        order === 'desc'
+          ? sql`sort_key desc, kind asc, id asc`
+          : sql`sort_key asc, kind asc, id asc`;
       // On demande une ligne de plus que la page : sa seule présence dit « il reste
       // quelque chose après », sans avoir à faire un COUNT global.
       const fetchSize = limit + 1;
@@ -128,13 +145,13 @@ export const searchRoutes: FastifyPluginAsync = async (server) => {
       let rows: SearchRow[];
       if (wantUsers && wantTeams) {
         rows = await unionAll(usersSource, teamsSource)
-          .orderBy(order)
+          .orderBy(orderBy)
           .limit(fetchSize)
           .offset(offset);
       } else if (wantUsers) {
-        rows = await usersSource.orderBy(order).limit(fetchSize).offset(offset);
+        rows = await usersSource.orderBy(orderBy).limit(fetchSize).offset(offset);
       } else {
-        rows = await teamsSource.orderBy(order).limit(fetchSize).offset(offset);
+        rows = await teamsSource.orderBy(orderBy).limit(fetchSize).offset(offset);
       }
 
       const hasMore = rows.length > limit;

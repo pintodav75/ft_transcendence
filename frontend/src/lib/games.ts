@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { gameOrder } from '@/data/games';
@@ -100,6 +101,27 @@ export function useLadders({ enabled = true }: { enabled?: boolean } = {}) {
     staleTime: REFERENCE_STALE_TIME,
     enabled,
   });
+}
+
+export type GameByLadder = Map<string, { game: string; format: string }>;
+
+/*
+`ladderId` → le jeu et le format de ce ladder.
+
+`GET /search` ne rend qu'un `ladderId` sur un résultat d'équipe, pas son jeu.
+On le reconstruit client side via useLadders (cached)
+
+appelé une fois par écran
+*/
+export function useGameByLadder({ enabled = true }: { enabled?: boolean } = {}) {
+  const { data } = useLadders({ enabled });
+  return useMemo(() => {
+    const map: GameByLadder = new Map();
+    for (const ladder of data?.ladders ?? []) {
+      map.set(ladder.id, { game: ladder.gameId, format: ladder.format });
+    }
+    return map;
+  }, [data]);
 }
 
 /**

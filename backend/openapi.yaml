@@ -5052,6 +5052,16 @@ paths:
           required: false
           description: Décalage dans la liste fusionnée et triée.
           schema: { type: integer, minimum: 0, default: 0 }
+        - name: order
+          in: query
+          required: false
+          description: >
+            Sens du tri **alphabétique** (`asc` = A→Z, `desc` = Z→A). Le **critère** n'est
+            pas paramétrable : c'est le nom (`pseudo` ou `name`), seule donnée que les deux
+            sources ont en commun. S'applique à la liste **fusionnée**, avant découpe par
+            `limit`/`offset`. Les ex æquo restent départagés par `type` puis `id` dans les
+            deux sens — l'ordre reste **total**, donc la pagination reste stable.
+          schema: { type: string, enum: [asc, desc], default: asc }
       responses:
         '200':
           description: Résultats (liste vide si aucun match)
