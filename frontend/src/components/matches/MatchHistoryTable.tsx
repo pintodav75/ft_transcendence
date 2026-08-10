@@ -1,42 +1,30 @@
-import { MatchCard } from '@/components/matches/MatchCard';
-import { MatchRow } from '@/components/matches/MatchRow';
-import { useMediaQuery } from '@/hooks/use-media-query';
-
-import type { ReactNode, Ref } from 'react';
-import type { MatchHistoryMatch } from '@/components/matches/MatchRow';
-import type { MatchOpponentView } from '@/lib/match-history';
-
-/**
- * The match history of a screen: header, one entry per match, dispute notice and footnote.
+/*
+ * The match history of a screen: dispute notice, one entry per match, footnote.
  *
- * ⚠️ MOVED from `components/teams/detail/TeamMatches.tsx` by [F-SOLO] (rule of the second
- * use). **The DOM it renders for a team is unchanged**; what left the component is the PROSE
- * (empty state, footnote) and the two derivations that depended on a team payload, both of
- * which are now the caller's job. `TeamMatches` and `SoloMatches` are the two thin adapters.
- *
- * 🚨 [FX-TABLE] — TWO LAYOUTS, ONE TREE. From `sm` up it is the table it has always been,
- * to the node. Below `sm` the table is REPLACED by a list of `MatchCard`s: at 375 px it left
- * 426 px of itself outside the viewport, so the opponent and the status sat behind a
- * horizontal scroll on the three screens that use it.
- *
- * The switch is a JS media query, NOT a `sm:hidden` / `hidden sm:block` pair, and that is a
- * hard constraint: mounting both trees would make every `getByText` of the eight audit
- * scenarios match two nodes, including at 1280 px where nothing is supposed to change — and
- * would hand a screen reader the whole history twice. `useMediaQuery` reads `matchMedia`
- * synchronously, so the first render is already the right one (no flash, no double render).
+ * 🚨 TWO LAYOUTS, ONE TREE — a table from `sm` up, a list of cards below it. The switch is a
+ * JS media query and NOT a `sm:hidden` / `hidden sm:block` pair: mounting both trees would
+ * hand a screen reader the whole history twice, and make every `getByText` match two nodes.
+ * `useMediaQuery` reads `matchMedia` synchronously, so the first render is already the right
+ * one (no flash, no double render).
  *
  * Entering a result and attaching dispute evidence stay out: both need the winning SIDE's id,
  * which neither history route exposes — they belong to `/matches/$matchId`.
  */
 
+import { MatchCard } from '@/components/matches/MatchCard';
+import { MatchRow } from '@/components/matches/MatchRow';
+import { useMediaQuery } from '@/hooks/use-media-query';
+
+import type { ReactNode, Ref } from 'react';
+import type { MatchHistoryMatch } from '@/components/matches/match-entry';
+import type { MatchOpponentView } from '@/lib/match-history';
+
 /**
- * Tailwind's `sm` is 40rem and is NOT overridden in `index.css`: this is the last width under
- * it (39.9375rem = 639px at the default root size).
+ * The last width under Tailwind's `sm` (40rem, not overridden in `index.css`).
  *
- * ⚠️ IN `rem`, NOT IN `px`, and the two are not the same promise: `sm:` resolves against the
- * user's root font size, so a reader who enlarges it — a common accessibility setting — would
- * see the breakpoint move while a pixel query stayed put. No `sm:` class lives in these two
- * components today, so nothing would break yet; the point is that it cannot start to.
+ * ⚠️ IN `rem`, NOT IN `px`: `sm:` resolves against the user's root font size, so a reader who
+ * enlarges it — a common accessibility setting — would see the breakpoint move while a pixel
+ * query stayed put.
  */
 const NARROW_QUERY = '(max-width: 39.9375rem)';
 
@@ -110,6 +98,25 @@ export function MatchHistoryTable<M extends MatchHistoryMatch>({
   const showLadder = rows.some((row) => row.ladder !== undefined);
   const showActions = Boolean(onCancelSlot);
 
+  // The two layouts are fed the SAME entry, from one place: a prop set that drifted between
+  // them would only show up at the viewport the reader is not using.
+  //
+  // 🚨 NO `key` IN HERE. `key` is not a prop: the JSX compiler hands it to React as a separate
+  // argument, and it only does that when it is written as an attribute. Spread in from an
+  // object it lands in the props bag instead, and React DEV logs an error for it — a red line
+  // in the console on /history, /solo/$ladderId and every team page, i.e. a rejection motif.
+  const entryProps = (row: MatchHistoryRow<M>) => ({
+    match: row.match,
+    opponent: row.opponent,
+    lineup: row.lineup,
+    showLineup,
+    ladder: row.ladder,
+    showLadder,
+    showActions,
+    onCancelSlot,
+    canOpenSheet: row.canOpenSheet,
+  });
+
   return (
     <div className="flex flex-col gap-4">
       {disputes > 0 && (
@@ -148,18 +155,7 @@ export function MatchHistoryTable<M extends MatchHistoryMatch>({
           className="focus-ring flex flex-col gap-3"
         >
           {rows.map((row) => (
-            <MatchCard
-              key={row.match.id}
-              match={row.match}
-              opponent={row.opponent}
-              lineup={row.lineup}
-              showLineup={showLineup}
-              ladder={row.ladder}
-              showLadder={showLadder}
-              showActions={showActions}
-              onCancelSlot={onCancelSlot}
-              canOpenSheet={row.canOpenSheet}
-            />
+            <MatchCard key={row.match.id} {...entryProps(row)} />
           ))}
         </ul>
       ) : (
@@ -185,7 +181,7 @@ export function MatchHistoryTable<M extends MatchHistoryMatch>({
           aria-label="Match history, scroll sideways to see every column"
           className="focus-ring relative overflow-x-auto"
         >
-          <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
+          <table className="w-full min-w-xl border-collapse text-left text-sm">
             <caption className="sr-only">Match history, most recent first</caption>
             <thead>
               <tr className="text-xs label-caps text-text-muted">
@@ -225,18 +221,7 @@ export function MatchHistoryTable<M extends MatchHistoryMatch>({
             </thead>
             <tbody>
               {rows.map((row) => (
-                <MatchRow
-                  key={row.match.id}
-                  match={row.match}
-                  opponent={row.opponent}
-                  lineup={row.lineup}
-                  showLineup={showLineup}
-                  ladder={row.ladder}
-                  showLadder={showLadder}
-                  showActions={showActions}
-                  onCancelSlot={onCancelSlot}
-                  canOpenSheet={row.canOpenSheet}
-                />
+                <MatchRow key={row.match.id} {...entryProps(row)} />
               ))}
             </tbody>
           </table>

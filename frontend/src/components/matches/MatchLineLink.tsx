@@ -1,3 +1,8 @@
+/*
+ * One match as a single full-width link — to its sheet, or to its dispute file. The « on the
+ * clock » lines of `/history` and the « Next up » lines of `/home` are both made of these.
+ */
+
 import { Link } from '@tanstack/react-router';
 
 import { cn } from '@/lib/utils';
@@ -5,12 +10,12 @@ import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
 
 /**
- * Where the row leads.
+ * Where the line leads.
  *
- * 🔑 A DISCRIMINATED UNION, NOT AN OPTIONAL `disputeId`. The rule — "a row in dispute opens its
+ * 🔑 A DISCRIMINATED UNION, NOT AN OPTIONAL `disputeId`. The rule — "a line in dispute opens its
  * dispute file, everything else opens the match sheet" — is a PRODUCT decision, and it belongs at
  * the call site where the payload is read, not hidden inside a shared component that would then
- * quietly decide for every caller. [F-DISPUTE].
+ * quietly decide for every caller.
  */
 export type MatchLineTarget =
   | { kind: 'match'; matchId: string }
@@ -33,27 +38,14 @@ type MatchLineLinkProps = {
 };
 
 /**
- * One match, as a single full-width link — to its sheet, or to its dispute file.
- *
- * Extracted at its SECOND use (repo rule): written inside `ActionRequired` for the « on the
- * clock » cards of `/history`, and needed verbatim by `/home` for the « Next up » lines. The
- * alternative was copying its class string, which the reuse rule forbids — and rightly so: the
- * card is NEUTRAL with its status colour carried by the left edge alone, a balance that took
- * two attempts to get right (painting the whole card red made a match merely waiting on a
- * confirmation look like an error, and stacked two red blocks at 375 px).
- *
  * ⚠️ ONE LINK, AND NOTHING INTERACTIVE NESTED INSIDE IT. A second target inside would make a
  * line whose two halves lead to different places, and nesting an `<a>` in an `<a>` is invalid
  * HTML that browsers repair by silently splitting the DOM. Callers that need a second
- * destination (an opponent's team page, say) put it OUTSIDE this component — that is exactly
- * what [FX-ROW] had to do for the history table. It is also why [F-DISPUTE] generalised the
- * DESTINATION rather than nesting a "see the dispute" link inside the card: the way back to the
- * match sheet is carried by the header of the dispute file itself.
+ * destination (an opponent's team page, say) put it OUTSIDE this component.
  *
- * ⚠️ THE TWO BRANCHES BELOW RENDER THE SAME ELEMENT WITH THE SAME CLASS STRING. The « Next up »
- * cards of `/home` must be byte-identical to what they were before the union existed, and a check
- * guards it (`D18`) — the whole point of routing the difference through `to`/`params` and nothing
- * else.
+ * The line is NEUTRAL, its status colour carried by the left edge alone: painting the whole
+ * card red made a match merely waiting on a confirmation look like an error, and stacked two
+ * red blocks at 375 px.
  */
 export function MatchLineLink({ target, accentClass, ariaLabel, children }: MatchLineLinkProps) {
   const className = cn(

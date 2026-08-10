@@ -1,18 +1,25 @@
+// `/history` — every match of mine, all games and all ladders at once (those where you were benched also, with no distinction).
 import { History as HistoryIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { ActionRequired } from '@/components/matches/ActionRequired';
 import { Callout } from '@/components/ui/callout';
 import { HistoryFilters } from '@/components/history/HistoryFilters';
 import { HistoryMatches } from '@/components/history/HistoryMatches';
+import { Pagination } from '@/components/ui/pagination';
 import { SectionTitle } from '@/components/ui/section-title';
 import { useAnnouncement } from '@/lib/use-announcement';
 import {
+  DEFAULT_HISTORY_PAGE_SIZE,
   EMPTY_HISTORY_FILTERS,
+  HISTORY_PAGE_SIZES,
   applyHistoryFilters,
+  applyHistoryOrder,
   hasActiveHistoryFilters,
   historyFormatOptions,
   historyGameOptions,
+  historyPage,
+  historyPageForSize,
   historyResultOptions,
   historySummary,
   needsMyAttention,
@@ -20,39 +27,12 @@ import {
   useMyMatchHistory,
 } from '@/lib/history';
 
-import type { HistoryFilterState } from '@/lib/history';
+import type { HistoryFilterState, HistoryPageSize } from '@/lib/history';
 
-/**
- * `/history` — every match of mine, all games and all ladders at once.
- *
- * 🔑 THE ONLY CROSS-CUTTING VIEW IN THE APP. Until now, finding out what you had played meant
- * visiting one page per team AND one `/solo/$ladderId` per ladder and stitching the pieces
- * together. `GET /matches/me` with no parameter already unions the two sources (matches I was
- * fielded in, and matches of my teams where I sat on the bench), so this page is one request.
- *
- * 🚨 ITS REAL VALUE IS THE FIRST SECTION, not the table. `awaiting_confirmation` and
- * `disputed` are on a 24 h clock and nothing else in the app groups them — see
- * `ActionRequired`.
- *
- * 🚨 NO GLOBAL WIN–LOSS RECORD. A cross-ladder record means nothing (ten wins at chess and
- * ten losses on cs2 are not "50 %"), and the payload does not even say whether I was fielded
- * or on the bench. The record already exists per ladder, where it has a meaning.
- *
- * ⚠️ EXACTLY ONE LIVE REGION (invariant #11), and it is the filters that need it. Changing a
- * `<select>` announces the option that was picked and NOTHING about its effect — yet on this
- * screen the four controls have no other effect than re-filling the table (WCAG 4.1.3). It is
- * mounted permanently and empty: a region inserted at the same time as its text is not
- * reliably announced, the screen reader has to be watching it already.
- *
- * ⚠️ `/matchmaking` has the same gap and stays silent for now — its summary is a plain
- * paragraph. Aligning it is its own change, not something to smuggle in here.
- *
- * ⚠️ NO PAGINATION AND NO SCROLLING BOX — same arbitration as `LadderBoard` (FT-3): we keep
- * Ctrl+F over the whole history. The table keeps its own internal `overflow-x-auto`, which is
- * a different thing and does not move.
- */
 export function History() {
   const [filters, setFilters] = useState<HistoryFilterState>(EMPTY_HISTORY_FILTERS);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<HistoryPageSize>(DEFAULT_HISTORY_PAGE_SIZE);
 
   const announcement = useAnnouncement();
   const historyQuery = useMyMatchHistory();
@@ -62,11 +42,13 @@ export function History() {
 
   const matches = historyQuery.data?.matches ?? [];
 
-  // 🚨 Read from the FULL history, never from the filtered list: a match waiting on me must
-  // not be hideable behind a filter — that is the whole point of the section.
+  // games waiting an action from me
   const waitingOnMe = matches.filter(needsMyAttention);
 
-  const visible = applyHistoryFilters(matches, filters);
+  // Filter, then order, then cut a page out of the result in that order
+  const matched = applyHistoryFilters(matches, filters);
+  const ordered = applyHistoryOrder(matched, filters.oldestFirst);
+  const current = historyPage(ordered, page, pageSize);
   const filtersActive = hasActiveHistoryFilters(filters);
 
   // Derived at render, not stored in state: they are a pure function of the data and of the
@@ -75,31 +57,62 @@ export function History() {
   const formatOptions = historyFormatOptions(matches, filters.gameId);
   const resultOptions = historyResultOptions(matches);
 
-  // `null` en erreur, ET PAS une phrase de plus : le `Callout` juste au-dessus dit déjà tout,
-  // et le répéter en petit gris sous les filtres faisait dire deux fois la même chose à
-  // l'écran — sans rien ajouter, puisque le Callout porte aussi le remède.
+  /**
+   * The one sentence both readers get, for any state of the controls — computed for a
+   * candidate state so the announcement can describe the table the user is ABOUT to get.
+   */
+  const summaryOf = (state: HistoryFilterState, targetPage: number, size: number) => {
+    const rows = applyHistoryFilters(matches, state);
+    const { from, to } = historyPage(rows, targetPage, size);
+
+    return historySummary({
+      matched: rows.length,
+      total: matches.length,
+      filtersActive: hasActiveHistoryFilters(state),
+      oldestFirst: state.oldestFirst,
+      from,
+      to,
+    });
+  };
+
+  // `null` en erreur
   const summary = historyQuery.isPending
     ? 'Loading your matches…'
     : historyQuery.isError
       ? null
-      : historySummary(visible.length, matches.length, filtersActive);
+      : summaryOf(filters, page, pageSize);
 
-  /**
-   * 🔑 CHANGER UN FILTRE N'A AUCUN AUTRE EFFET QUE DE CHANGER LA TABLE, et c'est ce qui rend
-   * l'annonce nécessaire : un lecteur d'écran entend l'option qu'il vient de choisir, puis
-   * plus rien — la liste sous ses doigts est devenue autre chose en silence (WCAG 4.1.3). Le
-   * texte annoncé est celui de `historySummary`, le MÊME que la ligne visible : deux
-   * formulations tenues à la main finiraient par diverger.
-   */
-  const applyFilters = (next: HistoryFilterState) => {
+  const announceTimer = useRef<number | undefined>(undefined);
+
+  const announceSummary = (text: string, afterTyping: boolean) => {
+    window.clearTimeout(announceTimer.current);
+    if (!afterTyping) {
+      announcement.announce(text);
+      return;
+    }
+    announceTimer.current = window.setTimeout(() => announcement.announce(text), 700);
+  };
+
+  useEffect(() => () => window.clearTimeout(announceTimer.current), []);
+
+  const applyFilters = (next: HistoryFilterState, typed = false) => {
     setFilters(next);
-    announcement.announce(
-      historySummary(
-        applyHistoryFilters(matches, next).length,
-        matches.length,
-        hasActiveHistoryFilters(next),
-      ),
-    );
+    // BACK TO PAGE 1 ON EVERY CHANGE.
+    setPage(1);
+    announceSummary(summaryOf(next, 1, pageSize), typed);
+  };
+
+  const goToPage = (next: number) => {
+    setPage(next);
+    announceSummary(summaryOf(filters, next, pageSize), false);
+  };
+
+  // CHANGING THE PAGE SIZE KEEPS YOUR PLACE,
+  const changePageSize = (next: HistoryPageSize) => {
+    const nextPage = historyPageForSize(current.from, next);
+    setPageSize(next);
+    setPage(nextPage);
+    announceSummary(summaryOf(filters, nextPage, next), false);
   };
 
   return (
@@ -110,8 +123,7 @@ export function History() {
         </p>
         <h1 className="text-3xl label-caps-black">My matches</h1>
         <p className="max-w-prose pt-1 text-sm text-text-secondary">
-          Everything you have played, solo and with your teams, across every game and every
-          ladder — most recent first. Each row opens its match sheet.
+          Everything you have played. Each row opens its match sheet.
         </p>
       </header>
 
@@ -125,8 +137,6 @@ export function History() {
 
       <SectionTitle>All matches</SectionTitle>
 
-      {/* The filters are hidden while the history is empty or unavailable: four selects with
-          one option each say nothing, and they would be the loudest thing on an empty page. */}
       {matches.length > 0 && (
         <HistoryFilters
           filters={filters}
@@ -137,31 +147,34 @@ export function History() {
         />
       )}
 
-      {/* La ligne VISIBLE. Elle n'est pas la région live : celle-ci est montée en permanence
-          plus bas, vide, et ne parle qu'au changement d'un filtre. Rendre la ligne visible
-          `role="status"` la ferait relire à chaque refetch, y compris quand rien n'a bougé. */}
-      {/* ⚠️ `text-text-secondary` (7,81:1) et NON `text-text-muted` (4,23:1, sous AA) : c'est
-          l'idiome du repo pour ce genre de ligne, mais il porte une dette de contraste connue,
-          et cette ligne-ci est la seule qui dise combien de matchs sont affichés. `MatchRow`
-          fait déjà ce même écart, pour la même raison. */}
+      {/* they both have the same msg, just updates differently */}
       {summary && <p className="text-xs text-text-secondary">{summary}</p>}
-
-      {/* L'UNIQUE région live de l'écran (invariant #11). `sr-only` : ce qu'elle dit est déjà
-          écrit juste au-dessus pour qui le voit. */}
       <p role="status" className="sr-only">
         {announcement.message}
       </p>
 
-      {/* Nothing here while loading or on error: the summary line right above already says
-          both, and printing a second sentence made the screen repeat itself. */}
       {historyQuery.isPending || historyQuery.isError ? null : (
-        <HistoryMatches
-          matches={visible}
-          totalCount={matches.length}
-          ladderOf={labels.forMatch}
-          filtersActive={filtersActive}
-          onClearFilters={() => applyFilters(EMPTY_HISTORY_FILTERS)}
-        />
+        <>
+          <HistoryMatches
+            matches={current.rows}
+            totalCount={matches.length}
+            ladderOf={labels.forMatch}
+            filtersActive={filtersActive}
+            // Goes through `applyFilters`, never `setFilters`: clearing must also send the
+            // reader back to page 1 and announce the table it lands on.
+            onClearFilters={() => applyFilters(EMPTY_HISTORY_FILTERS)}
+          />
+          <Pagination
+            page={current.page}
+            pageCount={current.pageCount}
+            onPageChange={goToPage}
+            pageSize={pageSize}
+            pageSizeOptions={HISTORY_PAGE_SIZES}
+            onPageSizeChange={changePageSize}
+            total={ordered.length}
+            label="matches"
+          />
+        </>
       )}
     </div>
   );

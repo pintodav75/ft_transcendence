@@ -24,12 +24,7 @@ type MatchStateNoticeProps = {
 };
 
 /**
- * What is happening RIGHT NOW, in one sentence — the only part of the sheet that changes
- * between the seven states of the cycle.
- *
- * 🚨 It STATES, it never acts. The actions live one block below, in `MatchResultPanel`
- * ([FT-4B]), and the two are complementary by design: a side that has already reported gets
- * no form at all, only the wait — with its 24 h deadline — announced here.
+ * What is happening RIGHT NOW, in one sentence
  */
 export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps) {
   const kickoffIn = msUntil(match.scheduledAt, nowMs);
@@ -42,18 +37,7 @@ export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps)
         <strong className="text-text-primary">The two sides disagree.</strong> Each reported a
         different result, so the match is on hold until an admin settles it. Nothing is applied to
         the ladder in the meantime.{' '}
-        {/* 🔑 THE END OF A DEAD END ([F-DISPUTE]). This sentence used to stop here, and the
-            dispute file it describes had no screen at all: no way to see what each camp claimed,
-            no way to file the screenshot that decides it — while a dispute nobody settles is
-            CANCELLED after 24 h. `disputeId` is served by `GET /matches/{id}` exactly while the
-            match is `disputed`, so the link costs no request. It is guarded rather than assumed:
-            the field is nullable in the contract, and a link to `/disputes/null` would be a 404
-            in the console, i.e. a project-rejection criterion. */}
         {match.disputeId ? (
-          // Inline prose link, same underline affordance `LadderOpenSlots` uses inside a
-          // `Callout` — plus `focus-ring`, which that one predates. Four utilities written here
-          // rather than a shared helper: there is no third caller yet, and generalising would
-          // mean touching a component this ticket has no business touching.
           <Link
             to="/disputes/$disputeId"
             params={{ disputeId: match.disputeId }}
@@ -129,8 +113,8 @@ export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps)
       <Callout>
         Slot open for {kickoff}
         {kickoffIn !== null && kickoffIn > 0 ? ` — in ${formatDuration(kickoffIn)}` : ''}. It is
-        withdrawn automatically once it falls under {MIN_LEAD_MINUTES} minutes from kick-off, the point where
-        nobody can accept it any more.
+        withdrawn automatically once it falls under {MIN_LEAD_MINUTES} minutes from kick-off, the
+        point where nobody can accept it any more.
       </Callout>
     );
   }
@@ -139,16 +123,17 @@ export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps)
   if (kickoffIn !== null && kickoffIn > 0) {
     return (
       <Callout>
-        Kick-off {kickoff} — <strong className="text-text-primary">in {formatDuration(kickoffIn)}</strong>
-        . Play the Bo3 on the game itself, then come back to report the score.
+        Kick-off {kickoff} —{' '}
+        <strong className="text-text-primary">in {formatDuration(kickoffIn)}</strong>. Play the Bo3
+        on the game itself, then come back to report the score.
       </Callout>
     );
   }
 
   return (
     <Callout>
-      Kick-off was {kickoff}. Both sides can now report the result; the match closes as soon as
-      they agree, and goes to an admin if they do not.
+      Kick-off was {kickoff}. Both sides can now report the result; the match closes as soon as they
+      agree, and goes to an admin if they do not.
     </Callout>
   );
 }

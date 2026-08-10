@@ -1,7 +1,13 @@
+// Shared status chip.
+
 import { cn } from '@/lib/utils';
 
 import type { ReactNode } from 'react';
 
+// NOTE: it's not only used for match results
+// an admin badge is tone="live", and "Friends" is tone="win"
+// open: blue
+// live: gold etc...
 export type PillTone = 'open' | 'live' | 'dispute' | 'settled' | 'muted' | 'win' | 'loss';
 
 const toneClasses: Record<PillTone, string> = {
@@ -18,11 +24,9 @@ type PillProps = {
   tone: PillTone;
   children: ReactNode;
   className?: string;
-  /** Hover text for a label kept short so the column fits (e.g. "Admin call"). */
-  title?: string;
+  title?: string; // Hover text
 };
 
-// Shared status chip of the team detail page (match status, dispute, recent form).
 export function Pill({ tone, children, className, title }: PillProps) {
   return (
     <span

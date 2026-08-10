@@ -22,7 +22,7 @@ import type { HistoryMatch, MatchLabeller } from '@/lib/history';
  *
  * 🔑 THE BUDGET IS FIVE REQUESTS, AND FOUR OF THE FIVE LAND ON A CACHE KEY ANOTHER SCREEN
  * ALREADY USES — `['games']` (`/games`), `EXTERNAL_ACCOUNTS_KEY` (`/solo` and `/profile`),
- * `historyMatchesKey()` (`/history`) and `MY_INVITATIONS_KEY` (`/teams`). `/home` is a READER of
+ * `['matches', 'me', 'all']` (`/history`) and `MY_INVITATIONS_KEY` (`/teams`). `/home` is a READER of
  * the app's caches, so arriving on it never makes a later page slower.
  *
  * ⚠️ THE FIFTH IS THE EXCEPTION, AND IT IS NOT AN ACCIDENT: the open-slot teaser has its OWN

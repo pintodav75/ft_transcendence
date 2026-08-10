@@ -1,5 +1,6 @@
 import { useId } from 'react';
 
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 
@@ -11,28 +12,16 @@ type HistoryFiltersProps = {
   games: { id: string; name: string }[];
   formats: MatchFormat[];
   results: ('win' | 'loss')[];
-  onChange: (filters: HistoryFilterState) => void;
+  /**
+   * `typed` marks a change that came from the text box, one keystroke at a time — the page
+   * uses it to hold its screen-reader announcement until the typing pauses. Every other
+   * control is one deliberate act and leaves it `false`.
+   */
+  onChange: (filters: HistoryFilterState, typed?: boolean) => void;
 };
 
 const resultLabels: Record<'win' | 'loss', string> = { win: 'Wins', loss: 'Losses' };
 
-/**
- * The four filters of `/history`: game, format, result, and "still in play".
- *
- * 🚨 EVERY OPTION COMES FROM THE MATCHES, NEVER FROM THE CONTRACT'S ENUMS. That is the [F-MM]
- * lesson, and this screen has no excuse for repeating it: the whole history is already in
- * memory, so a select can only ever offer a value that matches at least one row. Nobody can
- * land on an empty table and be left wondering whether he never played that combination or
- * whether the page is broken.
- *
- * 🔑 FILTERING NEVER TOUCHES THE NETWORK. `GET /matches/me` returns everything in one call —
- * `?ladderId=` exists but is deliberately not used here (see `useMyMatchHistory`). Changing a
- * select is a `filter()` over an array, so it applies instantly and an "Apply" button would
- * be a form nobody submits.
- *
- * Native `<select>`s and a native checkbox, same reasoning as `SlotFilters`: the platform
- * brings keyboard behaviour, type-ahead and the OS wheel picker on a phone for free.
- */
 export function HistoryFilters({
   filters,
   games,
@@ -40,15 +29,27 @@ export function HistoryFilters({
   results,
   onChange,
 }: HistoryFiltersProps) {
+  const searchFieldId = useId();
   const gameFieldId = useId();
   const formatFieldId = useId();
   const resultFieldId = useId();
 
   return (
     <fieldset className="flex flex-wrap items-end gap-4 border-0 p-0">
-      {/* Names the group for a screen reader without adding a heading: the four controls
-          would otherwise be four loose fields hanging under the section title. */}
-      <legend className="sr-only">Filter your match history</legend>
+      {/* Names the group for a screen reader without adding a heading */}
+      <legend className="sr-only">Filter and sort your match history</legend>
+
+      <div className="flex min-w-48 flex-1 basis-full flex-col gap-2 sm:basis-64">
+        <Label htmlFor={searchFieldId}>Opponent</Label>
+        {/*`type="search"` for the platform's own clear button (⌫ on iOS, ✕ in Chrome) */}
+        <Input
+          id={searchFieldId}
+          type="search"
+          value={filters.query}
+          onChange={(event) => onChange({ ...filters, query: event.target.value }, true)}
+          placeholder="Player or team name…"
+        />
+      </div>
 
       <div className="flex min-w-40 flex-1 flex-col gap-2 sm:max-w-56">
         <Label htmlFor={gameFieldId}>Game</Label>
@@ -57,9 +58,6 @@ export function HistoryFilters({
           value={filters.gameId ?? ''}
           onChange={(event) => {
             const gameId = event.target.value || undefined;
-            // ⚠️ A format the NEW game does not have is DROPPED, never kept out of sight:
-            // leaving "1v1" set while switching to a game that has no 1v1 ladder would empty
-            // the table while the Format select still displayed a value it no longer offers.
             onChange({ ...filters, gameId, format: undefined });
           }}
         >
@@ -127,6 +125,16 @@ export function HistoryFilters({
           onChange={(event) => onChange({ ...filters, ongoingOnly: event.target.checked })}
         />
         <span className="text-sm text-text-secondary">Still in play</span>
+      </label>
+
+      <label className="flex min-h-12 cursor-pointer items-center gap-2.5">
+        <input
+          type="checkbox"
+          className="focus-ring size-4 shrink-0 accent-action-primary"
+          checked={filters.oldestFirst}
+          onChange={(event) => onChange({ ...filters, oldestFirst: event.target.checked })}
+        />
+        <span className="text-sm text-text-secondary">Oldest first</span>
       </label>
     </fieldset>
   );

@@ -7,11 +7,6 @@ export type CalloutTone = 'success' | 'muted' | 'danger';
 const toneClasses: Record<CalloutTone, string> = {
   success: 'border-success/40 bg-success/10 text-success',
   muted: 'border-border-subtle bg-surface-card-strong/60 text-text-secondary',
-  // Border + surface of the "Disputed" pill, so a match in dispute reads the same wherever
-  // it is shown. The TEXT is `text-text-secondary` and not `arena-red`: MEASURED on
-  // `arena-red-soft`, the red gives 4.87:1 (AA, but only just, for a whole paragraph) where
-  // the secondary text gives 7.81:1 — and it is the tone every other paragraph of the app
-  // already uses. The red carries the alarm through the border and the surface.
   danger: 'border-arena-red/45 bg-arena-red-soft text-text-secondary',
 };
 

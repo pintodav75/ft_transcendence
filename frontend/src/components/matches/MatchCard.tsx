@@ -1,37 +1,26 @@
-import { useNavigate } from '@tanstack/react-router';
-import { X } from 'lucide-react';
+/*
+ * One entry of a match history, as a card — the layout used below `sm`, where the table left
+ * 426 px of itself outside the viewport and hid the opponent and the status behind a scroll.
+ *
+ * Mounted INSTEAD of `MatchRow`, never alongside it (a JS media query, not `sm:hidden`), so a
+ * screen reader is never handed the whole history twice. What the two share: `match-entry.tsx`.
+ */
 
 import { Card } from '@/components/ui/card';
-import { InlineButton } from '@/components/ui/inline-button';
-import { MatchDateLink } from '@/components/matches/MatchDateLink';
-import { MatchOpponentLink } from '@/components/matches/MatchOpponentLink';
+import {
+  CancelSlotButton,
+  MatchDateLink,
+  MatchOpponentLink,
+  useMatchEntry,
+} from '@/components/matches/match-entry';
 import { MatchStatusPill } from '@/components/matches/MatchStatusPill';
-import { eloDeltaClass, matchAccentClass, matchStatusView } from '@/components/matches/match-status';
-import { opensMatchSheet } from '@/components/matches/match-sheet-click';
-import { formatEloDelta, formatMatchDate } from '@/lib/match-detail';
-import { formatScore, isCancellableSlot } from '@/lib/match-history';
+import { eloDeltaClass } from '@/components/matches/match-status';
+import { formatEloDelta } from '@/lib/match-detail';
+import { formatScore } from '@/lib/match-history';
 import { EM_DASH, cn } from '@/lib/utils';
 
-import type { MatchHistoryMatch, MatchRowProps } from '@/components/matches/MatchRow';
+import type { MatchEntryProps, MatchHistoryMatch } from '@/components/matches/match-entry';
 
-/**
- * One entry of a match history, as a CARD — what `MatchHistoryTable` mounts under `sm` instead
- * of `MatchRow` ([FX-TABLE]).
- *
- * 🚨 ONE TREE IN THE DOM, NEVER TWO. This is not a `sm:hidden` twin of the row: the table
- * mounts exactly one of the two (`useMediaQuery`), because duplicating the markup would make
- * every `getByText` of the eight audit scenarios match two nodes — including at 1280 px, where
- * nothing is supposed to change.
- *
- * 🔑 WHY A CARD AT ALL: at 375 px the table left 426 px of itself outside the viewport, so the
- * opponent and the status — the two things a history is read for — sat behind a horizontal
- * scroll. A card lays the same fields out vertically, and since there is no column header left
- * to explain them, EVERY value carries its own label (a bare "2–0" says nothing).
- *
- * It takes `MatchRowProps` as-is, deliberately: the table picks one component or the other by
- * viewport, and a prop honoured by only one of them would be a silent difference of behaviour
- * between the desktop and the mobile rendering of the same list.
- */
 export function MatchCard<M extends MatchHistoryMatch>({
   match,
   opponent,
@@ -42,39 +31,20 @@ export function MatchCard<M extends MatchHistoryMatch>({
   showActions = false,
   onCancelSlot,
   canOpenSheet = false,
-}: MatchRowProps<M>) {
-  const navigate = useNavigate();
-  const { tone } = matchStatusView(match);
-  // A finished match is the only one carrying a RESULT — that is what drives the entry's
-  // emphasis, and it is deliberately NOT the same question as "can it be opened".
-  const hasResult = match.status === 'completed';
-  const opponentName = opponent?.name;
-  const disputed = match.disputeStatus === 'open' || match.status === 'disputed';
-  const eloDelta = match.eloDelta;
-  // Same rule as the row: only the NEUTRAL parts are toned down. Dimming the whole card would
-  // take the status pill down with it, and the "Disputed" pill is the one thing the design
-  // wants to shout.
-  const muted = hasResult ? undefined : 'opacity-70';
+}: MatchEntryProps<M>) {
+  const { accentClass, disputed, opponentName, muted, onEntryClick } = useMatchEntry({
+    match,
+    opponent,
+    canOpenSheet,
+  });
 
   return (
     <li>
       <Card
-        // Same three guards as the row (`opensMatchSheet`): the whole card is a convenience
-        // target, the date link below is the real keyboard access to the sheet.
-        onClick={
-          canOpenSheet
-            ? (event) => {
-                if (!opensMatchSheet(event)) return;
-                void navigate({ to: '/matches/$matchId', params: { matchId: match.id } });
-              }
-            : undefined
-        }
+        onClick={onEntryClick}
         className={cn(
-          // The coloured left edge is the row's accent, kept so a slot / a live match / a
-          // dispute reads the same on both layouts. `border-l-transparent` (the quiet tones)
-          // simply shows the card's own background — nothing is cut out.
           'flex flex-col gap-3 border-l-2 p-3',
-          matchAccentClass(tone),
+          accentClass,
           /*
             🚨 THE DISPUTE TINT IS AN OVERLAY, NOT A BACKGROUND, and that is not a detail.
             `cn()` is `twMerge`: a `bg-*` passed here REPLACES `Card`'s own `bg-surface-card/84`
@@ -85,10 +55,8 @@ export function MatchCard<M extends MatchHistoryMatch>({
 
             So the tint is painted by a pseudo-element instead: `-z-10` puts it ABOVE the card's
             background and UNDER the content (CSS paints negative-z descendants right after the
-            element's own background), which is exactly what the row's `bg-arena-red/5` did, and
-            `isolate` keeps that negative layer from escaping behind the page. `hover:` then
-            needs no special case: the hover changes the surface, the tint stays on top of it.
-            Same 5 % of the same token as the row, so both layouts tint by the same amount.
+            element's own background), and `isolate` keeps that negative layer from escaping
+            behind the page. Same 5 % of the same token as the row, so both layouts tint alike.
           */
           disputed &&
             'relative isolate before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-card before:bg-arena-red/5',
@@ -103,9 +71,8 @@ export function MatchCard<M extends MatchHistoryMatch>({
         </div>
 
         {/* THE information of the card, and the reason the ticket exists: on a phone the
-            opponent was the first thing pushed off screen. `break-words` because a 30-character
-            team name has nowhere to go at 375 px. */}
-        <p className={cn('text-base font-bold break-words', muted)}>
+            opponent was the first thing pushed off screen. */}
+        <p className={cn('text-base font-bold wrap-break-word', muted)}>
           <MatchOpponentLink opponent={opponent} />
         </p>
 
@@ -114,11 +81,9 @@ export function MatchCard<M extends MatchHistoryMatch>({
         <dl className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
           {showLadder && (
             <div className="min-w-0">
-              {/* ⚠️ NOT `text-text-muted`: that token measures 4.23:1 on a card, under AA, and
-                  is already a ticketed debt with 45 usages. `text-text-secondary` is 7.81:1
-                  and gives the same "this is only a label" hierarchy. */}
+              {/* ⚠️ NOT `text-text-muted`: 4.23:1 on a card, under AA — see `MatchRow`. */}
               <dt className="label-caps text-text-secondary">Ladder</dt>
-              <dd className={cn('font-semibold break-words text-text-primary', muted)}>
+              <dd className={cn('font-semibold wrap-break-word text-text-primary', muted)}>
                 {ladder ? `${ladder.game} · ${ladder.format}` : EM_DASH}
               </dd>
             </div>
@@ -127,7 +92,7 @@ export function MatchCard<M extends MatchHistoryMatch>({
           {showLineup && (
             <div className="min-w-0">
               <dt className="label-caps text-text-secondary">Line-up</dt>
-              <dd className={cn('font-mono break-words text-text-secondary', muted)}>
+              <dd className={cn('font-mono wrap-break-word text-text-secondary', muted)}>
                 {lineup ?? EM_DASH}
               </dd>
             </div>
@@ -140,26 +105,17 @@ export function MatchCard<M extends MatchHistoryMatch>({
 
           <div>
             <dt className="label-caps text-text-secondary">Elo</dt>
-            <dd className={cn('font-mono font-bold tabular-nums', eloDeltaClass(eloDelta))}>
-              {formatEloDelta(eloDelta)}
+            <dd className={cn('font-mono font-bold tabular-nums', eloDeltaClass(match.eloDelta))}>
+              {formatEloDelta(match.eloDelta)}
             </dd>
           </div>
         </dl>
 
-        {/* An accepted match cannot be cancelled: offering the button would guarantee a 409
-            and a red line in the console. */}
-        {showActions && onCancelSlot && isCancellableSlot(match) ? (
-          <div className="flex justify-end">
-            <InlineButton
-              tone="danger"
-              onClick={() => onCancelSlot(match)}
-              aria-label={`Cancel the slot of ${formatMatchDate(match.scheduledAt, 'long')}`}
-            >
-              <X aria-hidden="true" className="size-3" />
-              Cancel
-            </InlineButton>
+        {showActions && (
+          <div className="flex justify-end empty:hidden">
+            <CancelSlotButton match={match} onCancelSlot={onCancelSlot} />
           </div>
-        ) : null}
+        )}
       </Card>
     </li>
   );

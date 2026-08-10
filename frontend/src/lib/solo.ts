@@ -54,7 +54,7 @@ export function useSoloLadders() {
  * (defaulting to `'all'`) so that `/history` could reuse it for the UNFILTERED list — which
  * worked, but silently removed a compile-time guard: a future caller who simply forgot the id
  * would have invalidated `/history`'s entry instead of its own, and nothing would have said
- * so. The unfiltered list has its own named helper, `historyMatchesKey()` in `lib/history.ts`.
+ * so. `/history` spells its own key out instead (`['matches', 'me', 'all']`).
  *
  * 🔑 The two keys share the `['matches', 'me']` PREFIX on purpose: `useAcceptMatch` sweeps
  * every one of my histories with that prefix, so both entries are covered for free. The two

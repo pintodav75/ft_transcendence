@@ -1,7 +1,20 @@
-import { MatchSideCard } from '@/components/matches/MatchSideCard';
-import { formatSideScore, isSoloMatch, sideName } from '@/lib/match-detail';
+import { Link } from '@tanstack/react-router';
+import { Trophy } from 'lucide-react';
+
+import { Avatar } from '@/components/ui/avatar';
+import { Pill } from '@/components/ui/pill';
+import { eloDeltaClass } from '@/components/matches/match-status';
+import { useBackFrom } from '@/lib/back-navigation';
+import {
+  formatEloDelta,
+  formatSideScore,
+  isSoloMatch,
+  sideAvatarUrl,
+  sideInitials,
+  sideName,
+} from '@/lib/match-detail';
 import { MIN_LEAD_MINUTES } from '@/lib/match-slots';
-import { EM_DASH } from '@/lib/utils';
+import { EM_DASH, cn } from '@/lib/utils';
 
 import type { MatchSheet, MatchSide } from '@/lib/match-detail';
 
@@ -9,6 +22,95 @@ type MatchScoreboardProps = {
   match: MatchSheet;
   sides: MatchSide[];
 };
+
+const identityLinkClasses =
+  'group focus-ring flex min-w-0 flex-col items-center gap-3 rounded-card underline-offset-4';
+
+/**
+ * One camp of the sheet.
+ *
+ * `solo` is `isSoloMatch(match)`, read from the LADDER'S FORMAT: a side without a team is NOT
+ * proof of 1v1, since a dissolved team leaves the same hole (`team_id` is `set null`), and
+ * treating that as solo linked a 5v5 camp to one player.
+ *
+ * 🚨 The Elo shown is the Elo of the CAMP, never of a player. A 5v5 result moves one `rankings`
+ * line — the team's — and splitting it across five names would invent a number the backend
+ * never computed.
+ */
+function MatchSideCard({
+  side,
+  isWinner,
+  solo,
+}: {
+  side: MatchSide;
+  isWinner: boolean;
+  solo: boolean;
+}) {
+  const backFrom = useBackFrom();
+  const name = sideName(side, solo);
+  // On a 1v1 the PLAYER is the camp, so the link goes to his profile instead of a team page
+  // that does not exist. A teamless side on a TEAM ladder is a dissolved team, not a player:
+  // it gets no link at all rather than one pointing at whoever happened to be listed first.
+  const player = !side.team && solo ? side.players[0] : undefined;
+
+  const identity = (
+    <>
+      <Avatar
+        src={sideAvatarUrl(side, solo)}
+        alt=""
+        fallback={sideInitials(side, solo)}
+        className="size-16 shrink-0"
+      />
+      {/* 🚨 THE UNDERLINE IS CARRIED BY THE NAME, NOT BY THE LINK. `hover:underline` on the
+          wrapper decorates every descendant — including the INITIALS drawn inside the avatar when
+          a team has no logo, which then reads as a rendering fault. `group`/`group-hover` keeps
+          the whole card clickable while only the name reacts. */}
+      <span className="min-w-0 text-lg font-bold text-text-primary group-hover:underline sm:text-xl">
+        <span className="line-clamp-2 wrap-break-word">{name}</span>
+      </span>
+    </>
+  );
+
+  return (
+    <div className="flex min-w-0 flex-col items-center gap-3 text-center">
+      {side.team ? (
+        <Link to="/teams/$teamId" params={{ teamId: side.team.id }} className={identityLinkClasses}>
+          {identity}
+        </Link>
+      ) : player ? (
+        <Link
+          to="/players/$pseudo"
+          params={{ pseudo: player.pseudo }}
+          // Names what the player page goes back to (this match sheet).
+          state={backFrom}
+          className={identityLinkClasses}
+        >
+          {identity}
+        </Link>
+      ) : (
+        // Neither a team nor a player: nothing to link to, so no empty <a>.
+        <div className="flex min-w-0 flex-col items-center gap-3">{identity}</div>
+      )}
+
+      {isWinner && (
+        <Pill tone="win">
+          <Trophy aria-hidden="true" className="size-3" />
+          Winner
+        </Pill>
+      )}
+
+      <p className={cn('font-mono text-sm font-bold tabular-nums', eloDeltaClass(side.eloDelta))}>
+        {/* Never "0" when the match is not over: `formatEloDelta(null)` renders an em dash,
+            because "no Elo yet" and "no Elo change" are different facts. */}
+        <span className="sr-only">Elo change: </span>
+        {formatEloDelta(side.eloDelta)}
+        {side.eloAfter !== null && (
+          <span className="ml-2 font-normal text-text-muted">({side.eloAfter} Elo)</span>
+        )}
+      </p>
+    </div>
+  );
+}
 
 /**
  * What a screen reader hears in place of the big "2 – 1".
