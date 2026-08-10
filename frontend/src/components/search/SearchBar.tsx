@@ -5,7 +5,7 @@
 // or
 //    * use the default one
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 
 import { Input } from '@/components/ui/input';
@@ -105,6 +105,7 @@ export function SearchBar({
   panel = 'overlay',
 }: SearchBarProps) {
   const navigate = useNavigate();
+  const fieldId = useId();
   const [query, setQuery] = useState('');
   // `null` = no result yet  `[]` = server answered with no result.
   const [results, setResults] = useState<SearchResult[] | null>(null);
@@ -219,6 +220,7 @@ export function SearchBar({
       )}
 
       <Input
+        id={fieldId}
         className={small ? 'h-9 px-3' : undefined}
         type="search"
         value={query}

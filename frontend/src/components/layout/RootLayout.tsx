@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { TanStackRouterDevtools } from '@tanstack/react-router-devtools';
 
 import { titleForPath } from '@/lib/page-title';
 
@@ -20,7 +19,6 @@ export function RootLayout() {
   return (
     <div className="arena-background min-h-screen text-text-primary">
       <Outlet />
-      <TanStackRouterDevtools />
     </div>
   );
 }
