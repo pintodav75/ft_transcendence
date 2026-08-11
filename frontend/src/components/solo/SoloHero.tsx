@@ -17,12 +17,7 @@ type SoloHeroProps = {
   /** Always `'1v1'` here, but read from the data — the page refuses any other format. */
   format: string;
   me: { pseudo: string; displayName: string | null; avatarUrl: string | null };
-  /**
-   * My line on this ladder, or `undefined` when I have none yet. On a solo ladder that is the
-   * NORMAL state of a new account: a line is created by the first match RESULT, and there is
-   * no enrolment to make it appear earlier. "No line" and "still loading" must not look
-   * alike, hence the two flags below.
-   */
+  /** My line on this ladder, or `undefined` when I have none yet. */
   standing: RankingEntry | undefined;
   ladderSize: number;
   rankingsPending: boolean;
@@ -32,16 +27,10 @@ type SoloHeroProps = {
 };
 
 /**
- * "Dossier" header of `/solo/$ladderId` — the counterpart of `TeamHero`, with MY identity in
- * place of the team's.
- *
- * Two deliberate differences from the team header, both from the card:
- *   - the identity is an avatar + a pseudo, not a logo + a team name;
- *   - there are THREE stats, not four. `Roster (n/10)` is gone because there is no roster:
- *     on a 1v1 ladder the player IS the side.
- *
- * The strip itself is the shared `StatStrip` (`components/ui`), so the two headers cannot
- * drift on the part that is genuinely identical.
+ * Header of /solo/$ladderId. Counterpart of TeamHero with my identity instead of the team's:
+ *   - avatar + pseudo, not logo + team name
+ *   - three stats, not four — no "Roster (n/10)", on a 1v1 ladder the player IS the side
+ * the strip itself is the shared StatStrip so the two headers can't drift.
  */
 export function SoloHero({
   gameId,
@@ -62,8 +51,7 @@ export function SoloHero({
       aria-labelledby={headingId}
       className="overflow-hidden rounded-card border border-border-subtle"
     >
-      {/* `GameBanner` carries the artwork AND the bottom-to-top readability gradient, and is
-          `aria-hidden` by design: the game's name is written in full just below. */}
+
       <GameBanner gameId={gameId} name={gameName} className="h-40 sm:h-44" />
 
       <div className="relative -mt-14 flex flex-wrap items-end gap-4 px-4 pb-5 sm:px-6">
@@ -78,15 +66,13 @@ export function SoloHero({
             {me.displayName ?? me.pseudo}
           </h1>
           <p className="mt-2 text-xs label-caps text-text-secondary">
-            {/* `ladderSubtitle` drops the ladder's name when it is just "<game> <format>",
-                which would otherwise read "Chess · 1v1 · Chess 1v1". */}
+
             {[gameName, format, ladderSubtitle(ladderName, gameName, format)]
               .filter(Boolean)
               .join(' · ')}
           </p>
         </div>
-        {/* `ml-auto` pushes the action to the trailing edge on a wide viewport; the wrapping
-            row drops it onto its own line below ~500 px instead of squeezing the pseudo. */}
+
         {actions ? <div className="ml-auto flex flex-wrap gap-2">{actions}</div> : null}
       </div>
 

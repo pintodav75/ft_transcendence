@@ -8,19 +8,16 @@ import {
 } from '@/components/legal/legal-page';
 
 /**
- * `/privacy` — the Privacy Policy.
+ * `/privacy` — the Privacy Policy. A placeholder here is a rejection motive for the project.
  *
- * 🚨 A PLACEHOLDER HERE IS A REJECTION MOTIVE of the whole project, on the same footing as
- * a warning in the Chrome console. That is why this page describes what the code ACTUALLY
- * does — every claim below was read off the source on 1 August 2026:
- *   · the columns of `usersTable` and friends → `backend/src/db/schema.ts`
- *   · the one and only cookie → `backend/src/auth/cookies.ts` (`refresh`, 7 days)
- *   · what deleting an account erases, and what survives → `DELETE /users/me` and the
- *     `onDelete` of each foreign key (messages, blocks and line-ups CASCADE; a played match
- *     keeps its score)
- *   · the two 24 h clocks → `backend/src/jobs/index.ts`
- *   · upload limits → `IMAGE_MIME` / `EVIDENCE_MIME` and the multipart limits
- * ⚠️ CHANGE THE CODE, CHANGE THIS PAGE. A policy that over-promises is worse than none.
+ * every claim on this page describes what the code actually does:
+ *   - stored columns          -> backend/src/db/schema.ts
+ *   - the one and only cookie -> backend/src/auth/cookies.ts (refresh, 7 days)
+ *   - what deletion erases    -> DELETE /users/me and the onDelete of each FK (messages,
+ *     blocks and line-ups cascade; a played match keeps its score)
+ *   - the two 24 h clocks     -> backend/src/jobs/index.ts
+ *   - upload limits           -> IMAGE_MIME / EVIDENCE_MIME and the multipart limits
+ * CHANGE THE CODE, CHANGE THIS PAGE. a policy that over-promises is worse than none.
  */
 const CONTENTS = [
   { id: 'who', title: 'Who is behind VSMODE' },

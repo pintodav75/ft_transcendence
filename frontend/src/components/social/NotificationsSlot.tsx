@@ -30,31 +30,16 @@ import type { AppNotification } from '@/lib/notifications';
 import type { NotificationLink } from '@/lib/notification-copy';
 
 type NotificationsSlotProps = {
-  /**
-   * Posts a sentence in the ONE live region of the rail, which `SocialPanel` owns and mounts.
-   * This slot declares no `role="status"` / `aria-live` of its own — see the comment there,
-   * and the two review passes it already cost on [FS-1] and [FS-3].
-   */
+  /** Posts a sentence in the ONE live region of the rail, which `SocialPanel` owns and mounts. */
   announce: (text: string) => void;
   /**
    * Closes the bell's panel — and, under 1024 px, the social overlay around it — before a link
-   * navigates. Without it the visitor lands on a page hidden behind an `aria-modal` overlay.
+   * navigates.
    */
   onNavigate: () => void;
 };
 
-/**
- * The content of the bell's panel: my notifications, newest first, with the two read actions.
- *
- * 🚨 MOUNTED ONLY WHILE THE PANEL IS OPEN. The social rail is on every authenticated page, so
- * this component — and the GET inside it — is what `SocialPanel` mounts and unmounts with the
- * bell. The badge's count is the ONE thing fetched before that, because it is what the badge
- * shows (see `useUnreadNotificationCount`). Same discipline as [FS-3] and [FS-4].
- *
- * 🔑 TWO SOURCES, JOINED AT RENDER, like every other slot of this rail: the pages come from
- * `GET /notifications` (TanStack Query) and the live arrivals from the single WebSocket of
- * [FS-0], merged and deduplicated by id — never a refetch per incoming notification.
- */
+/** The content of the bell's panel: my notifications, newest first, with the two read actions. */
 export function NotificationsSlot({ announce, onNavigate }: NotificationsSlotProps) {
   const { data, isPending, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useNotifications();
@@ -64,14 +49,12 @@ export function NotificationsSlot({ announce, onNavigate }: NotificationsSlotPro
   const markAll = useMarkAllNotificationsRead();
   /**
    * Landing point for the focus when an action destroys the control that had it: marking a row
-   * read removes its button, marking everything read removes the header's own. Without this
-   * the platform drops focus on `<body>` and a keyboard user restarts at the top of the page.
-   * Same idiom — and the same visible `SectionTitle` — as [FS-1].
+   * read removes its button, marking everything read removes the header's own.
    */
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   /**
-   * ⚠️ LIVE FIRST, SERVER PAGES AFTER: the last source wins on a conflict (`mergeNotifications`),
+   * LIVE FIRST, SERVER PAGES AFTER: the last source wins on a conflict (`mergeNotifications`),
    * and the server's copy is the one that knows whether the row was read from another tab.
    */
   const notifications = mergeNotifications(live, ...(data?.pages ?? []).map((page) => page.notifications));
@@ -79,7 +62,7 @@ export function NotificationsSlot({ announce, onNavigate }: NotificationsSlotPro
 
   /**
    * The refusal is DISPLAYED by `FormMessage` with no live role of its own (one region per
-   * rail, and it is the panel's), so it is spoken from here — same idiom as [FS-4]'s list.
+   * rail, and it is the panel's), so it is spoken from here — same idiom as the other rail lists.
    */
   useEffect(() => {
     if (!isError) return;
@@ -106,11 +89,7 @@ export function NotificationsSlot({ announce, onNavigate }: NotificationsSlotPro
     );
   }
 
-  /**
-   * Opening a notification reads it — that is what opening something means. The failure is
-   * deliberately SILENT here: the user is already on the page the link led to, and shouting
-   * about a bookkeeping call they never asked for would be noise. The row simply stays unread.
-   */
+  /** Opening a notification reads it — that is what opening something means. */
   function handleOpen(notification: AppNotification) {
     if (notification.readAt === null) {
       markRead.mutate(
@@ -141,16 +120,13 @@ export function NotificationsSlot({ announce, onNavigate }: NotificationsSlotPro
     // `max-h-96` + its own scroller: the popover this sits in has no height of its own, so
     // twenty rows would otherwise run off the bottom of the screen with no way to reach them.
     <div className="flex max-h-96 flex-col gap-3 overflow-y-auto p-3">
-      {/* Names the panel ON SCREEN — the bell above is icon-only — and doubles as the focus
-          landing point (see `headingRef`). Outside the content below so it survives every
-          state, including the empty one "mark all as read" can never produce but a first
-          visit does. */}
+
       <SectionTitle
         headingRef={headingRef}
         action={
           unreadCount > 0 ? (
-            // Three words, not four: the heading, the hairline and this button share 264 px
-            // of usable width inside the popover, and this is the part that cannot truncate.
+            // Three words, not four: the heading, the hairline and this button share 264 px of
+            // usable width inside the popover, and this is the part that cannot truncate.
             <InlineButton
               onClick={handleMarkAll}
               disabled={markAll.isPending}
@@ -233,8 +209,7 @@ function NotificationsContent({
   if (isPending) {
     return (
       <div className="flex flex-col gap-2">
-        {/* Three boxes the height of a real row, so the panel does not jump when the data
-            lands. `aria-hidden`: the sentence below is what a screen reader needs. */}
+
         {[0, 1, 2].map((row) => (
           <div key={row} aria-hidden="true" className="h-12 animate-pulse rounded-control bg-surface-card" />
         ))}
@@ -243,9 +218,7 @@ function NotificationsContent({
     );
   }
 
-  // 🚨 WHAT THERE IS TO READ COMES FIRST. TanStack keeps `data` when a REFETCH fails, so
-  // `isError` goes true on a list that is perfectly usable; wiping it for a background
-  // failure would be worse than the failure itself. Same order of tests as [FS-4].
+  // WHAT THERE IS TO READ COMES FIRST.
   if (notifications.length === 0) {
     if (isError) {
       return (
@@ -283,8 +256,6 @@ function NotificationsContent({
         </div>
       )}
 
-      {/* `role="list"` is explicit: Tailwind's preflight drops the marker and Safari then
-          drops the list semantics with it. */}
       <ul role="list" aria-label="Notifications" className="flex flex-col gap-0.5">
         {notifications.map((notification) => (
           <NotificationRow
@@ -309,12 +280,8 @@ type NotificationRowProps = {
 
 /**
  * One notification: a sentence, a date, and — when it is safe — a way to the screen it talks
- * about (see `describeNotification` for the four destinations that qualify and the two that
- * do not).
- *
- * 🔑 THE "MARK AS READ" BUTTON IS A SIBLING OF THE LINK, NEVER INSIDE IT. A control nested in
- * a link is invalid HTML that browsers repair by splitting the DOM, and it would be
- * unreachable by keyboard in the bargain.
+ * about (see `describeNotification` for the four destinations that qualify and the two that do
+ * not).
  */
 function NotificationRow({ notification, onOpen, onMarkRead, isMarkingRead }: NotificationRowProps) {
   const { text, link } = describeNotification(notification);
@@ -325,8 +292,7 @@ function NotificationRow({ notification, onOpen, onMarkRead, isMarkingRead }: No
       {/* Said in words, because the dot is decorative and colour alone is not information. */}
       {unread && <span className="sr-only">Unread. </span>}
       {text}
-      {/* Without these words the row reads "…was cancelled. 14:32" — a bare clock time
-          dropped at the end of a sentence, saying nothing about what it dates. */}
+
       <span className="sr-only"> Received </span>
       <time dateTime={notification.createdAt} className="ml-1 whitespace-nowrap text-xs text-text-muted">
         {formatRailTime(notification.createdAt)}
@@ -341,8 +307,7 @@ function NotificationRow({ notification, onOpen, onMarkRead, isMarkingRead }: No
         unread && 'bg-surface-card-strong/60',
       )}
     >
-      {/* Fixed-width slot rather than a conditional dot: read and unread rows must start their
-          text on the same vertical line. */}
+
       <span aria-hidden="true" className="mt-2 flex size-1.5 shrink-0">
         {unread && <span className="size-1.5 rounded-full bg-arena-blue" />}
       </span>
@@ -352,9 +317,9 @@ function NotificationRow({ notification, onOpen, onMarkRead, isMarkingRead }: No
           {body}
         </NotificationLinkBody>
       ) : (
-        // `break-words`: a team name is user-provided text and can be one long unbroken word
-        // — in a 288 px popover that is the difference between wrapping and overflowing.
-        <p className={cn('min-w-0 flex-1 break-words text-sm', unread ? 'text-text-primary' : 'text-text-secondary')}>
+        // `wrap-break-word`: a team name is user-provided text and can be one long unbroken word —
+        // in a 288 px popover that is the difference between wrapping and overflowing.
+        <p className={cn('min-w-0 flex-1 wrap-break-word text-sm', unread ? 'text-text-primary' : 'text-text-secondary')}>
           {body}
         </p>
       )}
@@ -382,16 +347,10 @@ type NotificationLinkBodyProps = {
   children: ReactNode;
 };
 
-/**
- * The sentence, as a link to the screen it is about.
- *
- * 🚨 ONE LITERAL `<Link>` PER KIND, not a computed `to`. TanStack ties `params` to the literal
- * route path, so a union there is not type-checkable — and losing that check is exactly how a
- * route rename ends up producing a link to nowhere at runtime (`MatchLineLink` says the same).
- */
+/** The sentence, as a link to the screen it is about. */
 function NotificationLinkBody({ link, onClick, unread, children }: NotificationLinkBodyProps) {
   const className = cn(
-    'focus-ring min-w-0 flex-1 break-words rounded-control text-sm transition hover:text-text-primary hover:underline',
+    'focus-ring min-w-0 flex-1 wrap-break-word rounded-control text-sm transition hover:text-text-primary hover:underline',
     unread ? 'text-text-primary' : 'text-text-secondary',
   );
   // Spoken after the sentence, so the destination is announced without being read twice.

@@ -24,8 +24,8 @@ export const useRealtimeStore = create<RealtimeStore>((set) => ({
   setConnectionState: (connectionState) =>
     set((state) => ({
       connectionState,
-      // The ids may remain useful until the next snapshot, but their count is stale while
-      // the transport is reconnecting and must not be presented as current information.
+      // The ids may remain useful until the next snapshot, but their count is stale while the
+      // transport is reconnecting and must not be presented as current information.
       hasPresenceSnapshot:
         connectionState === 'reconnecting' ? false : state.hasPresenceSnapshot,
     })),

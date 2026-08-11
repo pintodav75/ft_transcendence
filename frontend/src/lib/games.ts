@@ -6,26 +6,25 @@ import { retryServerErrorsOnly } from '@/lib/ladders';
 
 import type { components, paths } from '@/lib/api-types.gen';
 
-// Games and ladders are seeded reference data that doesn't change during a
-// session, so we cache them for an hour: no refetch on remount or window focus.
+// Games and ladders are seeded reference data that doesn't change during a session, so we cache
+// them for an hour: no refetch on remount or window focus.
 const REFERENCE_STALE_TIME = 1000 * 60 * 60;
 
 export type Game = {
   id: string;
   name: string;
   /**
-   * ⚠️ Typed from the CODEGEN union (see `RequiredProvider` below), not `string`: a screen
-   * that renders one label per provider must break at COMPILE TIME the day a provider is
-   * added, instead of rendering `undefined` at runtime.
+   * Typed from the CODEGEN union (see `RequiredProvider` below), not `string`: a screen that
+   * renders one label per provider must break at COMPILE TIME the day a provider is added,
+   * instead of rendering `undefined` at runtime.
    */
   requiredProvider: RequiredProvider;
   isActive: boolean;
 };
 
-// Sorts games by the front-defined display order (data/games.ts); any game not
-// listed there (not yet implemented front-side) is pushed to the end, keeping
-// its incoming order via the stable sort. Copies first so the React Query cache
-// array is never mutated in place.
+// Sorts games by the front-defined display order (data/games.ts); any game not listed there
+// (not yet implemented front-side) is pushed to the end, keeping its incoming order via the
+// stable sort.
 export function sortGames(games: Game[]): Game[] {
   const rank = (id: string) => {
     const i = gameOrder.indexOf(id);
@@ -52,19 +51,7 @@ export function useSortedGames() {
 type GameDetailResponse =
   paths['/games/{id}']['get']['responses'][200]['content']['application/json'];
 
-/**
- * `GET /games/{id}` — the game AND its map pool.
- *
- * 🔑 A MAP POOL BELONGS TO THE GAME, not to a ladder (`game_maps` is keyed on `games.id`):
- * `GET /ladders/{id}` only serves one because a ladder page needed it first. It is the very
- * table `POST /matches` draws from, so a screen fed by this cannot advertise a map the server
- * would never pick. ⚠️ An EMPTY pool is legitimate — only cs2 and val have maps.
- *
- * ⚠️ `enabled` is the caller's answer to "does this slug exist?", read from the CACHED game
- * list — never from this request. An unknown slug must render its error state without
- * spending a round-trip, because the 404 it would take writes a red line in the Chrome
- * console, and that is a project-rejection criterion. Same discipline as `isValidLadderId`.
- */
+/** `GET /games/{id}` — the game AND its map pool. */
 export function useGameDetail(gameId: string, enabled: boolean) {
   return useQuery({
     queryKey: ['game', gameId],
@@ -80,20 +67,12 @@ export type Ladder = {
   gameId: string;
   format: string;
   name: string;
-  /**
-   * Lockout window of §5.2, in minutes (60 in 5v5, 30 elsewhere). A match at `s` occupies
-   * `]s − lockout, s + lockout[` for its side, which is what lets the client GREY OUT the
-   * quarters a team is already engaged on instead of sending a POST bound for a 409.
-   *
-   * ⚠️ The field was already in the response (`Ladder` schema of `openapi.yaml`, and
-   * `GET /ladders` does a bare `select()`): this hand-written type simply omitted it. No
-   * backend change, nothing to regenerate.
-   */
+  /** Lockout window of §5.2, in minutes (60 in 5v5, 30 elsewhere). */
   lockoutMinutes: number;
 };
 
 // `enabled: false` keeps the request from leaving at all — used by the search bar, whose
-// ladder→game map is dead weight when the search is restricted to players.
+// laddergame map is dead weight when the search is restricted to players.
 export function useLadders({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['ladders'],
@@ -105,14 +84,7 @@ export function useLadders({ enabled = true }: { enabled?: boolean } = {}) {
 
 export type GameByLadder = Map<string, { game: string; format: string }>;
 
-/*
-`ladderId` → le jeu et le format de ce ladder.
-
-`GET /search` ne rend qu'un `ladderId` sur un résultat d'équipe, pas son jeu.
-On le reconstruit client side via useLadders (cached)
-
-appelé une fois par écran
-*/
+/** `ladderId` le jeu et le format de ce ladder. */
 export function useGameByLadder({ enabled = true }: { enabled?: boolean } = {}) {
   const { data } = useLadders({ enabled });
   return useMemo(() => {
@@ -124,17 +96,7 @@ export function useGameByLadder({ enabled = true }: { enabled?: boolean } = {}) 
   }, [data]);
 }
 
-/**
- * The external account a game requires before a player can be fielded.
- *
- * ⚠️ Typed from the CODEGEN, not from the hand-written `Game` above: the union
- * (`riot | steam | epic | chess_com`) is a contract, and a page that renders a label per
- * member must break at compile time the day a provider is added.
- *
- * The labels moved out of `lib/team-detail.ts` when the ladder page became their second
- * reader — a ladder is a game × format, so "which account does this game require" belongs
- * with the games module, not with a team.
- */
+/** The external account a game requires before a player can be fielded. */
 export type RequiredProvider = components['schemas']['Game']['requiredProvider'];
 
 const providerLabels: Record<RequiredProvider, string> = {
@@ -148,19 +110,7 @@ export function providerLabel(provider: RequiredProvider) {
   return providerLabels[provider];
 }
 
-/**
- * Every provider the platform knows about, in display order.
- *
- * Derived from `providerLabels`, never written out as a literal: that record is keyed on the
- * codegen union, so a provider added to `openapi.yaml` breaks the build until it gets a label,
- * and `/profile` then lists it for free. A hand-written array would keep compiling and hide it.
- *
- * ⚠️ Not the same question as the `/home` banner, which lists only the providers the platform's
- * GAMES require and the user has not linked (`lib/home.ts`, from `GET /games`). The settings
- * page lists all of them — linking an account for a game with no ladder yet is harmless.
- *
- * `Object.keys` preserves insertion order for string keys, so the rows are stable without a sort.
- */
+/** Every provider the platform knows about, in display order. */
 export const ALL_PROVIDERS = Object.keys(providerLabels) as RequiredProvider[];
 
 // Distinct ranking formats a game supports, derived from its ladders.

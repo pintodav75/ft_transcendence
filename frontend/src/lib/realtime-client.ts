@@ -10,8 +10,7 @@ const RECONNECT_MAX_DELAY_MS = 30_000
 const AUTH_POLICY_VIOLATION_CODE = 1008
 /**
  * How long a deferred resynchronisation waits for a send to be acknowledged before going ahead
- * anyway. Same 10 s as `ChatConversation`'s own send timeout: past it the composer has already
- * declared the message lost, so there is nothing left to protect.
+ * anyway.
  */
 const RESYNC_SEND_GRACE_MS = 10_000
 
@@ -28,10 +27,6 @@ class RealtimeClient {
   /**
    * How many sends are still waiting for the server to answer them (`message_sent`, or an
    * `error` frame). Read by `resynchronize()` only — see the comment there.
-   *
-   * A COUNTER and not a boolean: up to three conversations are on screen at once and each may
-   * have a send in flight. It is floored at 0 and reset whenever the socket goes, so a frame
-   * the server never sends cannot leave it stuck above zero for good.
    */
   private sendsAwaitingAck = 0
   private resyncPending = false
@@ -43,10 +38,7 @@ class RealtimeClient {
   }
 
   connect(userId: string, accessToken: string) {
-    // The backend validates the JWT only during the WebSocket handshake. Rotating the
-    // short-lived access token does not change the user session and must not make every
-    // friend observe a false offline/online transition. Keep the fresh token for the next
-    // real reconnect instead.
+    // The backend validates the JWT only during the WebSocket handshake.
     const sameSession = this.userId === userId
     const socketIsActive =
       this.socket?.readyState === WebSocket.CONNECTING ||
@@ -91,13 +83,6 @@ class RealtimeClient {
   /**
    * Re-asks the server for the presence snapshot, by dropping and reopening the socket — the
    * only way there is (see `refreshPresence` in `lib/friend-mutations.ts`).
-   *
-   * 🚨 IT WAITS FOR A SEND THAT IS STILL IN FLIGHT. Closing the socket makes `connectionState`
-   * go `reconnecting`, and an open conversation reacts to that by declaring its pending message
-   * lost and putting the text back in the composer — while the server has in fact received and
-   * STORED it. The user re-sends, and creates a real duplicate. So a resynchronisation asked for
-   * while the server still owes an answer is deferred until that answer lands (or until
-   * `RESYNC_SEND_GRACE_MS`, so a frame that never comes cannot cancel it altogether).
    */
   resynchronize() {
     if (!this.userId || !this.accessToken || this.authRejected) {
@@ -269,10 +254,6 @@ class RealtimeClient {
   /**
    * Closes the socket we hold, whoever asked — a session change, a logout, going offline, or a
    * resynchronisation.
-   *
-   * ⚠️ IT ALSO DROPS THE SEND BOOKKEEPING. The answers to whatever was in flight died with the
-   * socket, and a resynchronisation still waiting for one must not outlive the socket (or the
-   * session) it was asked for: it would reopen a connection nobody wants any more.
    */
   private closeCurrentSocket() {
     const socket = this.socket

@@ -30,16 +30,12 @@ function conflictOf(payload: unknown): TeamCreateConflict | undefined {
 
 type TeamCreationProps = {
   /**
-   * Ladder pre-picked by the caller — `/teams?create=<id>`, set by a game page so the user
-   * does not have to choose the ladder he has just chosen. Validated by the caller (it must
-   * exist and not be a solo ladder); `undefined` restores the picker's own default.
+   * Ladder pre-picked by the caller — `/teams?create=<id>`, set by a game page so the user does
+   * not have to choose the ladder he has just chosen.
    */
   defaultLadderId?: string;
-  // Called after a successful create with the team's name, so the parent can
-  // refresh its list and name the team in its success banner. `warning`
-  // carries a non-blocking message (logo upload failure) the parent must show
-  // even though the create itself succeeded — TeamCreation unmounts as soon
-  // as this resolves, so it cannot display it itself.
+  // Called after a successful create with the team's name, so the parent can refresh its list
+  // and name the team in its success banner.
   onCreated: (teamName: string, warning?: string) => Promise<void>;
   // Closes the form without creating anything — lives inside the form now.
   onCancel: () => void;
@@ -63,9 +59,8 @@ export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreat
     defaultValues: { ladderId: defaultLadderId ?? '', name: '' },
   });
 
-  // `useWatch` rather than the form's `watch()` method: the latter breaks the
-  // React Compiler's memoization guarantees (flagged by
-  // react-hooks/incompatible-library).
+  // `useWatch` rather than the form's `watch()` method: the latter breaks the React Compiler's
+  // memoization guarantees (flagged by react-hooks/incompatible-library).
   const name = useWatch({ control, name: 'name' });
 
   const ladderError = dirtyFields.ladderId || isSubmitted ? errors.ladderId?.message : undefined;
@@ -77,9 +72,8 @@ export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreat
     let createdTeam: Team;
 
     try {
-      // The 201 carries the raw team row, which lacks the ladder and game
-      // names the list renders — refetching (onCreated) is simpler than
-      // rebuilding them here.
+      // The 201 carries the raw team row, which lacks the ladder and game names the list
+      // renders — refetching (onCreated) is simpler than rebuilding them here.
       const response = await apiFetch<{ team: Team }>('/teams', {
         method: 'POST',
         body: { ladderId: values.ladderId, name: values.name },
@@ -87,10 +81,8 @@ export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreat
       createdTeam = response.team;
     } catch (creationError) {
       if (creationError instanceof ApiError && creationError.status === 409) {
-        // Two distinct causes share the 409: name already taken on this ladder
-        // (field-level), or the user is already in a team on this ladder (not
-        // about any single field). On se fie au `code` du contrat, jamais au
-        // texte de `error` — celui-ci peut être reformulé sans préavis.
+        // Two distinct causes share the 409: name already taken on this ladder (field-level),
+        // or the user is already in a team on this ladder (not about any single field).
         const conflict = conflictOf(creationError.payload);
         setError(conflict?.code === 'name_taken' ? 'name' : 'root.server', {
           type: 'server',
@@ -100,9 +92,9 @@ export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreat
       }
 
       if (creationError instanceof ApiError && creationError.status === 400) {
-        // A Zod rejection answers { errors: [...] }, so ApiError has no
-        // message to show — client-side validation should already have
-        // caught this, but stay generic and readable just in case.
+        // A Zod rejection answers { errors: [...] }, so ApiError has no message to show —
+        // client-side validation should already have caught this, but stay generic and readable
+        // just in case.
         setError('root.server', {
           type: 'server',
           message: `Pick a ladder and a name of 1 to ${NAME_MAX_LENGTH} characters.`,
@@ -114,8 +106,8 @@ export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreat
       return;
     }
 
-    // The team exists from this point on no matter what happens below: a
-    // failed logo upload must never look like a failed team creation.
+    // The team exists from this point on no matter what happens below: a failed logo upload
+    // must never look like a failed team creation.
     let logoUploadWarning: string | undefined;
 
     if (logoFile) {
@@ -152,7 +144,7 @@ export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreat
               value={field.value || undefined}
               onChange={(nextLadderId) => field.onChange(nextLadderId ?? '')}
               excludeSolo
-              // ⚠️ Needed IN ADDITION to `defaultValues` above: the picker announces its own
+              // Needed IN ADDITION to `defaultValues` above: the picker announces its own
               // default as soon as its lists land, which would otherwise overwrite ours.
               initialLadderId={defaultLadderId}
             />
@@ -171,9 +163,7 @@ export function TeamCreation({ defaultLadderId, onCreated, onCancel }: TeamCreat
           aria-describedby={nameError ? 'team-name-error' : 'team-name-count'}
           {...register('name')}
         />
-        {/* Pas de `maxLength` natif (convention Register/Login : c'est Zod qui tranche),
-            donc le compteur doit lui-même signaler le dépassement — sinon rien n'indique
-            pourquoi la soumission va échouer. */}
+
         <p
           id="team-name-count"
           className={cn(

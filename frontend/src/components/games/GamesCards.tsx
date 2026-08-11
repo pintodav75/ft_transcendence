@@ -8,8 +8,8 @@ import { GamesFallback } from './GamesFallback';
 export function GamesCards() {
   const { games, isLoading, isError } = useSortedGames();
   const ladders = useLadders();
-  // Generated rather than hardcoded: an id must stay unique even if this
-  // section is ever rendered more than once on a page.
+  // Generated rather than hardcoded: an id must stay unique even if this section is ever
+  // rendered more than once on a page.
   const headingId = useId();
 
   if (isLoading || ladders.isLoading) return <GamesFallback variant="loading" />;
@@ -24,13 +24,10 @@ export function GamesCards() {
         Choose your arena
       </h2>
 
-      {/* role="list" is redundant on paper, but Safari drops list semantics
-          from a <ul> as soon as it is display:flex — restating it keeps the
-          "list of N games" announcement. */}
       <ul role="list" className="flex flex-wrap justify-evenly gap-4">
         {games.map((game) => (
-          // group + focusable card: the info overlay reveals on hover (mouse)
-          // and on keyboard focus (group-focus-within), so it stays accessible.
+          // group + focusable card: the info overlay reveals on hover (mouse) and on keyboard
+          // focus (group-focus-within), so it stays accessible.
           <li
             key={game.id}
             tabIndex={0}

@@ -16,29 +16,22 @@ type TeamHeroProps = {
   gameName: string;
   memberCount: number;
   /**
-   * The team's ladder line, or `undefined` when the team has no line yet — a line is
-   * created by the FIRST match result, not by team creation. "No line" and "still
-   * loading" must not look alike, hence the two flags below.
+   * The team's ladder line, or `undefined` when the team has no line yet — a line is created by
+   * the FIRST match result, not by team creation.
    */
   standing: RankingEntry | undefined;
   ladderSize: number;
   rankingsPending: boolean;
   rankingsError: boolean;
   /**
-   * Role-dependent buttons rendered in the identity row ("Edit team" for the captain,
-   * "Leave team" for a plain member, nothing for a visitor). The header stays ignorant
-   * of who is looking: the PAGE knows the role, this component only reserves the slot.
+   * Role-dependent buttons rendered in the identity row ("Create match" for the captain, "Leave
+   * team" for a plain member, nothing for a visitor).
    */
   actions?: ReactNode;
 };
 
-// "Dossier" header: game artwork, team identity, then the stats strip. Elo, record and
-// rank come from the LADDER RANKINGS, not from GET /teams/{id}.
-//
-// ⚠️ The stats strip itself moved to `components/ui/stat-strip.tsx` ([F-SOLO]): it is handed
-// plain strings and knows nothing of teams, so it belongs in `ui/`. The identity row above it
-// deliberately stayed — a solo header shows an avatar and a pseudo, which is a different row,
-// not a parameter of this one.
+// "Dossier" header: game artwork, team identity, then the stats strip. Elo, record and rank
+// come from the LADDER RANKINGS, not from GET /teams/{id}.
 export function TeamHero({
   team,
   gameName,
@@ -79,9 +72,7 @@ export function TeamHero({
               .join(' · ')}
           </p>
         </div>
-        {/* `ml-auto` pushes the actions to the trailing edge on a wide viewport; the
-            wrapping row drops them onto their own line below ~500 px instead of
-            squeezing the team name. */}
+
         {actions ? <div className="ml-auto flex flex-wrap gap-2">{actions}</div> : null}
       </div>
 
@@ -104,9 +95,7 @@ export function TeamHero({
           rankingsError
             ? 'Ladder standings could not be loaded.'
             : !rankingsPending && !standing
-              ? // ⚠️ A PLAIN apostrophe (U+0027): the JSX this replaced wrote `&apos;`, which
-                // the JSX parser decodes to U+0027 — a curly ’ here would silently change the
-                // rendered text of a screen this ticket is not supposed to touch.
+              ? // A PLAIN apostrophe (U+0027): the JSX this replaced wrote `&apos;`, which the JSX parser decodes to U+0027 — a curly ’ here would silently change the rendered text of a screen this ticket is not supposed to touch.
                 "Not ranked yet — a ladder line is created by this team's first match result."
               : undefined
         }

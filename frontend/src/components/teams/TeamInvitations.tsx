@@ -19,13 +19,9 @@ import type { MyTeamInvitation } from '@/lib/teams';
 
 type TeamInvitationsProps = {
   /**
-   * Ce que la page hôte prête à ce bloc pour le seul cas où il DISPARAÎT ENTIÈREMENT :
-   * refuser la dernière invitation démonte la section, et avec elle son titre (le point
-   * d'atterrissage habituel du focus) ET sa région live (donc l'annonce, qui s'effacerait
-   * avant d'être lue). Les deux ont la même cause, ils viennent donc ensemble.
-   *
-   * Optionnel : sans lui le composant fonctionne exactement comme avant, et sa promesse
-   * d'origine — déposable tel quel sur `/profile` ou dans le rail social — est intacte.
+   * Ce que la page hôte prête à ce bloc pour le seul cas où il DISPARAÎT ENTIÈREMENT : refuser
+   * la dernière invitation démonte la section, et avec elle son titre (le point d'atterrissage
+   * habituel du focus) ET sa région live (donc l'annonce, qui s'effacerait avant d'être lue).
    */
   host?: {
     focusRef: RefObject<HTMLElement | null>;
@@ -33,27 +29,15 @@ type TeamInvitationsProps = {
   };
 };
 
-/**
- * The teams that have invited me, with Accept / Decline.
- *
- * SELF-CONTAINED on purpose: it takes no props and runs its own query, so it can be dropped
- * on `/profile` or into the social rail later without a line of rewriting. That is the only
- * concession made to a future consumer — no "generic" API was invented for one that does
- * not exist yet.
- *
- * ⚠️ Renders NOTHING when there is no invitation. An "you have no invitation" block would be
- * permanent noise on every visit for a case that is rare by nature.
- */
+/** The teams that have invited me, with Accept / Decline. */
 export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
   const { data, isError } = useMyTeamInvitations();
   const accept = useAcceptTeamInvitation();
   const decline = useDeclineTeamInvitation();
-  // Survives the list going empty: accepting my last invitation removes the row that
-  // triggered it, so the confirmation has to live outside the list to still be readable.
+  // Survives the list going empty: accepting my last invitation removes the row that triggered
+  // it, so the confirmation has to live outside the list to still be readable.
   const [joinedTeamName, setJoinedTeamName] = useState<string | null>(null);
-  // FX-FOCUS — répondre supprime la ligne AVEC ses deux boutons. Il n'y a même pas de
-  // `<dialog>` ici pour tenter une restauration : sans point d'atterrissage, le focus tombe
-  // sur `<body>` et l'utilisateur au clavier repart du haut de la page.
+  // Répondre supprime la ligne AVEC ses deux boutons.
   const headingRef = useRef<HTMLHeadingElement>(null);
   const answered = useAnnouncement();
 
@@ -63,18 +47,11 @@ export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
     return <FormMessage className="text-sm">Could not load your team invitations.</FormMessage>;
   }
 
-  // Loading renders nothing either: a skeleton would push the grid down on every single
-  // visit for a block that is usually absent.
+  // Loading renders nothing either: a skeleton would push the grid down on every single visit
+  // for a block that is usually absent.
   if (invitations.length === 0 && !joinedTeamName) return null;
 
-  /**
-   * ⚠️ BOTH mutations are reset at the start of BOTH handlers, and the success banner with
-   * them. With several invitations on screen the two mutation objects are shared by every
-   * row, so without this: the "You joined A" banner would still sit above a row I am now
-   * DECLINING, and a failed accept would keep printing its error on the row while the
-   * decline that replaced it is still in flight (the `accept ?? decline` chain below reads
-   * `accept` first). Same pattern as `dismissCancelInvitation` in `TeamManage`.
-   */
+  /** BOTH mutations are reset at the start of BOTH handlers, and the success banner with them. */
   function clearFeedback() {
     accept.reset();
     decline.reset();
@@ -83,25 +60,12 @@ export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
 
   function handleAccept(invitation: MyTeamInvitation) {
     clearFeedback();
-    // No navigation on success. The grid below refreshes on its own (`['teams']` is
-    // invalidated by the hook) and the new team appears — which is the proof asked for,
-    // without replaying the navigate/removeQueries minefield of the dissolution flow.
+    // No navigation on success.
     accept.mutate(invitation.id, {
       onSuccess: () => {
         answered.announce(`You joined ${invitation.team.name}.`);
         setJoinedTeamName(invitation.team.name);
-        // 🚨 À LA FRAME SUIVANTE, PAS TOUT DE SUITE — et le commentaire d'avant disait
-        // l'inverse. Focaliser ici mettait bien le focus sur le titre, mais le rendu
-        // déclenché par `setJoinedTeamName` juste au-dessus **remplace** le bloc (la ligne
-        // d'invitation disparaît, « You joined … » apparaît) : le titre est remonté et le
-        // focus retombe sur `<body>`. L'utilisateur au clavier repartait donc du haut de la
-        // page. Même idiome que `ActionMenu` et `ChatConversation` — on attend que React ait
-        // committé avant de poser le focus.
-        // 🔑 Le défaut était RÉEL depuis FT-INV mais se cachait derrière un check instable :
-        // l'attente du harnais rendait la main dès que le focus quittait `<body>`, donc elle
-        // échantillonnait parfois l'instant AVANT la retombée. Rendue stricte (focus hors de
-        // `<body>` sur trois frames consécutives), elle a rendu le défaut visible à tous les
-        // coups.
+        // À LA FRAME SUIVANTE, PAS TOUT DE SUITE — et le commentaire d'avant disait l'inverse.
         requestAnimationFrame(() => headingRef.current?.focus());
       },
     });
@@ -111,9 +75,8 @@ export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
     clearFeedback();
     decline.mutate(invitation.id, {
       onSuccess: () => {
-        // ⚠️ Refuser la DERNIÈRE invitation démonte tout le bloc, titre compris (le garde
-        // `invitations.length === 0 && !joinedTeamName` juste au-dessus). Accepter, lui, le
-        // garde en vie pour afficher « You joined … ». D'où le repli fourni par la page.
+        // Refuser la DERNIÈRE invitation démonte tout le bloc, titre compris (le garde
+        // `invitations.length === 0 && !joinedTeamName` juste au-dessus).
         const message = `The invitation from ${invitation.team.name} was declined.`;
         const lastOne = invitations.length === 1;
         if (lastOne && host) {
@@ -131,23 +94,15 @@ export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
     <section className="flex flex-col gap-3">
       <SectionTitle headingRef={headingRef}>Team invitations</SectionTitle>
 
-      {/* Montée en permanence, seul son texte change : une région insérée en même temps que
-          son contenu n'est pas annoncée de façon fiable. */}
       <p role="status" className="sr-only">
         {answered.message}
       </p>
 
-      {/* Plus de `role="status"` sur ce Callout : l'annonce passe par la région ci-dessus,
-          une seule voix pour un seul événement. Ce bloc redevient purement visuel. */}
       {joinedTeamName && <Callout tone="success">You joined “{joinedTeamName}”.</Callout>}
 
-      {/* role="list" is explicit: Tailwind's preflight drops the marker, and Safari then
-          drops list semantics from the accessibility tree with it. */}
       <ul role="list" className="flex flex-col gap-2">
         {invitations.map((invitation) => {
-          // ⚠️ PER ROW. One `useMutation` is shared by the whole list, so
-          // `accept.isPending` alone would spin every row at once; pairing it with
-          // `variables` narrows it to the invitation actually being answered.
+          // PER ROW.
           const accepting = accept.isPending && accept.variables === invitation.id;
           const declining = decline.isPending && decline.variables === invitation.id;
           const busy = accepting || declining;
@@ -168,8 +123,6 @@ export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
                 className="size-11 shrink-0"
               />
 
-              {/* `min-w-32` is what makes the two buttons drop onto their own line on a
-                  narrow screen instead of crushing the team name to three letters. */}
               <div className="min-w-32 flex-1">
                 <p className="truncate text-sm font-bold text-text-primary">
                   {invitation.team.name}
@@ -181,8 +134,7 @@ export function TeamInvitations({ host }: TeamInvitationsProps = {}) {
               </div>
 
               <div className="flex shrink-0 gap-2">
-                {/* Nominative accessible names: three rows of "Accept" tell a screen
-                    reader user nothing about WHICH team they are joining. */}
+
                 <Button
                   variant="primary"
                   disabled={busy}

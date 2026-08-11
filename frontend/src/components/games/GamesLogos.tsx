@@ -12,8 +12,8 @@ export function GamesLogos() {
   return (
     <div className="flex items-center gap-3">
       {games.map((game) => (
-        // remplacer <a> par <Link> lorsque les routes vers les jeux definies
-        // pour eviter les rechargements de page
+        // remplacer <a> par <Link> lorsque les routes vers les jeux definies pour eviter les
+        // rechargements de page
         <a
           key={game.id}
           href={gameHref[game.id]}

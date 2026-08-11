@@ -97,11 +97,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
           { method: 'POST' },
         )
 
-        // 204 = pas de cookie, donc pas de session (B13) : on sort READY et déconnecté.
-        // ⚠️ Garde ÉCRITE, pas subie : `requestAuthJson` rend `undefined` sur un corps vide,
-        // donc sans elle le destructuring jetterait un TypeError que le `catch` ci-dessous
-        // avalerait — on obtiendrait le bon état par accident, en passant par un chemin
-        // d'erreur. C'est exactement ce que B13 veut éviter.
+        // 204 = pas de cookie, donc pas de session : on sort READY et déconnecté.
         if (!session) {
           set({ accessToken: null, user: null, ready: true })
           return

@@ -5,7 +5,7 @@ import type { AppNotification } from '@/lib/realtime-schema';
 /**
  * WHERE a notification leads, as a discriminated union rather than a path.
  *
- * 🔑 A UNION, NOT A COMPUTED `to`. TanStack ties `params` to the literal route path, so a
+ * A UNION, NOT A COMPUTED `to`. TanStack ties `params` to the literal route path, so a
  * variable `to` is not type-checkable — and losing that check is exactly how a route rename
  * ends up producing a link to nowhere at runtime. `NotificationsSlot` renders one literal
  * `<Link>` per kind, the same way `MatchLineLink` does.
@@ -41,37 +41,24 @@ function quoted(name: string) {
 }
 
 /**
- * WHAT ONE NOTIFICATION SAYS, AND WHERE IT LEADS.
+ * What one notification says, and where it leads.
  *
- * 🚨 A NOTIFICATION IS A PAST FACT, AND ITS TARGET MAY BE GONE. A link that answers 404 (or
- * 403) writes a red line in the console, which is a rejection criterion for the whole project
- * — so a target is linked only when it is provably still there AND still readable BY ME:
+ * a notification is a past fact and its target may be gone. a link that 404s or 403s writes a
+ * red console line, so only link a target that is provably still there AND still readable by me:
+ *   - /matches/$matchId — a match row is never deleted (disbanding only nulls the side's
+ *     team_id), and these go to people GET /matches/:id lets in.
+ *   - /disputes/$disputeId — cascades from its match, so never deleted.
+ *   - /ladders/$ladderId — seeded config, restrict on delete, readable by anyone signed in.
+ *     that's why every team payload carries a ladderId: it outlives the team it talks about.
+ *   - /teams — static route, can't 404, and it's where invitations are answered.
  *
- *  ✅ `/matches/$matchId`   — a match row is NEVER deleted (disbanding a team only sets its
- *     side's `team_id` to null), and these notifications go to an aligned player or to the
- *     engaged team's captain, which is exactly who `GET /matches/:id` lets in. ⚠️ ONE match
- *     type is excluded — see `match_cancelled_member_left` below.
- *  ✅ `/disputes/$disputeId` — a dispute cascades from its match, which is never deleted, and
- *     `GET /disputes/:id` admits the aligned players and the engaged teams' members. ⚠️ It
- *     ALSO admits admins, but that is a right checked at every call, so the admin-only type is
- *     not linked — see `dispute_needs_admin` below.
- *  ✅ `/ladders/$ladderId`  — ladders are seeded configuration, `restrict` on delete, and
- *     readable by anyone signed in. That is precisely why every team payload carries a
- *     `ladderId`: it survives the team it talks about (see `notification-schemas.ts`).
- *  ✅ `/teams`             — a static route, so it cannot 404, and it is where invitations are
- *     actually answered.
- *
- * ❌ NOT LINKED — `/teams/$teamId`: disbanding a team DELETES the row (`routes/teams.ts`), so
- *    every team notification would eventually point at a 404. Team notifications lead to the
- *    ladder instead, which is where the team was competing.
- * 🔑 THE TWO EXCEPTIONS ARE BOTH 403s, NOT 404s — a right that was held when the notification
- *    was sent and is not held any more when it is opened. A cancelled match lets its captain
- *    disband the team that gave them access to it (`match_cancelled_member_left` → the ladder),
- *    and an admin can be demoted (`dispute_needs_admin` → no link at all).
- *
- * ❌ NOT LINKED — `/players/$pseudo`: the payload carries a pseudo SNAPSHOT, and an account can
- *    be renamed or deleted (`DELETE /users/me` really deletes the row). Two independent ways
- *    of producing a 404 from a sentence whose only job was to name somebody.
+ * NOT linked:
+ *   - /teams/$teamId — disbanding DELETES the row, so it would eventually 404. team
+ *     notifications lead to the ladder instead.
+ *   - /players/$pseudo — the payload carries a pseudo snapshot, and an account can be renamed
+ *     or deleted.
+ *   - match_cancelled_member_left and dispute_needs_admin — both 403s, not 404s: a right held
+ *     when it was sent and lost by the time it's opened.
  */
 export function describeNotification(notification: AppNotification): NotificationDisplay {
   switch (notification.type) {
@@ -104,15 +91,11 @@ export function describeNotification(notification: AppNotification): Notificatio
 
     case 'match_cancelled_member_left': {
       const { playerPseudo, teamName, scheduledAt } = notification.data;
-      // ⚠️ `scheduledAt` is nullable HERE (and nowhere else), so the time is part of the
-      // sentence only when there is one — never an em dash standing in for a missing hour.
+      // `scheduledAt` is nullable HERE (and nowhere else), so the time is part of the sentence
+      // only when there is one — never an em dash standing in for a missing hour.
       const when = scheduledAt ? ` (${formatMatchDate(scheduledAt, 'short')})` : '';
 
-      // ⚠️ THE LADDER, NOT THE MATCH, and this one is the exception among match notifications.
-      // Its recipients include the CAPTAIN, who may be out of the line-up — and once the match
-      // is cancelled they may legally disband the team, which is exactly what takes their read
-      // access to `GET /matches/:id` away. The ladder is readable by anyone signed in, and the
-      // payload carries `ladderId` for precisely this reason.
+      // THE LADDER, NOT THE MATCH, and this one is the exception among match notifications.
       return {
         text: `@${playerPseudo} left ${quoted(teamName)} — your match${when} was cancelled.`,
         link: { kind: 'ladder', ladderId: notification.data.ladderId },
@@ -131,8 +114,7 @@ export function describeNotification(notification: AppNotification): Notificatio
         text:
           notification.data.resolution === 'cancelled'
             ? 'Your dispute was settled — the match was cancelled.'
-            : // Naming the winning SIDE would mean naming a row id, or guessing which side is
-              // mine. The dispute page states the ruling in full.
+            : // Naming the winning SIDE would mean naming a row id, or guessing which side is mine. The dispute page states the ruling in full.
               'Your dispute was settled — an admin decided the winner.',
         link: { kind: 'dispute', disputeId: notification.data.disputeId },
       };
@@ -144,17 +126,12 @@ export function describeNotification(notification: AppNotification): Notificatio
       };
 
     case 'dispute_needs_admin':
-      // ❌ NOT LINKED, and it is the only dispute type that is not. `GET /disputes/:id` checks
-      // the admin flag AT EVERY CALL, never at the moment the notification was sent — and this
-      // team clears that flag in the database before each console-audit campaign, so an admin
-      // reading yesterday's alert after being demoted is a path our own environment takes. The
-      // sentence still says what happened; `/admin/disputes` is where it is acted on.
+      // NOT LINKED, and it is the only dispute type that is not.
       return { text: 'A dispute is waiting for an admin ruling.', link: null };
 
-    // ------------------------------------------------------------------------ friends
-    // No link on either: the only page about a person is `/players/$pseudo`, and the pseudo
-    // here is a snapshot of an account that may since have been renamed or deleted. The
-    // request itself is answered in the rail's own "Friends" tab, one click away.
+    // ------------------------------------------------------------------------ friends No link
+    // on either: the only page about a person is `/players/$pseudo`, and the pseudo here is a
+    // snapshot of an account that may since have been renamed or deleted.
     case 'friend_request_received':
       return { text: `@${notification.data.fromPseudo} sent you a friend request.`, link: null };
 
@@ -163,9 +140,7 @@ export function describeNotification(notification: AppNotification): Notificatio
 
     // -------------------------------------------------------------------------- teams
     case 'team_member_added':
-      // ⚠️ NOBODY EMITS THIS ANY MORE — adding a player went through invitations with [B-INV].
-      // The value still exists in the database and old rows still reference it, so it gets a
-      // rendering like the other sixteen. It is not an exception, it is history.
+      // NOBODY EMITS THIS ANY MORE — adding a player went through invitations.
       return {
         text: `@${notification.data.byPseudo} added you to ${quoted(notification.data.teamName)}.`,
         link: { kind: 'ladder', ladderId: notification.data.ladderId },
@@ -203,10 +178,8 @@ export function describeNotification(notification: AppNotification): Notificatio
 
     // -------------------------------------------------------------------- safety net
     /**
-     * A type this build has never heard of, or a known type whose payload no longer matches
-     * the contract (`notificationSchema` sends both here). There is nothing truthful to say
-     * about it and nothing safe to link to — but it is still a real, dated notification of
-     * mine, so it is listed, it can be marked read, and it counts in the badge.
+     * A type this build has never heard of, or a known type whose payload no longer matches the
+     * contract (`notificationSchema` sends both here).
      */
     case 'unsupported':
     default:

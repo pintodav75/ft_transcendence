@@ -31,12 +31,7 @@ type CreateSoloSlotPanelProps = {
   providerName: string;
   /** My history ON THIS LADDER — `undefined` while it loads. Feeds BOTH pre-emptions below. */
   matches: SoloMatch[] | undefined;
-  /**
-   * La requête d'historique a-t-elle ÉCHOUÉ ? ⚠️ Distinct de `matches === undefined`, qui
-   * couvre aussi « encore en cours de chargement » : l'ouvrant n'attend que la requête des
-   * comptes liés, alors que `GET /matches/me` est plus lente et retente sur 5xx. Sans ce
-   * drapeau, cliquer dans cette fenêtre annonçait une panne qui n'avait pas eu lieu.
-   */
+  /** La requête d'historique a-t-elle ÉCHOUÉ ? */
   matchesFailed: boolean;
   /** Called with the ISO instant of the slot that was just opened. */
   onCreated: (scheduledAt: string) => void;
@@ -45,26 +40,8 @@ type CreateSoloSlotPanelProps = {
 
 /**
  * Solo slot opener: an inline DISCLOSURE panel, not a modal — same idiom as the team's
- * `CreateMatchPanel`, and for the same reason (a `<dialog>` traps focus around a task the
- * user may want to abandon halfway).
- *
- * 🔑 WHY THIS IS A SEPARATE COMPONENT AND NOT A MODE OF `CreateMatchPanel` (decision taken
- * with David, 30/07): what must never diverge between the two screens are the RULES — the
- * quarter grid, the 15-minute lead, the overlap detection and the cap of five. Those are
- * shared, in `lib/match-slots.ts`, and neither file owns a copy. What legitimately differs is
- * the FORM: there is no line-up here, no roster, no player tiles, no captain. Generalising
- * 410 lines of team JSX to grow an "optional line-up" would have rewritten a component
- * guarded by a 532-line audit scenario and merged the same week, to share markup the two
- * screens do not actually have in common.
- *
- * ⚠️ NO LINE-UP IS SENT AT ALL. `POST /matches` ignores `lineup` in 1v1 (the caller IS the
- * side), and `lineup: []` would be REFUSED in 400 — the field is `min(1).optional()`, so
- * "absent" and "empty" are not the same thing to the server.
- *
- * ⚠️ THIS PANEL ASSUMES THE ACCOUNT IS LINKED. §5.1 is not re-checked here: the page does not
- * render the opener at all without a linked account, because a `POST` bound for a 400 writes
- * a red line in the Chrome console. The 400 is still mapped below, for the page left open
- * while the account was unlinked elsewhere.
+ * `CreateMatchPanel`, and for the same reason (a `<dialog>` traps focus around a task the user
+ * may want to abandon halfway).
  */
 export function CreateSoloSlotPanel({
   id,
@@ -84,18 +61,15 @@ export function CreateSoloSlotPanel({
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   /**
-   * "Now", frozen when the panel opens rather than read at every render — a moving `now`
-   * would silently drop the option the user is about to click. It is refreshed on the one
-   * event that proves it went stale: the 400 saying the slot just passed.
+   * "Now", frozen when the panel opens rather than read at every render — a moving `now` would
+   * silently drop the option the user is about to click.
    */
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const createMatch = useCreateMatch(myMatchesKey(ladder.id));
 
-  // ⚠️ `undefined` (still loading, or the request failed) is NOT the same as an empty history,
-  // and `matches ?? []` would flatten the difference: both pre-emptions below would silently
-  // switch off — no greyed-out quarter, no cap notice — while the screen kept looking normal.
-  // Unknown stays unknown, and is said out loud.
+  // `undefined` (still loading, or the request failed) is NOT the same as an empty history, and
+  // `matches ??
   const engagements = matches ? engagementTimes(matches, nowMs) : undefined;
   const openSlots = matches ? openSlotCount(matches, nowMs) : undefined;
   const atCap = openSlots !== undefined && openSlots >= MAX_OPEN_SLOTS;
@@ -122,10 +96,10 @@ export function CreateSoloSlotPanel({
   const dayValue = useWatch({ control, name: 'day' });
   const timeValue = useWatch({ control, name: 'time' });
 
-  // ⚠️ Unlike the team panel, `lockoutMinutes` is NEVER missing here: it comes from
-  // `GET /ladders/{id}`, which this page has already loaded before rendering the opener (the
-  // team page only has the ladder's id, hence its extra `useLadders()` lookup and its
-  // "rules could not be loaded" branch). So the only unknown left is my own history.
+  // Unlike the team panel, `lockoutMinutes` is NEVER missing here: it comes from `GET
+  // /ladders/{id}`, which this page has already loaded before rendering the opener (the team
+  // page only has the ladder's id, hence its extra `useLadders()` lookup and its "rules could
+  // not be loaded" branch).
   const times = slotTimes(Number(dayValue), nowMs).map((slot) => ({
     ...slot,
     blocked:
@@ -143,8 +117,7 @@ export function CreateSoloSlotPanel({
 
   const submit = handleSubmit((values) => {
     // `new Date(y, m, d, h, min, 0, 0)` produced the epoch behind this value — never a
-    // hand-built string, which would guess at the time zone. Every UTC offset on Earth is a
-    // multiple of 15 min, so a local quarter is always a UTC quarter.
+    // hand-built string, which would guess at the time zone.
     const scheduledAt = new Date(Number(values.time)).toISOString();
 
     createMatch.mutate(
@@ -154,21 +127,14 @@ export function CreateSoloSlotPanel({
         onSuccess: () => onCreated(scheduledAt),
         onError: (error) => {
           // The chosen quarter slipped under the 15-minute bound while the panel sat open.
-          // Showing the message without redrawing the list would let the next click fail
-          // exactly the same way.
           if (isExpiredSlotError(error)) {
             const freshNow = Date.now();
             setNowMs(freshNow);
             setValue('time', '');
 
-            // FX-MIDNIGHT — if the panel stayed open ACROSS MIDNIGHT, the remembered `day` is
+            // If the panel stayed open ACROSS MIDNIGHT, the remembered `day` is
             // yesterday's midnight and matches no `<option>` any more: the menu showed one day
             // while the form held another, and the time list came out empty.
-            // ⚠️ RECOMPUTED here: `days`/`firstUsableDay` of the current render derive from the
-            // OLD `nowMs` (the `setNowMs` above only takes effect next render), so reusing them
-            // would write back the very stale value we are fixing.
-            // ⚠️ The day is NOT reset unconditionally: someone who picked "in 3 days" has no
-            // reason to be dragged back to today because a quarter of an hour went by.
             const freshDays = slotDays(freshNow);
             const stillListed = freshDays.some((day) => day.value === getValues('day'));
             if (!stillListed) {
@@ -193,8 +159,7 @@ export function CreateSoloSlotPanel({
   return (
     <section id={id} aria-labelledby={headingId} className="panel flex flex-col gap-5 p-5">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* `tabIndex={-1}` only so focus can be MOVED here on open; it stays out of the tab
-            order afterwards. */}
+
         <h2
           id={headingId}
           ref={headingRef}
@@ -210,8 +175,7 @@ export function CreateSoloSlotPanel({
 
       {atCap ? (
         <>
-          {/* The 409 stays the real rampart; this only avoids a request whose answer is
-              already known. */}
+
           <Callout tone="muted">
             You already hold {MAX_OPEN_SLOTS} open slots on this ladder. Cancel one from the
             Matches tab before opening another.
@@ -230,8 +194,8 @@ export function CreateSoloSlotPanel({
               <Select
                 id={dayId}
                 aria-invalid={Boolean(dayError)}
-                // Without this, a screen reader announces "invalid" and stops there: the
-                // reason sits in an element nothing points at.
+                // Without this, a screen reader announces "invalid" and stops there: the reason
+                // sits in an element nothing points at.
                 aria-describedby={dayError ? dayErrorId : undefined}
                 {...dayField}
                 onChange={(event) => {

@@ -13,13 +13,7 @@ type PresenceAvatarProps = {
 
 /**
  * A friend's avatar with the little connected dot — the two social screens that show a person
- * ([FS-1]'s friends list, [FS-3]'s conversation header) draw exactly the same thing.
- *
- * 🔑 THE DOT IS PURELY VISUAL, and that is a deliberate a11y choice, not an oversight. Both
- * callers already state presence in text somewhere a screen reader reads once — the name of
- * the list ("Friends online") or the subtitle under the pseudo — so repeating it per avatar
- * would say the same word twice in a row. `unknown` draws no dot at all rather than a grey
- * one: "we do not know" and "offline" are different answers.
+ * (the friends list, the conversation header) draw exactly the same thing.
  */
 export function PresenceAvatar({ src, fallback, presence, className }: PresenceAvatarProps) {
   return (

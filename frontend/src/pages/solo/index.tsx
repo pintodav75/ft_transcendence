@@ -3,17 +3,13 @@ import { User } from 'lucide-react';
 import { SoloLadderCards } from '@/components/solo/SoloLadderCards';
 
 /**
- * `/solo` — the mirror of `/teams`: pick the ladder you want to play on.
+ * `/solo` — the mirror of /teams: pick the ladder you want to play on.
  *
- * 🚨 THE ONE THING THAT MAKES IT DIFFERENT FROM `/teams`, and it drives the whole page: there
- * is NO SUCH THING AS JOINING a solo ladder. A `rankings` row is created by the first match
- * RESULT, never by an enrolment. So this page cannot list "my solo ladders" — it lists the
- * 1v1 ladders that EXIST and hangs my standing off the ones I have played. Listing only the
- * ranked ones would hand a new account an empty page with no way in, which is exactly the
- * trap the card warned about.
- *
- * Consequently there is no invitations block, no game filter (two tiles) and no "create"
- * button: a ladder is seeded by a migration, nobody creates one.
+ * you don't JOIN a solo ladder: a rankings row is created by the first match RESULT, never by
+ * an enrolment. so this can't list "my solo ladders" — it lists the 1v1 ladders that exist and
+ * hangs my standing off the ones I've played. listing only ranked ones gives a new account an
+ * empty page with no way in.
+ * hence no invitations block, no game filter, no create button — ladders are seeded by a migration.
  */
 export function Solo() {
   return (

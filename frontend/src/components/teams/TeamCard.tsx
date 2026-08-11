@@ -7,16 +7,13 @@ import type { TeamListItem } from '@/lib/teams';
 
 type TeamCardProps = {
   team: TeamListItem;
-  // Display name of team.gameId, resolved by the caller (TeamsCards) from
-  // useSortedGames() — used as the artwork's accessible name.
+  // Display name of team.gameId, resolved by the caller (TeamsCards) from useSortedGames() —
+  // used as the artwork's accessible name.
   gameName: string;
 };
 
-// One team, one poster: the whole tile is a single link to the team's detail
-// page — this screen exists only to pick a team, no stats belong here.
-//
-// ⚠️ The tile's markup moved to `components/games/GamePosterTile.tsx` at its second reader
-// (the `/solo` grid, F-SOLO). The rendered DOM is unchanged; only the file it comes from is.
+// One team, one poster: the whole tile is a single link to the team's detail page — this screen
+// exists only to pick a team, no stats belong here.
 export function TeamCard({ team, gameName }: TeamCardProps) {
   return (
     <li>

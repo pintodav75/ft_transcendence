@@ -4,18 +4,13 @@ import { Avatar } from '@/components/ui/avatar';
 import type { ReactNode } from 'react';
 
 /**
- * The square "poster" tile of a picker grid: the game's artwork full-bleed, a readability
- * gradient, an optional corner badge, and an identity strip along the bottom.
+ * The square poster tile of a picker grid: artwork full-bleed, readability gradient, optional
+ * corner badge, identity strip along the bottom. TeamCard is an adapter over this.
  *
- * Extracted from `TeamCard` at its second reader — [F-SOLO]'s `/solo` grid, which the card
- * asked for "au gabarit `TeamCard`" while forbidding a copy of its classes. `TeamCard` is now
- * an adapter over this, so the two grids cannot drift.
- *
- * ⚠️ THIS COMPONENT DOES NOT RENDER THE LINK, and that is deliberate. The two grids point at
- * different routes with different params, and TanStack Router types `to`/`params` as a pair —
- * funnelling them through a generic `href` prop would throw away exactly the type-safety that
- * makes a broken link a compile error. The caller owns its `<Link>` and puts
- * `posterTileClasses` on it; the `group-hover` below hangs off that class.
+ * it does NOT render the link. the grids using it point at different routes with different
+ * params, and TanStack Router types to/params as a pair — a generic href prop would throw away
+ * the type-safety that makes a broken link a compile error. the caller owns its <Link> and
+ * puts posterTileClasses on it, which is what the group-hover below hangs off.
  */
 export const posterTileClasses =
   'group focus-ring relative block aspect-square overflow-hidden rounded-card border border-border-subtle';
@@ -26,11 +21,7 @@ type GamePosterTileProps = {
   gameName: string;
   title: string;
   subtitle: string;
-  /**
-   * Small round emblem left of the title (a team's logo). Left out entirely on a grid where
-   * it would carry no information: a solo ladder tile would only ever show MY avatar, on
-   * every tile, which says nothing about the ladder.
-   */
+  /** Small round emblem left of the title (a team's logo). */
   avatar?: { src?: string; fallback: string };
   /** Corner marker, top right (the captain's crown). */
   badge?: ReactNode;
@@ -46,12 +37,7 @@ export function GamePosterTile({
 }: GamePosterTileProps) {
   return (
     <>
-      {/*
-        Square on purpose: every game asset is a 512x512 square. Any other ratio either
-        crops into the artwork's logotype (4/3 cut the top off Rocket League and
-        Counter-Strike) or letterboxes it. Matching the source ratio is the only framing
-        that shows them whole, full-bleed and undistorted — same choice as GamesCards.
-      */}
+
       <GameImage
         gameId={gameId}
         name={gameName}

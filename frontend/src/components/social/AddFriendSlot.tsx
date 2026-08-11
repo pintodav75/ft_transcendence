@@ -45,36 +45,15 @@ type NoticeTone = 'success' | 'muted' | 'danger';
 type Notice = { tone: NoticeTone; text: string };
 
 type AddFriendSlotProps = {
-  /**
-   * Posts a sentence in the ONE live region of the rail, which `SocialPanel` owns and mounts.
-   * This slot deliberately declares no `role="status"` / `aria-live` of its own — see the
-   * comment there, and the three review passes it already cost on [FS-1], [FS-3] and [FS-4].
-   */
+  /** Posts a sentence in the ONE live region of the rail, which `SocialPanel` owns and mounts. */
   announce: (text: string) => void;
-  /**
-   * Closes the social overlay before a link navigates. Under 1024 px the panel is a full-screen
-   * `aria-modal` overlay, and navigating without closing it leaves the visitor BEHIND it, on a
-   * page they cannot reach. `undefined` on desktop, where the rail is permanent.
-   */
+  /** Closes the social overlay before a link navigates. */
   onNavigate?: () => void;
 };
 
 /**
  * The "Add friend" tab of the social rail: find a player, send them a request, and answer the
  * requests and blocks already on my account.
- *
- * 🚨 MOUNTED ONLY WHILE ITS TAB IS ON SCREEN (`SocialPanel` renders it behind
- * `activeTab === 'addFriend'`), and the four requests it fires depend on that. The rail lives on
- * every authenticated page, so a slot mounted unconditionally would ask the server for my
- * requests, my blocks and my friends on every single screen of the app. Same discipline as
- * [FS-2], [FS-3] and [FS-4].
- *
- * 🔑 IT NEVER FIRES A CALL IT KNOWS WILL BE REFUSED. `POST /friends` answers 400 for "already
- * friends", "already requested" and "yourself" — three cases this screen can see coming, and
- * each one would print a red line in a console the subject requires to be empty. So the friends
- * list and my sent requests are read here as well, and a click on somebody already in one of
- * them explains itself without touching the network. The refusals are still MAPPED (see
- * `friend-mutations.ts`), for the stale tab that disproves "unreachable".
  */
 export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
   const meId = useAuthStore((state) => state.user?.id);
@@ -87,9 +66,8 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
   const sent = useFriendRequests('sent');
   const blocks = useBlocks();
   /**
-   * ⚠️ NOT DISPLAYED HERE — read purely to know who is already a friend, so a search hit that is
-   * one is answered on the spot instead of by a 400. It costs nothing when the Friends tab has
-   * been opened first (same cache key), and one request otherwise.
+   * NOT DISPLAYED HERE — read purely to know who is already a friend, so a search hit that is
+   * one is answered on the spot instead of by a 400.
    */
   const friends = useFriends();
 
@@ -102,38 +80,14 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
   /** The answer to the last click on a search hit — sent, auto-accepted, or refused. */
   const [notice, setNotice] = useState<Notice | null>(null);
 
-  /**
-   * Landing points for the focus when a confirmed action destroys the row that carried it.
-   * Without them the platform drops focus on `<body>` and a keyboard user restarts at the top of
-   * the page. A section heading is the right target: it survives its list emptying, and it NAMES
-   * where the focus landed. Same idiom — and the same visible `SectionTitle` — as [FS-1].
-   */
+  /** Landing points for the focus when a confirmed action destroys the row that carried it. */
   const receivedHeadingRef = useRef<HTMLHeadingElement>(null);
   const sentHeadingRef = useRef<HTMLHeadingElement>(null);
   const blocksHeadingRef = useRef<HTMLHeadingElement>(null);
 
   /**
-   * 🚨 WITHOUT THIS, THE THREE LISTS NEVER MOVE WHILE THE TAB IS OPEN — and the worst of it is
-   * not a stale row, it is a DESTRUCTIVE button. `DELETE /friends/{id}` is the same route for
-   * "cancel my request" and for "unfriend", and the server decides which from the row's CURRENT
-   * status: so if the person I am waiting on accepts while I am looking at the list, my "Cancel"
-   * button silently becomes "destroy the friendship we just made" — and they are not notified.
-   *
-   * The same silence covered two more: a request that arrives live is announced by the bell
-   * while the tab right under it still says "no pending requests", and a friendship created by
-   * the OTHER side (the third door into one, which `refreshPresence` cannot see) never shows up.
-   *
-   * One subscription, two invalidations, all three closed. The rest of the rail already works
-   * this way — `ConversationList` and the bell both listen on the same socket.
-   *
-   * ⚠️ NO OPTIMISTIC EDIT OF THE CACHE HERE, unlike the conversation list: the notification
-   * carries the friendship id and a pseudo, never the avatar and display name a row needs. The
-   * refetch is the only thing that can produce a correct row, and these lists are short.
-   *
-   * ⚠️ AND NO PRESENCE RESYNCHRONISATION either, deliberately: it closes and reopens the very
-   * socket that just delivered this event, on somebody ELSE's action, for a dot. A friend made
-   * this way is therefore shown offline in the Friends tab until the next reconnection — the
-   * known limit of the debt written up in `refreshPresence` (`lib/friend-mutations.ts`).
+   * WITHOUT THIS, THE THREE LISTS NEVER MOVE WHILE THE TAB IS OPEN — and the worst of it is not
+   * a stale row, it is a DESTRUCTIVE button.
    */
   useEffect(
     () =>
@@ -143,10 +97,8 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
         const { type } = event.notification;
         if (type !== 'friend_request_received' && type !== 'friend_request_accepted') return;
 
-        // `void`: an unhandled rejection is a console error, and a refetch that fails is already
-        // reflected by each list's own error state.
-        // `FRIEND_REQUESTS_KEY` is the PREFIX of both directions — one call covers received and
-        // sent, which is what a live acceptance moves at once.
+        // `void`: an unhandled rejection is a console error, and a refetch that fails is
+        // already reflected by each list's own error state.
         void queryClient.invalidateQueries({ queryKey: FRIEND_REQUESTS_KEY });
         void queryClient.invalidateQueries({ queryKey: FRIENDS_KEY });
       }),
@@ -161,13 +113,7 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
     () => new Set((friends.data?.friends ?? []).map((friend) => friend.id)),
     [friends.data],
   );
-  /**
-   * Everyone who already has a request from me — server-side, or since the last refetch.
-   *
-   * ⚠️ It depends on `sent.data`, NOT on the `sentRequests` fallback above: `?? []` builds a
-   * fresh array on every render, so depending on it would recompute this set on every render
-   * and defeat the memo entirely (eslint's `exhaustive-deps` says exactly this).
-   */
+  /** Everyone who already has a request from me — server-side, or since the last refetch. */
   const alreadyRequestedIds = useMemo(() => {
     const ids = new Set<string>();
     for (const request of sent.data?.requests ?? []) {
@@ -177,12 +123,7 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
     return ids;
   }, [sent.data]);
 
-  /**
-   * The FIRST list failure, spoken once. The three `FormMessage`s below carry
-   * `role="presentation"` — one live region per rail, and it is `SocialPanel`'s — so somebody
-   * who cannot see them would otherwise never learn a list is missing. One effect rather than
-   * three: three simultaneous failures are one incident (the API is down), not three.
-   */
+  /** The FIRST list failure, spoken once. */
   const loadError = received.isError
     ? friendRequestsErrorMessage(received.error, 'received')
     : sent.isError
@@ -203,41 +144,22 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
     announce(text);
   }
 
-  /**
-   * A search hit was clicked. `SearchBar` is restricted to `type: 'user'`, so a team can never
-   * reach this — the narrowing is there because the payload is a discriminated union and reading
-   * `pseudo` off a team result would not compile.
-   *
-   * 🔑 THE THREE GUARDS BELOW ARE THE POINT OF THIS SCREEN, not a nicety: each one replaces a
-   * guaranteed 4xx with a sentence. See the class comment.
-   */
+  /** A search hit was clicked. */
   function handleSelect(result: SearchResult) {
     if (result.type !== 'user') return;
 
     const { id, pseudo } = result;
 
     /**
-     * 🚨 `/search` CAN RETURN ME — DO NOT DELETE THIS GUARD. `routes/search.ts` filters on the
-     * typed text and on blocks, and on NOTHING else: it never excludes the caller. Typing my own
-     * pseudo therefore lists my own account, and this is the NORMAL path to that click, not a
-     * belt for a stale tab. Without it, the click fires a `POST /friends` the server answers 400
-     * ("can't friend yourself") — a red line in a console the subject requires to be empty.
+     * `/search` CAN RETURN ME — DO NOT DELETE THIS GUARD. `routes/search.ts` filters on the
+     * typed text and on blocks, and on NOTHING else: it never excludes the caller.
      */
     if (id === meId) {
       report('You cannot send yourself a friend request.');
       return;
     }
 
-    /**
-     * 🚨 A GUARD THAT COULD NOT READ ITS LIST IS NOT A GUARD. The two sets below are empty both
-     * when there is genuinely nothing in them and when the request that fills them FAILED — and
-     * in the second case every check silently passes, so clicking somebody I am already friends
-     * with fires exactly the 400 this screen exists to prevent. "I do not know" is answered
-     * here, by a sentence, rather than by the server.
-     *
-     * The two lists are re-asked on the way out so the next click can work: the sent list also
-     * shows its own "Try again" further down, the friends list is not displayed here at all.
-     */
+    /** A GUARD THAT COULD NOT READ ITS LIST IS NOT A GUARD. */
     if (friends.isError || sent.isError) {
       void friends.refetch();
       void sent.refetch();
@@ -261,17 +183,9 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
       onSuccess: (outcome) => {
         /**
          * The mutation does not become successful until it has refreshed the authoritative
-         * sent/friends list, and `SearchBar` stays disabled while that happens. Do not keep a
-         * second, session-long copy of the id here: blocking deletes the friendship row, and a
-         * stale local id would keep claiming "already requested" after an unblock.
+         * sent/friends list, and `SearchBar` stays disabled while that happens.
          */
-        /**
-         * 🚨 THE TWO OUTCOMES OF ONE CLICK. If @pseudo had already sent me a request, the server
-         * accepted it there and then (200 + `accepted`) instead of creating a new one — so the
-         * friendship EXISTS, nobody has anything left to accept, and saying "request sent" would
-         * send the user waiting for an answer that is never coming. The second half of the
-         * sentence is what explains why they did not have to wait.
-         */
+        /** THE TWO OUTCOMES OF ONE CLICK. */
         report(
           outcome === 'auto-accepted'
             ? `You and @${pseudo} are now friends — they had already sent you a request.`
@@ -367,22 +281,12 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
   return (
     <div className="flex flex-col gap-4 p-3">
       <div className="flex flex-col gap-2">
-        {/* Names the tab ON SCREEN — the tab strip above is icon-only, so without this line
-            nothing written says which tab is open. */}
+
         <SectionTitle>Add friend</SectionTitle>
         <p className="text-xs text-text-muted">
           Search a player by pseudo. Open their profile or use Add to send a friend request.
         </p>
 
-        {/* 🔑 THE SEARCH IS `SearchBar`, NOT A SECOND ONE. It already carries everything this
-            field must not get wrong: the 300 ms debounce (one request per pause, never per
-            keystroke), the 2-character floor that keeps a half-typed pseudo from asking the
-            server for a 400, the abort of a superseded request, and the out-of-order guard.
-            `type="user"` also means blocked accounts — in BOTH directions — never appear, which
-            is what keeps "this player is not available" from ever revealing a block.
-
-            The identity remains navigable while relation data loads; only the separate Add
-            action is disabled until the two lists used by `handleSelect` are known. */}
         <SearchBar
           type="user"
           limit={SEARCH_RESULT_LIMIT}
@@ -522,9 +426,7 @@ export function AddFriendSlot({ announce, onNavigate }: AddFriendSlotProps) {
           <PersonRow
             key={blocked.id}
             person={blocked}
-            // 🚨 NO LINK TO THE PROFILE HERE. `GET /users/{pseudo}` answers 404 for an account I
-            // have blocked, so the link would open a page that cannot load and write a red line
-            // in the console on the way — which is a project-rejection criterion, not a detail.
+            // NO LINK TO THE PROFILE HERE.
             linkToProfile={false}
             actions={
               <InlineButton
@@ -553,10 +455,7 @@ type ListSectionProps = {
   onRetry: () => void;
   loadingText: string;
   emptyText: string;
-  /**
-   * The `children` are `<li>`s, so their number has to be told rather than counted. It also
-   * feeds the heading — "Requests received — 2" — the same way [FS-1] titles its groups.
-   */
+  /** The `children` are `<li>`s, so their number has to be told rather than counted. */
   itemCount: number;
   children: ReactNode;
 };
@@ -564,11 +463,6 @@ type ListSectionProps = {
 /**
  * One of the three lists, with its four states — loading, error, empty, loaded — side by side
  * instead of buried in early returns that would also take the heading with them.
- *
- * It stays LOCAL to this file on purpose. The same four states are drawn by [FS-1], [FS-2] and
- * [FS-4], but each with its own skeleton height, its own way of speaking and its own header
- * action; hoisting a shared component would mean reopening three merged tickets to make them
- * agree. What this ticket needed three times, it factors three times over — here.
  */
 function ListSection({
   title,
@@ -585,8 +479,7 @@ function ListSection({
 }: ListSectionProps) {
   return (
     <div className="flex flex-col gap-2">
-      {/* Rendered OUTSIDE the content below so it survives every state, including the empty one
-          an action can switch to — and so it stays a valid focus landing point throughout. */}
+
       <SectionTitle headingRef={headingRef}>
         {itemCount > 0 ? `${title} — ${itemCount}` : title}
       </SectionTitle>
@@ -621,9 +514,7 @@ function ListSectionContent({
   if (isPending) {
     return (
       <div className="flex flex-col gap-2">
-        {/* Two boxes the height of a real row, so the panel does not jump when the data lands.
-            Two and not three: there are three of these lists stacked in one 312 px column.
-            `aria-hidden`: the sentence below is what a screen reader needs, not these. */}
+
         {[0, 1].map((row) => (
           <div
             key={row}
@@ -636,15 +527,12 @@ function ListSectionContent({
     );
   }
 
-  // 🚨 WHAT THERE IS TO READ COMES FIRST. TanStack keeps `data` when a REFETCH fails, so
-  // `isError` goes true on a list that is perfectly usable; wiping it for a background failure
-  // would be worse than the failure itself. Same order of tests as [FS-2] and [FS-4].
+  // WHAT THERE IS TO READ COMES FIRST.
   if (itemCount === 0) {
     if (isError) {
       return (
         <div className="flex flex-col items-start gap-2">
-          {/* `role="presentation"`: one live region per rail, and it is `SocialPanel`'s. The red
-              tone stays; the speaking is done by the slot's own effect. */}
+
           <FormMessage role="presentation" className="text-sm">
             {errorMessage}
           </FormMessage>
@@ -671,8 +559,6 @@ function ListSectionContent({
         </div>
       )}
 
-      {/* `role="list"` is explicit: Tailwind's preflight drops the marker and Safari then drops
-          the list semantics with it. */}
       <ul role="list" aria-label={listLabel} className="flex flex-col gap-0.5">
         {children}
       </ul>

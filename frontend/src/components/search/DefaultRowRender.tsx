@@ -5,15 +5,12 @@ import { Button } from '@/components/ui/button';
 import type { GameByLadder } from '@/lib/games';
 import type { SearchBarProps, SearchResult } from './SearchBar.tsx';
 
-// `Pick` from typescript to build a type
-//
-// `onSelect` est REQUIS ici
+// `Pick` from typescript to build a type `onSelect` est REQUIS ici
 type DefaultRowRenderProps = Pick<SearchBarProps, 'type' | 'small' | 'disabled'> & {
   result: SearchResult;
   onSelect: (result: SearchResult) => void;
-  // 🚨 REÇUE EN PROP, JAMAIS RÉCUPÉRÉE ICI. Voir `useGameByLadder` : ce composant se rend
-  // une fois par ligne, il n'est pas le bon endroit pour décider si `GET /ladders` part.
-  // Une Map vide est un état normal (recherche joueurs-only) : le sous-titre reste vide.
+  // REÇUE EN PROP, JAMAIS RÉCUPÉRÉE ICI. Voir `useGameByLadder` : ce composant se rend une fois
+  // par ligne, il n'est pas le bon endroit pour décider si `GET /ladders` part.
   gameByLadder: GameByLadder;
 };
 

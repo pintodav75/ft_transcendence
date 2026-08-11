@@ -9,14 +9,7 @@ import { cn } from '@/lib/utils';
 
 import type { ReactNode } from 'react';
 
-/**
- * Where the line leads.
- *
- * 🔑 A DISCRIMINATED UNION, NOT AN OPTIONAL `disputeId`. The rule — "a line in dispute opens its
- * dispute file, everything else opens the match sheet" — is a PRODUCT decision, and it belongs at
- * the call site where the payload is read, not hidden inside a shared component that would then
- * quietly decide for every caller.
- */
+/** Where the line leads. */
 export type MatchLineTarget =
   | { kind: 'match'; matchId: string }
   | { kind: 'dispute'; disputeId: string };
@@ -30,23 +23,13 @@ type MatchLineLinkProps = {
   accentClass?: string;
   /**
    * Explicit accessible name, for a list where every line would otherwise be announced by the
-   * same words (a ladder name and a date). Left out, the name is the concatenation of the
-   * children, which is what `ActionRequired` has always relied on.
+   * same words (a ladder name and a date).
    */
   ariaLabel?: string;
   children: ReactNode;
 };
 
-/**
- * ⚠️ ONE LINK, AND NOTHING INTERACTIVE NESTED INSIDE IT. A second target inside would make a
- * line whose two halves lead to different places, and nesting an `<a>` in an `<a>` is invalid
- * HTML that browsers repair by silently splitting the DOM. Callers that need a second
- * destination (an opponent's team page, say) put it OUTSIDE this component.
- *
- * The line is NEUTRAL, its status colour carried by the left edge alone: painting the whole
- * card red made a match merely waiting on a confirmation look like an error, and stacked two
- * red blocks at 375 px.
- */
+/** ONE LINK, AND NOTHING INTERACTIVE NESTED INSIDE IT. */
 export function MatchLineLink({ target, accentClass, ariaLabel, children }: MatchLineLinkProps) {
   const className = cn(
     'focus-ring flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-control border border-l-2 border-border-subtle bg-surface-card-strong/60 px-4 py-3 transition hover:bg-surface-card',

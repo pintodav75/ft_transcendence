@@ -1,18 +1,12 @@
 import { z } from 'zod';
 
 /**
- * The one client-side echo of the backend's password policy: ≥ 8 characters, one uppercase,
- * one lowercase, one digit, one special character, and no more than 72 bytes (bcrypt's own
- * ceiling — beyond it the extra characters are silently ignored).
+ * Client echo of the backend password policy: >= 8 chars, one upper, one lower, one digit,
+ * one special, max 72 bytes (bcrypt's ceiling, past it the extra chars are ignored).
  *
- * It lives in a module of its OWN rather than being exported from `register-schema.ts`,
- * because a rule shared by sign-up and by the profile settings belongs to neither of them:
- * having `password-schema.ts` import a "register" module would point the dependency the
- * wrong way — the same mistake `sharedApiErrorMessage` was moved out of `team-mutations.ts`
- * to avoid (see `lib/api.ts`).
- *
- * ⚠️ The server is the authority. This copy exists so a weak password fails instantly and
- * readably instead of after a round trip, NOT to replace the check.
+ * its own module rather than an export of register-schema.ts: sign-up and the profile settings
+ * both use it, so it belongs to neither.
+ * server is the authority — this just fails fast instead of after a round trip.
  */
 export const passwordRule = z
   .string()

@@ -62,16 +62,14 @@ export function ProfileForm({ announce }: ProfileFormProps) {
 
   if (!user) return null;
 
-  // Rebound after the guard: TypeScript does not carry the narrowing into the callbacks
-  // below, which is why they each used to end up with a `user!`.
+  // Rebound after the guard: TypeScript does not carry the narrowing into the callbacks below,
+  // which is why they each used to end up with a `user!`.
   const currentUser = user;
 
   /**
-   * The nickname is now required (see `profile-schema.ts`), so the field must never open
-   * empty — otherwise an account that never set one could not save its bio without being
-   * forced to invent a nickname first. Falling back on the pseudo is what the page already
-   * DISPLAYS above the form (`displayName ?? pseudo`), so the prefilled value is the one
-   * the user sees as their name today: saving it changes nothing on screen.
+   * The nickname is now required (see `profile-schema.ts`), so the field must never open empty
+   * — otherwise an account that never set one could not save its bio without being forced to
+   * invent a nickname first.
    */
   function editableValues() {
     return {
@@ -118,7 +116,7 @@ export function ProfileForm({ announce }: ProfileFormProps) {
         <ReadOnlyRow
           label="Bio"
           value={user.bio}
-          valueClassName="max-w-[60ch] break-words @lg:max-w-[40ch]"
+          valueClassName="max-w-[60ch] wrap-break-word @lg:max-w-[40ch]"
           placeholder="No bio yet."
         />
         <ReadOnlyRow label="Email" value={user.email} valueClassName="break-all" />
@@ -126,8 +124,7 @@ export function ProfileForm({ announce }: ProfileFormProps) {
           label="Sign-in"
           value={user.oauthProvider ? `OAuth (${user.oauthProvider})` : 'Email / password'}
         />
-        {/* En fin de bloc : au milieu, entre Bio et Email, il coupait la liste de données
-            en deux et se lisait comme s'il n'agissait que sur la Bio. */}
+
         <Button variant="secondary" className="self-start" onClick={startEdit}>
           Edit profile
         </Button>
@@ -137,8 +134,7 @@ export function ProfileForm({ announce }: ProfileFormProps) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 @lg:min-w-[40ch]">
-      {/* Le même titre dans les deux états : la section garde son nom quand on bascule en
-          édition, et la ref de focus reste valide au retour. */}
+
       <SectionTitle headingRef={headingRef} headingClassName={SECTION_TITLE_SIZE}>
         Details
       </SectionTitle>

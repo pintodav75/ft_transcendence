@@ -75,16 +75,8 @@ export function PasswordChange({ announce }: PasswordChangeProps) {
   // An account with no local password has nothing to change: the route answers 400 for every
   // attempt, so offering the form would be a guaranteed dead end — and a red console line on
   // each try, which the console audit counts.
-  //
-  // 🔑 The test is `hasPassword`, NEVER `oauthProvider`, and the two are not interchangeable:
-  // signing in with Google from an account that already existed by email links the provider
-  // WITHOUT dropping the password (`auth/google.ts`, linking case B). Such an account has
-  // both, and must keep the form — it is the server's own test (`passwordHash !== null`,
-  // exposed by `toAuthUser()`).
   if (user && !user.hasPassword) {
-    // Provider capitalised for display: the column stores it lowercase ('google'). The
-    // fallback is unreachable today — no password means the account was created by OAuth —
-    // but `oauthProvider` is nullable at the contract, so the wording must not depend on it.
+    // Provider capitalised for display: the column stores it lowercase ('google').
     const provider = user.oauthProvider
       ? user.oauthProvider[0].toUpperCase() + user.oauthProvider.slice(1)
       : 'your identity provider';
@@ -107,13 +99,7 @@ export function PasswordChange({ announce }: PasswordChangeProps) {
 
       {editing ? (
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
-          {/* Chrome exige un champ d'identifiant dans TOUT formulaire de mot de passe, et
-              écrit sinon un avertissement en console (« Password forms should have
-              (optionally hidden) username fields for accessibility ») — or la console propre
-              est un motif de rejet du projet. Ce n'est pas que du silence acheté : sans lui,
-              un gestionnaire de mots de passe ne sait pas à QUEL compte rattacher le nouveau
-              mot de passe. Caché, en lecture seule, et hors de l'ordre de tabulation : il
-              informe le navigateur sans rien ajouter au parcours de l'utilisateur. */}
+
           <input
             type="text"
             autoComplete="username"

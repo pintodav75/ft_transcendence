@@ -45,19 +45,7 @@ export function MatchCard<M extends MatchHistoryMatch>({
         className={cn(
           'flex flex-col gap-3 border-l-2 p-3',
           accentClass,
-          /*
-            🚨 THE DISPUTE TINT IS AN OVERLAY, NOT A BACKGROUND, and that is not a detail.
-            `cn()` is `twMerge`: a `bg-*` passed here REPLACES `Card`'s own `bg-surface-card/84`
-            instead of stacking on it (measured — the class simply disappeared from the merged
-            list), so the one card the design wants to shout came out hollow: a shadow with no
-            surface, refilled on hover by `hover:bg-surface-card`. It worked on a `<tr>` only
-            because a row has no surface of its own and the tint landed on the page.
-
-            So the tint is painted by a pseudo-element instead: `-z-10` puts it ABOVE the card's
-            background and UNDER the content (CSS paints negative-z descendants right after the
-            element's own background), and `isolate` keeps that negative layer from escaping
-            behind the page. Same 5 % of the same token as the row, so both layouts tint alike.
-          */
+          /** THE DISPUTE TINT IS AN OVERLAY, NOT A BACKGROUND, and that is not a detail. */
           disputed &&
             'relative isolate before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-card before:bg-arena-red/5',
           canOpenSheet && 'cursor-pointer hover:bg-surface-card',
@@ -70,18 +58,14 @@ export function MatchCard<M extends MatchHistoryMatch>({
           <MatchStatusPill match={match} />
         </div>
 
-        {/* THE information of the card, and the reason the ticket exists: on a phone the
-            opponent was the first thing pushed off screen. */}
         <p className={cn('text-base font-bold wrap-break-word', muted)}>
           <MatchOpponentLink opponent={opponent} />
         </p>
 
-        {/* A description list, not a grid of divs: without a column header, "Score" and the
-            score it names have to be tied together for a screen reader too. */}
         <dl className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
           {showLadder && (
             <div className="min-w-0">
-              {/* ⚠️ NOT `text-text-muted`: 4.23:1 on a card, under AA — see `MatchRow`. */}
+              {/* NOT `text-text-muted`: 4.23:1 on a card, under AA — see `MatchRow`. */}
               <dt className="label-caps text-text-secondary">Ladder</dt>
               <dd className={cn('font-semibold wrap-break-word text-text-primary', muted)}>
                 {ladder ? `${ladder.game} · ${ladder.format}` : EM_DASH}

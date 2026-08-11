@@ -1,5 +1,12 @@
-import { useId } from 'react';
+/**
+ * The three filters: game, format, and "only what I can accept" tickbox.
+ *
+ * Native `<select>`s: the platform brings the keyboard behaviour, the type-ahead
+ * and the OS wheel picker on a phone.
+ * because nobody wants to have to click an "Apply" button (which is what a form would be).
+ */
 
+import { useId } from 'react';
 import { Label } from '@/components/ui/label';
 import { SLOT_FORMATS } from '@/lib/matchmaking';
 import { Select } from '@/components/ui/select';
@@ -8,37 +15,17 @@ import type { Game } from '@/lib/games';
 import type { SlotFormat } from '@/lib/matchmaking';
 
 type SlotFiltersProps = {
-  /** Display-sorted games, from the cached `GET /games`. Empty while it loads or if it fails. */
+  /** from the cached `GET /games`. Empty while it loads or if it fails. */
   games: Game[];
   gameId: string | undefined;
   format: SlotFormat | undefined;
-  /**
-   * The formats that actually EXIST for the selected game — not the four the contract knows.
-   * Valorant has no 1v1 ladder, so offering "1v1" there is offering an empty board, and the
-   * reader is left to guess whether nobody is playing or the combination cannot exist.
-   */
-  formats: readonly SlotFormat[];
+  formats: readonly SlotFormat[]; // format for that game
   acceptableOnly: boolean;
   onGameChange: (gameId: string | undefined) => void;
   onFormatChange: (format: SlotFormat | undefined) => void;
   onAcceptableOnlyChange: (acceptableOnly: boolean) => void;
 };
 
-/**
- * The three filters of the board: game, format, and "only what I can accept".
- *
- * 🚨 THE BOX IS TICKED BY DEFAULT, AND IT IS UNTICKABLE. Ticked, the board answers "what can I
- * play tonight?"; unticked, it answers "why can I not play?" — which is the whole point of
- * showing a refused slot with its reason instead of hiding it. Two questions, one screen.
- *
- * ⚠️ NO "my ladders" filter, ever: in 1v1 there is no such thing as being enrolled (a
- * `rankings` row is born of the first RESULT), so that filter would greet a new account with
- * an empty page and no way in — the very asymmetry [F-SOLO] is built around.
- *
- * Native `<select>`s, deliberately: the platform brings the keyboard behaviour, the type-ahead
- * and the OS wheel picker on a phone. Changing one applies immediately — a filter bar with an
- * "Apply" button is a form nobody submits.
- */
 export function SlotFilters({
   games,
   gameId,
@@ -54,8 +41,6 @@ export function SlotFilters({
 
   return (
     <fieldset className="flex flex-wrap items-end gap-4 border-0 p-0">
-      {/* The group is named for a screen reader without adding a heading to the page: the
-          three controls below are otherwise three loose fields under an <h1>. */}
       <legend className="sr-only">Filter the open slots</legend>
 
       <div className="flex min-w-40 flex-1 flex-col gap-2 sm:max-w-56">
@@ -63,8 +48,8 @@ export function SlotFilters({
         <Select
           id={gameFieldId}
           value={gameId ?? ''}
-          // The empty value means "no filter", so it is never SENT — `openSlotsSearch` omits
-          // a blank parameter rather than posting `?gameId=` (see `lib/matchmaking.ts`).
+          // The empty value means "no filter", so it is never SENT — `openSlotsSearch` omits a
+          // blank parameter rather than posting `?gameId=` (see `lib/matchmaking.ts`).
           onChange={(event) => onGameChange(event.target.value || undefined)}
         >
           <option value="">All games</option>
@@ -81,9 +66,9 @@ export function SlotFilters({
         <Select
           id={formatFieldId}
           value={format ?? ''}
-          // Matched AGAINST the contract's enum instead of cast: `event.target.value` is a
-          // plain string, and asserting it into a closed union is exactly how an unlisted
-          // value reaches the API and comes back as a 400.
+          // if you pick 2v2: event.target.value is the string '2v2'. .find walks the four
+          // entries of SLOT_FORMATS and returns the one that's === to it — the tuple's own
+          // '2v2'.
           onChange={(event) =>
             onFormatChange(SLOT_FORMATS.find((value) => value === event.target.value))
           }
@@ -97,8 +82,6 @@ export function SlotFilters({
         </Select>
       </div>
 
-      {/* A real <label> wrapping a real checkbox: the whole sentence becomes the click target
-          and the accessible name, with no ARIA and no JS. */}
       <label className="flex min-h-12 cursor-pointer items-center gap-2.5">
         <input
           type="checkbox"

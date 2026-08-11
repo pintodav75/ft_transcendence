@@ -9,9 +9,8 @@ import { uploadFile } from '@/lib/upload';
 import type { QueryClient } from '@tanstack/react-query';
 import type { components, paths } from '@/lib/api-types.gen';
 
-// Write side of the team page. Its read side (`lib/team-detail.ts`) stays untouched:
-// queries and mutations have opposite lifecycles (cached vs. one-shot) and mixing them
-// in one module makes it impossible to see, at a glance, what invalidates what.
+// Write side of the team page. Its read side (`lib/team-detail.ts`) stays untouched: queries
+// and mutations have opposite lifecycles (cached vs.
 
 type UpdateTeamBody = paths['/teams/{id}']['patch']['requestBody']['content']['application/json'];
 type UpdateTeamResponse =
@@ -31,10 +30,8 @@ type AcceptInvitationResponse =
 type DeclineInvitationResponse =
   paths['/teams/invitations/{invitationId}/decline']['post']['responses'][200]['content']['application/json'];
 type InvitationErrorCode = components['schemas']['TeamInvitationError']['code'];
-// The two 409 of the team routes are INLINE payloads in `openapi.yaml` (no named schema,
-// unlike `TeamInvitationError`), so their `code` is read straight off `paths`. Same purpose
-// as `InvitationErrorCode`: a code the backend renames breaks the build at the constant
-// below instead of quietly rotting into the generic fallback message.
+// The two 409 of the team routes are INLINE payloads in `openapi.yaml` (no named schema, unlike
+// `TeamInvitationError`), so their `code` is read straight off `paths`.
 type RemoveMemberConflictCode =
   paths['/teams/{id}/members/{userId}']['delete']['responses'][409]['content']['application/json']['code'];
 type DissolveTeamConflictCode =
@@ -47,23 +44,12 @@ type RefreshOptions = {
   matches?: boolean;
 };
 
-/**
- * Refetches everything a team mutation can have made stale.
- *
- * ⚠️ TanStack Query matches keys by PREFIX: `['team', id]` alone would already sweep
- * `['team', id, 'matches']`. `exact: true` keeps the two decisions separate and honest —
- * renaming a team or swapping its logo changes nothing in its match history, only a
- * roster change does.
- *
- * The returned promise is handed back to `onSuccess` on purpose: the mutation then stays
- * `isPending` until the screen actually shows fresh data, instead of flashing the old
- * roster for one frame between "done" and "refetched".
- */
+/** Refetches everything a team mutation can have made stale. */
 function refreshTeam(queryClient: QueryClient, teamId: string, { matches = false }: RefreshOptions = {}) {
   const refreshes = [
     queryClient.invalidateQueries({ queryKey: ['team', teamId], exact: true }),
-    // The /teams grid renders each team's name and logo, so a rename or a new logo
-    // makes it stale too.
+    // The /teams grid renders each team's name and logo, so a rename or a new logo makes it
+    // stale too.
     queryClient.invalidateQueries({ queryKey: ['teams'] }),
   ];
 
@@ -79,14 +65,7 @@ function refreshTeam(queryClient: QueryClient, teamId: string, { matches = false
 export const NAME_TAKEN_MESSAGE = 'This name is already taken on this ladder.';
 const TEAM_GONE_MESSAGE = 'This team no longer exists.';
 
-/**
- * The statuses that say the same thing whatever the action (429 / 403).
- *
- * ⚠️ It used to be DEFINED here, private, and that is exactly what pinned the slot mutations
- * to this file (their old comment said so). It now lives in `lib/api.ts`, where it belongs:
- * it describes the rate limiter and the auth layer, not a team. This alias only keeps the
- * eight call sites below reading the way they did.
- */
+/** The statuses that say the same thing whatever the action (429 / 403). */
 const sharedMessage = sharedApiErrorMessage;
 
 export type TeamUpdateError = {
@@ -100,13 +79,12 @@ export function updateTeamErrorMessage(error: unknown): TeamUpdateError {
   if (shared) return { field: null, message: shared };
 
   if (error instanceof ApiError) {
-    // ⚠️ Unlike the 409 of POST /teams (which carries a `TeamCreateConflict.code`), this
-    // one is a bare `{ error }`. No matter: `unique(ladder_id, name)` is its ONLY cause
-    // here, so the status alone identifies it — no substring matching on the message.
+    // Unlike the 409 of POST /teams (which carries a `TeamCreateConflict.code`), this one is a
+    // bare `{ error }`.
     if (error.status === 409) return { field: 'name', message: NAME_TAKEN_MESSAGE };
     if (error.status === 404) return { field: null, message: TEAM_GONE_MESSAGE };
-    // Empty body, name out of range, non-https logoUrl. All three are caught client-side
-    // before the request; this is the safety net, not the normal path.
+    // Empty body, name out of range, non-https logoUrl. All three are caught client-side before
+    // the request; this is the safety net, not the normal path.
     if (error.status === 400) {
       return {
         field: null,
@@ -123,8 +101,8 @@ export function uploadTeamLogoErrorMessage(error: unknown) {
   if (shared) return shared;
 
   if (error instanceof ApiError) {
-    // Both are pre-empted by ImagePicker (2 MB cap + MIME filter); kept so a file that
-    // slips through gets an explanation instead of a generic failure.
+    // Both are pre-empted by ImagePicker (2 MB cap + MIME filter); kept so a file that slips
+    // through gets an explanation instead of a generic failure.
     if (error.status === 413) return 'This image is larger than 2 MB.';
     if (error.status === 400) return 'Use a JPEG, PNG or WebP image.';
     if (error.status === 404) return TEAM_GONE_MESSAGE;
@@ -135,16 +113,14 @@ export function uploadTeamLogoErrorMessage(error: unknown) {
   return 'Could not upload the logo.';
 }
 
-// ------------------------------------------------------- invitations (B-INV / FT-INV)
+// ------------------------------------------------------- invitations
 
 const INVITATION_GONE_MESSAGE =
   'This invitation is no longer pending — it was answered or cancelled in the meantime.';
 
 /**
- * The invitation the user is acting on is not `pending` any more (answered, cancelled, or
- * gone with its team). The screen is stale, so the caller must REFETCH on top of showing
- * the message — an error banner over a row that should no longer be there is worse than
- * the row disappearing.
+ * The invitation the user is acting on is not `pending` any more (answered, cancelled, or gone
+ * with its team).
  */
 function isStaleInvitationError(error: unknown) {
   if (!(error instanceof ApiError)) return false;
@@ -153,39 +129,28 @@ function isStaleInvitationError(error: unknown) {
   return code === 'invitation_not_found' || code === 'not_pending';
 }
 
-/**
- * Turns a `code -> message` table into a lookup keyed by a plain string.
- *
- * The tables below are typed `Partial<Record<InvitationErrorCode, string>>`, so a code the
- * backend renames (or that never existed) is a COMPILE error on the key instead of a
- * message that silently rots into the fallback. The lookup itself stays untyped on
- * purpose: `errorPayloadCode` returns `string | undefined`, and an unrecognised value
- * must simply miss and fall back on our own wording.
- */
+/** Turns a `code -> message` table into a lookup keyed by a plain string. */
 function messageTable(messages: Partial<Record<InvitationErrorCode, string>>) {
   return new Map(Object.entries(messages));
 }
 
 const inviteMessages = messageTable({
-  // Says WHY the count differs from the number of faces on screen. Without the "pending
-  // invitations count" half, a captain reading "5 players" and "roster full" concludes
-  // the app is broken.
+  // Says WHY the count differs from the number of faces on screen.
   roster_full: `This roster is full — its ${ROSTER_LIMIT} slots count members AND pending invitations. Cancel an invitation or remove a player first.`,
   already_invited: 'This player already has a pending invitation from this team.',
   already_member: 'This player is already on the roster.',
   already_in_team_on_ladder: 'This player already has a team on this ladder.',
   already_in_team: 'This player already has a team on this ladder.',
-  // ⚠️ NEUTRAL on purpose: the backend answers `user_not_found` both for an account that
-  // does not exist and for one that has BLOCKED the captain (indistinguishable by design,
-  // exactly like POST /friends). "This account was deleted" would be a lie half the time
-  // — and would confirm the block the other half.
+  // NEUTRAL on purpose: the backend answers `user_not_found` both for an account that does not
+  // exist and for one that has BLOCKED the captain (indistinguishable by design, exactly like
+  // POST /friends).
   user_not_found: 'This player cannot be invited right now.',
   team_not_found: TEAM_GONE_MESSAGE,
 });
 
 const cancelInvitationMessages = messageTable({
-  // One code covers "already answered", "already cancelled" and "belongs to another
-  // team": from here they are the same fact — there is nothing left to cancel.
+  // One code covers "already answered", "already cancelled" and "belongs to another team": from
+  // here they are the same fact — there is nothing left to cancel.
   invitation_not_found: INVITATION_GONE_MESSAGE,
   team_not_found: TEAM_GONE_MESSAGE,
 });
@@ -231,9 +196,9 @@ export function cancelTeamInvitationErrorMessage(error: unknown) {
 }
 
 /**
- * Invited player side, shared by accept and decline: their refusals overlap, and the two
- * codes they do not share (`roster_full`, `already_in_team`, only reachable on accept)
- * simply never fire on decline.
+ * Invited player side, shared by accept and decline: their refusals overlap, and the two codes
+ * they do not share (`roster_full`, `already_in_team`, only reachable on accept) simply never
+ * fire on decline.
  */
 export function respondToInvitationErrorMessage(error: unknown) {
   // `not_your_invitation` is a 403, so it lands here as NOT_ALLOWED_MESSAGE.
@@ -251,25 +216,15 @@ export function respondToInvitationErrorMessage(error: unknown) {
 
 // --------------------------------------------- deletions blocked by a live match (409)
 
-// Typed against the codegen, so renaming the code backend-side breaks the build here
-// instead of silently degrading the screen to its generic fallback (invariant #8).
+// Typed against the codegen, so renaming the code backend-side breaks the build here instead of
+// silently degrading the screen to its generic fallback (invariant #8).
 const MEMBER_ENGAGED_CODE: RemoveMemberConflictCode = 'engaged_in_match';
 const TEAM_ENGAGED_CODE: DissolveTeamConflictCode = 'team_engaged_in_match';
 
-/**
- * Which of the two actions `DELETE /teams/{id}/members/{userId}` is serving.
- *
- * The route is the same for both, but the SENTENCE cannot be: "this player is in an
- * ongoing match" reads as someone else's problem when it is my own departure. The caller
- * states it explicitly — it is never inferred from the component's state, because the two
- * dialogs live in two different files and neither can be trusted to keep such a deduction
- * true after a refactor.
- */
+/** Which of the two actions `DELETE /teams/{id}/members/{userId}` is serving. */
 export type RemoveMemberIntent = 'kick' | 'leave';
 
-// Each carries its REMEDY (finish or cancel the match). No link to the match: the 409 does
-// not say which one it is, and a link that leads nowhere is worse than a sentence that
-// stops — same decision as `lib/matchmaking.ts`.
+// Each carries its REMEDY (finish or cancel the match).
 const ENGAGED_MESSAGES: Record<RemoveMemberIntent, string> = {
   kick: 'You cannot remove this player while they are in an ongoing match — finish it or cancel it first.',
   leave: 'You cannot leave while you are in an ongoing match — finish it or cancel it first.',
@@ -280,13 +235,11 @@ export function removeTeamMemberErrorMessage(error: unknown, intent: RemoveMembe
   if (shared) return shared;
 
   if (error instanceof ApiError) {
-    // Tested on the `code`, not on the bare 409: this route may well grow a second
-    // conflict later, and that one would then wrongly inherit this wording. Same idiom as
-    // the invitation mappers above — and unlike `updateTeamErrorMessage`, whose 409 has no
-    // `code` at all because its only possible cause is `unique(ladder_id, name)`.
+    // Tested on the `code`, not on the bare 409: this route may well grow a second conflict
+    // later, and that one would then wrongly inherit this wording.
     if (errorPayloadCode(error.payload) === MEMBER_ENGAGED_CODE) return ENGAGED_MESSAGES[intent];
-    // The route's only 400: the captain trying to remove themselves. Unreachable through
-    // the UI (a captain gets "Dissolve", never "Leave"), mapped for the stale-page case.
+    // The route's only 400: the captain trying to remove themselves. Unreachable through the UI
+    // (a captain gets "Dissolve", never "Leave"), mapped for the stale-page case.
     if (error.status === 400) return 'The captain cannot leave — dissolve the team instead.';
     if (error.status === 404) return TEAM_GONE_MESSAGE;
   }
@@ -300,14 +253,12 @@ export function dissolveTeamErrorMessage(error: unknown) {
 
   if (error instanceof ApiError) {
     // A side of this team is still engaged in a `pending` / `in_progress` /
-    // `awaiting_confirmation` / `disputed` match: dissolving would leave that side without
-    // a team (`match_sides.team_id` is `set null`).
+    // `awaiting_confirmation` / `disputed` match: dissolving would leave that side without a
+    // team (`match_sides.team_id` is `set null`).
     if (errorPayloadCode(error.payload) === TEAM_ENGAGED_CODE) {
-      // ⚠️ "open OR ongoing", and the difference is not cosmetic: this route refuses on
-      // ENGAGING_STATUSES (an unaccepted `pending` slot included), where member removal
-      // refuses on LOCKING_STATUSES only (a `pending` slot is cancelled instead, BX-LEAVE).
-      // Saying "ongoing match" here would leave a captain with a single open slot looking
-      // for a match that is not being played.
+      // "open OR ongoing", and the difference is not cosmetic: this route refuses on
+      // ENGAGING_STATUSES (an unaccepted `pending` slot included), where member removal refuses
+      // on LOCKING_STATUSES only (a `pending` slot is cancelled instead).
       return 'You cannot dissolve this team while it has an open or ongoing match — cancel it or finish it first.';
     }
     if (error.status === 404) return TEAM_GONE_MESSAGE;
@@ -329,11 +280,7 @@ export function useUpdateTeam(teamId: string) {
   });
 }
 
-/**
- * Uploads a logo file to MinIO. Goes through `uploadFile` (XHR) and not `apiFetch`
- * (fetch) for one reason: `fetch` has no upload-progress event, so the progress bar of
- * ImagePicker would have nothing to display.
- */
+/** Uploads a logo file to MinIO. */
 export function useUploadTeamLogo(teamId: string, onProgress?: (percent: number) => void) {
   const queryClient = useQueryClient();
 
@@ -344,17 +291,7 @@ export function useUploadTeamLogo(teamId: string, onProgress?: (percent: number)
   });
 }
 
-/**
- * Captain only: invites a player. `userId` comes from GET /search?type=user.
- *
- * ⚠️ There is no "add a member" route any more — `POST /teams/{id}/members` was REMOVED by
- * B-INV. The player does NOT join here; they get a pending invitation and a notification,
- * and the roster only changes if they accept.
- *
- * No `{ matches: true }`: an invited player is in no line-up of any match, so the history
- * is not stale. `refreshTeam` keeps `exact: true` on `['team', id]` for exactly that
- * reason — TanStack matches by PREFIX and would otherwise sweep `['team', id, 'matches']`.
- */
+/** Captain only: invites a player. `userId` comes from GET /search?type=user. */
 export function useInviteTeamMember(teamId: string) {
   const queryClient = useQueryClient();
 
@@ -370,12 +307,7 @@ export function useInviteTeamMember(teamId: string) {
 
 /**
  * Captain only: withdraws an invitation that is still pending, which gives the roster slot
- * back. NOT the same thing as `useRemoveTeamMember` — that one kicks a player who actually
- * joined; here nobody ever did, and nobody is notified.
- *
- * `apiFetch` sends no body and therefore no `content-type` on a DELETE (see `prepareBody`
- * in `lib/api.ts`), which is what keeps Fastify from answering 400
- * `FST_ERR_CTP_EMPTY_JSON_BODY`.
+ * back.
  */
 export function useCancelTeamInvitation(teamId: string) {
   const queryClient = useQueryClient();
@@ -387,26 +319,14 @@ export function useCancelTeamInvitation(teamId: string) {
         { method: 'DELETE' },
       ),
     onSuccess: () => refreshTeam(queryClient, teamId),
-    // The invitation was answered while the tab sat open: showing the failure over a chip
-    // that should already be gone is half a fix — the list has to catch up too.
+    // The invitation was answered while the tab sat open: showing the failure over a chip that
+    // should already be gone is half a fix — the list has to catch up too.
     onError: (error) =>
       isStaleInvitationError(error) ? refreshTeam(queryClient, teamId) : undefined,
   });
 }
 
-/**
- * Invited player only: accepts, and becomes a member.
- *
- * ⚠️ The invalidation is deliberately BY PREFIX here, unlike every captain-side mutation
- * above. Joining flips `isMember` on `GET /teams/{id}/matches`, which makes the whole
- * history change FOR ME (opponent-less slots and `lineup` appear), so `['team', teamId]`
- * without `exact` — sweeping `['team', teamId, 'matches']` too — is the correct behaviour,
- * not an oversight.
- *
- * `['team-invitations','me']` is refetched last for the rule the server applies silently:
- * accepting cancels my other pending invitations ON THAT LADDER, so rows I never touched
- * must disappear. That is the server's answer, never a client-side simulation.
- */
+/** Invited player only: accepts, and becomes a member. */
 export function useAcceptTeamInvitation() {
   const queryClient = useQueryClient();
 
@@ -430,8 +350,8 @@ export function useAcceptTeamInvitation() {
 }
 
 /**
- * Invited player only: declines, which frees the team's slot and notifies its captain.
- * Nothing else about me changes — no membership, no team of mine — so a single key.
+ * Invited player only: declines, which frees the team's slot and notifies its captain. Nothing
+ * else about me changes — no membership, no team of mine — so a single key.
  */
 export function useDeclineTeamInvitation() {
   const queryClient = useQueryClient();
@@ -451,13 +371,8 @@ export function useDeclineTeamInvitation() {
 }
 
 /**
- * Removes one member. Serves BOTH the captain's kick and a member's own departure
- * (`userId === me`) — it is the same route, and it is idempotent server-side.
- *
- * A voluntary departure needs no special cache handling: the team still exists and
- * `GET /teams/{id}` has no membership guard, so the refetch below answers 200 and the
- * page can navigate to /teams whenever it likes. Only DISSOLUTION is dangerous — see
- * `useDissolveTeam`.
+ * Removes one member. Serves BOTH the captain's kick and a member's own departure (`userId ===
+ * me`) — it is the same route, and it is idempotent server-side.
  */
 export function useRemoveTeamMember(teamId: string) {
   const queryClient = useQueryClient();
@@ -475,19 +390,11 @@ export function useRemoveTeamMember(teamId: string) {
 /**
  * Dissolves the team. Captain only, cascades on the members.
  *
- * ⚠️ THE ORDER OF THE CLEANUP IS LOAD-BEARING, which is why the hook owns it instead of
- * leaving it to the page. The team is gone from the database, so:
- *
- * - `invalidateQueries(['team', id])` would refetch a URL that now answers 404. Chrome
- *   prints "Failed to load resource" for every non-2xx fetch → console audit red → and a
- *   dirty console is a project-rejection criterion, not a detail.
- * - `removeQueries` alone is not enough either: destroying a query that still has a
- *   MOUNTED observer makes that observer rebuild and refetch it — the same 404.
- *
- * Hence: leave the page FIRST (awaited, so the team page is really unmounted), then drop
- * the dead entry, then refresh the /teams grid, which is a URL that still exists.
- * `leaveTeamPage` is passed in rather than called by the page afterwards precisely so the
- * correct order cannot be got wrong at the call site.
+ * the cleanup ORDER is load-bearing, which is why the hook owns it: leave the page first
+ * (awaited, so it's really unmounted), then drop the dead cache entry, then refresh the /teams
+ * grid. the team is gone, so invalidateQueries(['team', id]) would refetch a 404, and
+ * removeQueries alone isn't enough either — a query with a mounted observer gets rebuilt and
+ * refetched, same 404. leaveTeamPage is passed in so the order can't be got wrong at the call site.
  */
 export function useDissolveTeam(teamId: string, leaveTeamPage: () => void | Promise<unknown>) {
   const queryClient = useQueryClient();

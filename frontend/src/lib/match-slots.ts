@@ -1,21 +1,13 @@
 /**
- * The rules that decide WHICH SLOT MAY BE OPENED — mirrors of `backend/src/routes/matches.ts`.
+ * Rules deciding which slot may be opened. Mirror of backend/src/routes/matches.ts:
+ * quarter-hour grid, 15 min minimum lead, 5 open slots max.
  *
- * ⚠️ Written by FT-2C inside `lib/team-detail.ts`, because a captain opening a slot for his
- * team was their only reader. [F-SOLO] is the second one: a 1v1 ladder opens slots with the
- * very same grid, the very same 15-minute bound and the very same cap of five — and a solo
- * page importing "team-detail" would say the opposite of what the code does. So they MOVED
- * here (rule of two). **No logic was rewritten**, only the file they live in and the shape of
- * their inputs, which is now STRUCTURAL: `GET /teams/{id}/matches` and `GET /matches/me` do
- * not serve the same row, but both carry the two fields these rules actually read.
- *
- * 🚨 THIS MODULE IS THE REASON THE SOLO PANEL IS NOT A COPY OF `CreateMatchPanel`. The JSX of
- * the two forms legitimately differs (solo has no line-up), but the RULES must never drift:
- * the whole point of pre-empting the server here is that the screen never offers a slot the
- * API would refuse — a 4xx leaves a red line in the Chrome console, which is a
- * project-rejection criterion. Duplicate the numbers and that guarantee dies silently.
- *
- * The server stays the authority: every rule below is re-checked there, under a lock.
+ * shared by the team panel and the solo panel, so the two can't drift. inputs are structural:
+ * GET /teams/{id}/matches and GET /matches/me don't serve the same row, but both carry the
+ * two fields these rules read.
+ * don't recopy the numbers into a form — if the screen offers a slot the API refuses you get
+ * a 4xx, and a red console line is a rejection motive.
+ * server re-checks all of it under a lock.
  */
 
 /** Anti-spam cap: a side may not hold more than this many still-valid open slots. */
@@ -24,14 +16,7 @@ export const MAX_OPEN_SLOTS = 5;
 export const MIN_LEAD_MINUTES = 15;
 /** Slots only ever fall on a fixed quarter: :00, :15, :30, :45. */
 export const SLOT_GRID_MINUTES = 15;
-/**
- * Extra margin on top of MIN_LEAD_MINUTES for the quarters we OFFER.
- *
- * The 15-minute bound is evaluated when the request LANDS, not when the list is drawn: at
- * 20:44:40 a naive list still offers 21:00 (15.3 min away), the user thinks for forty
- * seconds, and the POST is refused. Five extra minutes cost one quarter and remove the
- * whole class of bug. The 400 is still mapped — see `isExpiredSlotError`.
- */
+/** Extra margin on top of MIN_LEAD_MINUTES for the quarters we OFFER. */
 export const SLOT_LEAD_MARGIN_MINUTES = 20;
 /** How far ahead a slot can be opened, in days. */
 export const SLOT_HORIZON_DAYS = 7;
@@ -39,11 +24,8 @@ export const SLOT_HORIZON_DAYS = 7;
 const MINUTE_MS = 60_000;
 
 /**
- * The strict minimum these rules read from a history row, described structurally rather
- * than by one API type — the two routes that feed them serve different shapes.
- *
- * ⚠️ `scheduledAt` is an ISO **string** that can be null, never a `Date` (invariant #8), and
- * `new Date(null)` silently yields 1970 instead of failing.
+ * The strict minimum these rules read from a history row, described structurally rather than by
+ * one API type — the two routes that feed them serve different shapes.
  */
 export type SchedulableMatch = {
   status: string;
@@ -56,14 +38,7 @@ export type SchedulableMatch = {
  */
 const ENGAGING_STATUSES = new Set(['pending', 'in_progress', 'awaiting_confirmation', 'disputed']);
 
-/**
- * Epoch times of the matches that currently engage this side.
- *
- * ⚠️ An expired `pending` slot (less than MIN_LEAD_MINUTES from its own time) is SKIPPED:
- * nobody can accept it any more, so the server stops counting it against its creator
- * (`or(ne(status,'pending'), gte(scheduledAt, stillAcceptable))`). Keeping it here would
- * grey out quarters the server would happily accept.
- */
+/** Epoch times of the matches that currently engage this side. */
 export function engagementTimes(matches: SchedulableMatch[], nowMs: number) {
   const stillAcceptable = nowMs + MIN_LEAD_MINUTES * MINUTE_MS;
   const times: number[] = [];
@@ -86,14 +61,6 @@ export function engagementTimes(matches: SchedulableMatch[], nowMs: number) {
 /**
  * Still-valid open slots, exactly as `countOpenSlots` counts them: `pending` AND at least
  * MIN_LEAD_MINUTES ahead. A dead slot does not eat one of the five.
- *
- * ⚠️ THE SCOPE IS THE SIDE, AND THE SIDE DIFFERS PER FORMAT — this function only counts what
- * it is handed, so the CALLER owns that decision. Backend-side (`countOpenSlots`), a 2v2+
- * side is the TEAM (which belongs to a single ladder, so no ladder filter is needed) while a
- * 1v1 side is the couple (PLAYER, LADDER). That is why the solo page passes
- * `GET /matches/me?ladderId=` and not the unfiltered list: handing it every ladder's matches
- * would count a chess slot against a Rocket League cap, and grey out a quarter the server
- * would accept.
  */
 export function openSlotCount(matches: SchedulableMatch[], nowMs: number) {
   const stillAcceptable = nowMs + MIN_LEAD_MINUTES * MINUTE_MS;
@@ -106,14 +73,7 @@ export function openSlotCount(matches: SchedulableMatch[], nowMs: number) {
   ).length;
 }
 
-/**
- * Would opening a slot at `slotMs` overlap a match this side is already engaged in?
- *
- * ⚠️ STRICT inequality (`<`, never `<=`) — the mirror of `hasConflictingMatch`, which uses
- * `gt`/`lt`. Two matches that TOUCH do not overlap: on a 60-minute lockout, 21:00 and 22:00
- * are BOTH open, only 21:30 is refused. Turning this into `<=` would forbid playing two
- * matches back to back, which is the main thing a user wants to do with this screen.
- */
+/** Would opening a slot at `slotMs` overlap a match this side is already engaged in? */
 export function conflictsWithEngagement(
   slotMs: number,
   engagements: number[],
@@ -137,13 +97,7 @@ export type SlotTime = {
   atMs: number;
 };
 
-/**
- * 🔑 `en-GB`, ET PAS `en-US`. The interface is in English, so month and weekday names have to be
- * English — but the reading order stays day-before-month and the clock stays 24-hour, which is
- * what `en-GB` gives (`Mon 31 Aug, 23:00`). `en-US` would flip the order and switch to AM/PM.
- * The locale is HARD-CODED, never left to the browser: the same slot must read the same for
- * everyone, and an audit check comparing a rendered date cannot depend on the host's locale.
- */
+/** `en-GB`, ET PAS `en-US`. */
 const slotDayFormat = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
   day: '2-digit',
@@ -158,8 +112,8 @@ export function slotDays(nowMs: number, days = SLOT_HORIZON_DAYS): SlotDay[] {
   const list: SlotDay[] = [];
 
   for (let offset = 0; offset < days; offset += 1) {
-    // Through the Date constructor, NOT by adding 86 400 000 ms: a DST change would
-    // otherwise shift every following day by an hour.
+    // Through the Date constructor, NOT by adding 86 400 000 ms: a DST change would otherwise
+    // shift every following day by an hour.
     const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 0, 0, 0, 0);
     const label = offset === 0 ? 'Today' : offset === 1 ? 'Tomorrow' : slotDayFormat.format(start);
 
@@ -169,13 +123,7 @@ export function slotDays(nowMs: number, days = SLOT_HORIZON_DAYS): SlotDay[] {
   return list;
 }
 
-/**
- * The quarters of one local day that are still far enough ahead to be opened.
- *
- * Built from the day's Y/M/D and a growing minute count so the instants are real LOCAL
- * quarters; every UTC offset in the world is a multiple of 15 minutes, so a local quarter
- * is always a UTC quarter — which is what `getUTCMinutes() % 15` checks server-side.
- */
+/** The quarters of one local day that are still far enough ahead to be opened. */
 export function slotTimes(
   dayStartMs: number,
   nowMs: number,
@@ -186,9 +134,8 @@ export function slotTimes(
   if (Number.isNaN(day.getTime())) return [];
 
   const list: SlotTime[] = [];
-  // On a spring-forward day 02:00 does not exist and JS folds it onto 03:00, which would
-  // hand React two children with the SAME key — a console warning, i.e. a rejection
-  // criterion. Deduplicating on the instant costs nothing and closes the case.
+  // On a spring-forward day 02:00 does not exist and JS folds it onto 03:00, which would hand
+  // React two children with the SAME key — a console warning, i.e.
   const seen = new Set<number>();
 
   for (let minutes = 0; minutes < 24 * 60; minutes += SLOT_GRID_MINUTES) {

@@ -1,14 +1,7 @@
 import { z } from 'zod';
 
-// Bornes alignées sur le backend (PATCH /users/me).
-//
-// 🔑 `displayName` est REQUIS ici, et c'est un choix, pas un oubli. La route accepte de
-// l'omettre mais ne sait pas le remettre à null : un champ vidé était donc envoyé comme
-// « absent », l'API répondait 200, et le pseudo restait en place — l'utilisateur croyait
-// l'avoir effacé alors que rien n'avait bougé. Un refus explicite vaut mieux qu'un succès
-// qui ment. Effacer vraiment son pseudo demanderait que l'API accepte `null`.
-//
-// `.trim()` AVANT `.min(1)` : une saisie de trois espaces est vide, pas valide.
+// Bornes alignées sur le backend (PATCH /users/me). `displayName` est REQUIS ici, et c'est un
+// choix, pas un oubli.
 export const profileSchema = z.object({
   displayName: z
     .string()

@@ -2,10 +2,8 @@ import { useSortedGames, useLadders, formatsForGame } from '@/lib/games';
 import { GameInfo } from './GameInfo';
 import { GamesFallback } from './GamesFallback';
 
-// Test/preview component: renders a GameInfo for every game so the overlay
-// content can be eyeballed on the page. Formats come from the backend (/ladders,
-// filtered per game); playerCount is still a placeholder until the backend can
-// count players.
+// Test/preview component: renders a GameInfo for every game so the overlay content can be
+// eyeballed on the page.
 export function GamesInfos() {
   const { games, isLoading, isError } = useSortedGames();
   const ladders = useLadders();

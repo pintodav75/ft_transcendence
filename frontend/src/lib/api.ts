@@ -12,14 +12,7 @@ export type ApiFetchOptions = Omit<RequestInit, 'body'> & {
   skipAuthRefresh?: boolean
 }
 
-/**
- * The 429 sentence, shared by every mutation module.
- *
- * It lives HERE and not next to a domain's error mapping because it carries no domain
- * knowledge whatsoever: it describes the rate limiter, which is a property of the API layer.
- * It first sat in `team-mutations.ts`, which made `match-mutations.ts` import a "team" module
- * for a string about quotas — a dependency pointing the wrong way.
- */
+/** The 429 sentence, shared by every mutation module. */
 export const RATE_LIMITED_MESSAGE = 'Too many requests — retry in a moment.'
 
 /**
@@ -42,33 +35,22 @@ export class ApiError extends Error {
 
 /**
  * The two statuses that mean the same thing WHATEVER the route, so the domain modules do not
- * each re-decide them. `undefined` = this error is action-specific, the caller must map it.
- *
- * ⚠️ It lives HERE, next to `RATE_LIMITED_MESSAGE`, for the same reason: it carries no domain
- * knowledge at all — 429 is a property of the rate limiter and 403 of the auth layer. It was
- * private to `team-mutations.ts`, and that is precisely what kept the slot mutations stuck in
- * a "team" module (see the note in `match-mutations.ts`); moving it up is what unblocked them
- * for their second consumer, the solo page.
+ * each re-decide them.
  */
 export function sharedApiErrorMessage(error: unknown) {
   if (!(error instanceof ApiError)) return undefined
   // 100 req/min per account (20/min on an upload). Reachable by a jumpy user, so it needs a
   // message that says "wait", not "it failed".
   if (error.status === 429) return RATE_LIMITED_MESSAGE
-  // Should never surface: the UI only offers these actions to whoever may perform them.
-  // Mapped anyway, because a stale page is exactly when it fires.
+  // Should never surface: the UI only offers these actions to whoever may perform them. Mapped
+  // anyway, because a stale page is exactly when it fires.
   if (error.status === 403) return NOT_ALLOWED_MESSAGE
   return undefined
 }
 
 /**
  * The STABLE `code` of an error payload, for the routes answering `{ error, code }` — the
- * invitations, the two team deletions, and `DELETE /users/me`. `error` is display prose the
- * backend may reword at any time; `code` is the contract, so this is what gets tested.
- *
- * Narrowing rather than casting: a payload of another shape returns `undefined` and the caller
- * falls back on its own wording. It lives here, not in a domain module, for the reason stated
- * above `sharedApiErrorMessage` — it carries no domain knowledge.
+ * invitations, the two team deletions, and `DELETE /users/me`.
  */
 export function errorPayloadCode(payload: unknown): string | undefined {
   if (typeof payload !== 'object' || payload === null) return undefined
@@ -160,8 +142,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return text as T
 }
 
-// Exported so upload.ts (XMLHttpRequest, not fetch) can build an ApiError the
-// exact same way as apiFetch for a non-2xx response.
+// Exported so upload.ts (XMLHttpRequest, not fetch) can build an ApiError the exact same way as
+// apiFetch for a non-2xx response.
 export function getErrorMessage(status: number, payload: unknown) {
   if (
     typeof payload === 'object' &&
@@ -187,8 +169,8 @@ async function createApiError(response: Response) {
   return new ApiError(response.status, payload, getErrorMessage(response.status, payload))
 }
 
-// Exported so upload.ts can retry an upload once after a silent refresh, the
-// same way `request()` below does for a plain apiFetch call.
+// Exported so upload.ts can retry an upload once after a silent refresh, the same way
+// `request()` below does for a plain apiFetch call.
 export async function refreshAccessToken() {
   try {
     // Refresh uses raw fetch so apiFetch cannot recursively refresh itself.
@@ -197,12 +179,8 @@ export async function refreshAccessToken() {
       credentials: 'include',
     })
 
-    // 204 = aucun cookie de refresh, donc aucune session à restaurer (B13). Ce n'est pas une
+    // 204 = aucun cookie de refresh, donc aucune session à restaurer. Ce n'est pas une
     // erreur, mais ce n'est pas non plus un succès : il n'y a pas de token à poser.
-    // ⚠️ La garde doit être ÉCRITE, pas subie : `parseResponse` rend `undefined` sur un corps
-    // vide, donc sans elle le destructuring ci-dessous jetterait un TypeError silencieusement
-    // avalé par le `catch`. Le comportement serait juste, par accident.
-    // ⚠️ Elle passe AVANT `response.ok` : un 204 est un 2xx.
     if (response.status === 204) {
       return false
     }
@@ -220,9 +198,9 @@ export async function refreshAccessToken() {
   }
 }
 
-// Exported for the same reason as refreshAccessToken above: upload.ts must clear the
-// session in the exact same case — refresh already attempted AND refused — otherwise the
-// auth store keeps believing the user is signed in with a dead access token.
+// Exported for the same reason as refreshAccessToken above: upload.ts must clear the session in
+// the exact same case — refresh already attempted AND refused — otherwise the auth store keeps
+// believing the user is signed in with a dead access token.
 export async function logoutAfterAuthFailure() {
   useAuthStore.getState().clearSession()
 

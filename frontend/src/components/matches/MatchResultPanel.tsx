@@ -59,13 +59,7 @@ function reportedAnnouncement(
   return `Result reported: ${winnerName} wins ${score}. ${opponentName} now has to confirm or contest it.`;
 }
 
-/**
- * What the live region says when the OTHER side settled the match while this tab sat open.
- *
- * ⚠️ It has to be announced, not merely displayed: the 409 triggers a refetch, the refetch
- * resolves the match, and the panel that holds the error message unmounts underneath it. The
- * live region is the only thing left standing (see `isSettledElsewhere`).
- */
+/** What the live region says when the OTHER side settled the match while this tab sat open. */
 const SETTLED_ELSEWHERE_ANNOUNCEMENT =
   'The other side settled this match while the page was open: the result form is gone, and the sheet now shows the final state.';
 
@@ -81,15 +75,7 @@ type MatchResultFormProps = {
   onCancel?: () => void;
 };
 
-/**
- * The score form itself: who won, and in how many games.
- *
- * TWO controls rather than three number inputs, on purpose — the pair (winner, games taken
- * by the loser) can only ever produce a legal best-of-3, so "a score that contradicts the
- * declared winner" is not a mistake to catch, it is a state the screen cannot represent. The
- * Zod schema mirrors the backend's two guards anyway (see `matchResultSchema`), as the net
- * for the day these controls change.
- */
+/** The score form itself: who won, and in how many games. */
 function MatchResultForm({
   id,
   match,
@@ -138,8 +124,8 @@ function MatchResultForm({
     const winnerName = body.winnerSideId === mySide.id ? myName : opponentName;
     const loserGames = Math.min(body.scoreSelf, body.scoreOpponent);
 
-    // `mutate`, not `mutateAsync`: a rejection lands in `submit.error` and is rendered
-    // below, so no promise is left unhandled in this handler.
+    // `mutate`, not `mutateAsync`: a rejection lands in `submit.error` and is rendered below,
+    // so no promise is left unhandled in this handler.
     submit.mutate(body, {
       onSuccess: ({ status }) =>
         onReported(reportedAnnouncement(status, winnerName, opponentName, loserGames)),
@@ -163,8 +149,7 @@ function MatchResultForm({
         aria-describedby={winnerError ? `${winnerHintId} ${winnerErrorId}` : winnerHintId}
         className="flex min-w-0 flex-col gap-2 border-0 p-0"
       >
-        {/* A <legend>, not a <Label>: it names a GROUP of radios, not one control. The look
-            is shared through labelClasses() rather than by copying Label's class string. */}
+
         <legend className={labelClasses('mb-2')}>Winner</legend>
 
         <div className="grid gap-2 sm:grid-cols-2">
@@ -177,8 +162,7 @@ function MatchResultForm({
                 value={side.id}
                 // Marked on the CONTROLS, not just described on the group: without it a screen
                 // reader reads the reason (through the fieldset) but never says which control
-                // is refused. Reachable — `matchResultSchema` files its cross-check issue on
-                // `winnerSideId`.
+                // is refused.
                 aria-invalid={Boolean(errors.winnerSideId)}
                 className="focus-ring size-4 shrink-0 accent-action-primary"
                 {...register('winnerSideId')}
@@ -202,8 +186,8 @@ function MatchResultForm({
         <Select
           id={scoreId}
           aria-invalid={Boolean(scoreError)}
-          // Without this, a screen reader announces "invalid" and stops there: the reason
-          // sits in an element nothing points at.
+          // Without this, a screen reader announces "invalid" and stops there: the reason sits
+          // in an element nothing points at.
           aria-describedby={scoreError ? `${scoreHintId} ${scoreErrorId}` : scoreHintId}
           {...register('loserGames')}
         >
@@ -244,8 +228,7 @@ type MatchResultPanelProps = {
   nowMs: number;
   /**
    * Where focus goes once this panel disappears (it does, on every success): the sheet's
-   * `<h1>`. `<body>` is the wrong answer — a keyboard user is thrown back to the top of the
-   * document with nothing announced (FX-FOCUS).
+   * `<h1>`.
    */
   returnFocusRef: RefObject<HTMLElement | null>;
   /** Hands the page the sentence to put in its ONE live region. */
@@ -254,27 +237,7 @@ type MatchResultPanelProps = {
 
 /**
  * The only place in the app where the challenge/accept cycle can END: reporting a score,
- * confirming the opponent's, or contesting it — [FT-4B].
- *
- * 🚨 IT RENDERS NOTHING unless all three conditions of `canReportResult` hold (I speak for a
- * camp · the match awaits a result · kick-off has passed). A button whose request the API is
- * certain to refuse writes a red line in the Chrome console, and a dirty console is a
- * rejection criterion for the whole project.
- *
- * 🔑 There is no "confirm" endpoint: confirming posts the EXACT MIRROR of the opponent's
- * submission back to `POST /matches/{id}/result`, contesting posts a different one and the
- * server opens the dispute itself.
- *
- * ⚠️ RE-SUBMISSION IS DELIBERATELY NOT OFFERED. The API lets a camp overwrite its own verdict
- * while the match is unresolved, but "change my declaration" is a UX of its own (it restarts
- * the opponent's 24 h window, and it would have to say so) and it is out of this ticket's
- * scope. A camp that has reported sees the wait of `MatchStateNotice`, never a form — that is
- * a decision, not an oversight.
- *
- * The form is an inline DISCLOSURE, never a `<dialog>`: a modal traps focus around a task one
- * may perfectly well want to abandon halfway (same reasoning as `CreateMatchPanel`). The
- * `ConfirmDialog` guards ONLY the Confirm button — one click, irreversible, applying Elo to
- * both camps — and its whole value is restating the exact score being agreed to.
+ * confirming the opponent's, or contesting it.
  */
 export function MatchResultPanel({
   match,
@@ -290,9 +253,7 @@ export function MatchResultPanel({
   const meId = useAuthStore((state) => state.user?.id);
   const { mySide, opponent, blocker } = canReportResult(match, sides, meId, nowMs);
 
-  // Hooks run on every render, so this one is created before any branch. It serves the
-  // Confirm path only — a SECOND instance next to the form's own, deliberately: a failure in
-  // the dialog must not surface inside the form, and vice versa.
+  // Hooks run on every render, so this one is created before any branch.
   const confirmResult = useSubmitMatchResult({
     matchId: match.id,
     teamId: mySide?.team?.id,
@@ -315,19 +276,7 @@ export function MatchResultPanel({
     onReported(announcement);
     setConfirming(false);
     setContesting(false);
-    // The control that had focus is about to be unmounted. Doing nothing leaves focus on
-    // `<body>`; the `<h1>` names the match, so a screen reader reads something useful on
-    // arrival.
-    //
-    // ⚠️ This call is a NO-OP on the confirmation path: the page is inert under the open
-    // `<dialog>`, and an inert element cannot take focus. What lands the focus there is
-    // `ConfirmDialog`, which falls back to this very `returnFocusRef` — but ONLY once its
-    // opener has left the DOM (`opener.isConnected`, see `ui/confirm-dialog.tsx`). That
-    // condition is met here rather than assumed: by the time this runs, the invalidation
-    // awaited inside the mutation has already landed, so the button that opened the dialog is
-    // gone. ⚠️ It is an ORDERING, so it is measured and not deduced — `R11b` of the
-    // `match-result` scenario is the check that keeps it, and it is deliberately separate
-    // from `R9`, which covers the other path (no dialog at all).
+    // The control that had focus is about to be unmounted.
     returnFocusRef.current?.focus();
   }
 
@@ -338,35 +287,19 @@ export function MatchResultPanel({
     confirmResult.mutate(mirrored, {
       onSuccess: ({ status }) =>
         handleReported(reportedAnnouncement(status, winnerName, opponentName, loserGames)),
-      /**
-       * ⚠️ The dialog does NOT close on its own here, and that is the whole point of this
-       * branch. On a 409, the refetch makes `body()` render `null` — the button that opened
-       * this dialog disappears — but `confirming` stays `true` and `mirror` survives (the
-       * `submitted*` columns outlive the closure), so the dialog would stay open with
-       * "Apply the result" re-enabled by the end of `isPending`. A second click is then a
-       * request the app KNOWS will be refused: a red console line, on purpose, which is a
-       * rejection criterion for the project. `handleReported` closes it and announces.
-       */
+      /** The dialog does NOT close on its own here, and that is the whole point of this branch. */
       onError: (error) => {
         if (isSettledElsewhere(error)) handleReported(SETTLED_ELSEWHERE_ANNOUNCEMENT);
       },
     });
   }
 
-  // The opponent's claim, turned into MY submission. `null` when he has not reported — or
-  // reported an incomplete row: there is then nothing to mirror, only a result to report.
+  // The opponent's claim, turned into MY submission.
   const mirror = foe.submittedAt !== null ? mirrorOfOpponentSubmission(foe) : null;
   const mirrorWinnerName = mirror && mirror.winnerSideId === me.id ? myName : opponentName;
   const mirrorLoserGames = mirror ? Math.min(mirror.scoreSelf, mirror.scoreOpponent) : 0;
 
-  /**
-   * The 24 h auto-confirmation window is over, but the job has not run yet.
-   *
-   * ⚠️ Without this, the screen contradicts itself: `MatchStateNotice` announces "the reported
-   * result is applied as is" while these buttons still offer to confirm or contest. BOTH are
-   * true — the status is still `awaiting_confirmation`, so the API still accepts an answer —
-   * and the reader has no way to tell which one to believe.
-   */
+  /** The 24 h auto-confirmation window is over, but the job has not run yet. */
   const windowLeft = confirmationMsLeft(foe, nowMs);
   const windowClosed = windowLeft !== null && windowLeft <= 0;
 
@@ -379,8 +312,7 @@ export function MatchResultPanel({
       return (
         <section className="flex flex-col gap-3.5">
           <SectionTitle>Result</SectionTitle>
-          {/* Deliberately NO control: §5.3 — the API refuses a result before kick-off, in
-              400, so a button here would guarantee a red line in the console. */}
+
           <Callout tone="muted">
             You are the one who reports this match for{' '}
             <strong className="text-text-primary">{myName}</strong>. The form opens at kick-off,
@@ -465,10 +397,6 @@ export function MatchResultPanel({
     <>
       {body()}
 
-      {/* ⚠️ MOUNTED AT A STABLE POSITION, whatever `body()` returns. Success makes the button
-          that opened this dialog disappear, and a `<dialog>` REMOVED from the DOM while open
-          never runs its close path: focus would land on `<body>` with nothing announced.
-          Same reason the team page keeps its dialogs at page level. */}
       <ConfirmDialog
         open={confirming && mirror !== null}
         title="Confirm this result?"

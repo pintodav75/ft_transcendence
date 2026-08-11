@@ -13,9 +13,7 @@ import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 import type { paths } from '@/lib/api-types.gen';
 import type { NotificationsPage } from '@/lib/notifications';
 
-// Write side of the bell. Its read side (`lib/notifications.ts`) stays separate for the reason
-// `friend-mutations.ts` states: queries and mutations have opposite lifecycles, and mixing
-// them makes it impossible to see at a glance what invalidates what.
+// Write side of the bell.
 
 type MarkReadResponse =
   paths['/notifications/{id}/read']['patch']['responses'][200]['content']['application/json'];
@@ -51,9 +49,7 @@ function updateCachedList(
 
 /**
  * The badge is a plain number in its own cache: it counts ALL my unread notifications, so it
- * cannot be derived from the pages currently loaded. `Math.max(0, …)` because two clicks on
- * the same row (the second landing while the first is still in flight) must not push it
- * negative — the server is idempotent there, and so is this.
+ * cannot be derived from the pages currently loaded.
  */
 function decrementBadge(queryClient: QueryClient, by: number) {
   queryClient.setQueryData<number>(NOTIFICATIONS_UNREAD_KEY, (current) =>
@@ -63,8 +59,7 @@ function decrementBadge(queryClient: QueryClient, by: number) {
 
 /**
  * The row the user acted on is not in the database, so what is on screen is stale: refetch on
- * top of showing the message. Same rule as `friend-mutations.ts` — an error printed over a
- * row that should not be there is half a fix.
+ * top of showing the message.
  */
 function isStaleRowError(error: unknown) {
   return error instanceof ApiError && error.status === 404;
@@ -87,31 +82,10 @@ export function markAllNotificationsReadErrorMessage(error: unknown) {
   return sharedApiErrorMessage(error) ?? 'Could not mark your notifications as read.';
 }
 
-/**
- * 🚨 `wasUnread` IS NOT DERIVABLE FROM THE CACHE, so the caller states it.
- *
- * The row acted on may not be in the cached pages at all — a live arrival the server has not
- * returned yet lives in the panel's own buffer (`useLiveNotifications`). Deducing "it was
- * unread" from "a cached page changed" would therefore leave the badge one too high for
- * exactly the notifications that just arrived, which are the ones a user acts on first.
- */
+/** `wasUnread` IS NOT DERIVABLE FROM THE CACHE, so the caller states it. */
 export type MarkReadVariables = { id: string; wasUnread: boolean };
 
-/**
- * Marks ONE notification read.
- *
- * 🔑 THE CACHE IS REWRITTEN, NOT INVALIDATED, and the difference is visible: invalidating
- * would refetch every loaded page just to flip one boolean, and the row would stay bold until
- * the answer came back. The list is ordered by date, so nothing moves — the only thing that
- * changes is this row's `readAt` and the badge.
- *
- * ⚠️ NOT OPTIMISTIC. The write is applied once the server has agreed, so there is no state to
- * roll back if it refuses; the round trip is one hop to the same origin, and the button is
- * disabled meanwhile (see `NotificationsSlot`).
- *
- * `apiFetch` sends no body and therefore no `content-type` on this PATCH (`prepareBody` in
- * `lib/api.ts`), which is what keeps Fastify from answering 400 `FST_ERR_CTP_EMPTY_JSON_BODY`.
- */
+/** Marks ONE notification read. */
 export function useMarkNotificationRead() {
   const queryClient = useQueryClient();
 
@@ -134,17 +108,7 @@ export function useMarkNotificationRead() {
   });
 }
 
-/**
- * Marks everything read in one call.
- *
- * 🚨 ZERO IS AN ASSUMPTION, NOT A FACT, and the server gets to correct it. The call reads every
- * row that was unread WHEN IT RAN; a notification pushed during the round trip is genuinely
- * unread after it, so forcing the badge to zero and stopping there hid it for good — the badge
- * said 0, "Mark all read" disappeared with it, and the row still came back bold on the next
- * fetch. Worse, its id was already in `countedNotificationIds`, so no later frame could add it
- * back either. The zero stays, because it is right in every ordinary case and it is instant;
- * the refetch behind it is what makes the wrong case temporary instead of permanent.
- */
+/** Marks everything read in one call. */
 export function useMarkAllNotificationsRead() {
   const queryClient = useQueryClient();
 
@@ -161,9 +125,8 @@ export function useMarkAllNotificationsRead() {
       // the ones no page here has ever loaded — so zero, and not one subtraction that a live
       // arrival could throw off.
       queryClient.setQueryData<number>(NOTIFICATIONS_UNREAD_KEY, 0);
-      // …and then the truth. Only the BADGE is invalidated: the list has just been rewritten
-      // in place above, and refetching its pages here would undo that work for nothing.
-      // `void`: TanStack swallows the rejection, the query owns its own error state.
+      // …and then the truth. Only the BADGE is invalidated: the list has just been rewritten in
+      // place above, and refetching its pages here would undo that work for nothing.
       void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_UNREAD_KEY });
     },
   });

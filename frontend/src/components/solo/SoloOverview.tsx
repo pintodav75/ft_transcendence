@@ -33,12 +33,7 @@ type SoloOverviewProps = {
   linked: boolean | undefined;
   accountsError: boolean;
   matches: SoloMatch[] | undefined;
-  /**
-   * L'historique a-t-il ÉCHOUÉ ? Sans ce drapeau, « Next match » et « Last results »
-   * disparaissaient **sans un mot** quand `GET /matches/me` tombait : impossible de
-   * distinguer « je n'ai aucun match prévu » de « on n'a pas réussi à le charger », et
-   * l'information n'était donnée que dans l'AUTRE onglet.
-   */
+  /** L'historique a-t-il ÉCHOUÉ ? */
   matchesError: boolean;
   rankings: RankingEntry[] | undefined;
   standing: RankingEntry | undefined;
@@ -94,9 +89,6 @@ export function SoloOverview({
         emptyMessage="Nobody is ranked on this ladder yet — the first finished match creates the first line."
       />
 
-      {/* L'échec se dit ICI aussi, pas seulement dans l'onglet Matches : les deux sections
-          ci-dessous sont pilotées par `matches`, et leur absence silencieuse se lit comme
-          « rien de prévu, aucun résultat » — une affirmation fausse sur son propre état. */}
       {matchesError && (
         <Callout tone="muted">
           Your matches on this ladder could not be loaded, so your next match and your recent
@@ -114,8 +106,7 @@ export function SoloOverview({
             <p className="text-sm text-text-muted">Waiting for an opponent</p>
             <span className="ml-auto flex items-center gap-2">
               <Pill tone="open">Open slot</Pill>
-              {/* `nextOpenSlot` only ever returns a `pending` match with no opponent, so the
-                  button offered here is always one the server will accept. */}
+
               {onCancelSlot ? (
                 <InlineButton
                   tone="danger"

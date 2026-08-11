@@ -58,8 +58,8 @@ export function History() {
   const resultOptions = historyResultOptions(matches);
 
   /**
-   * The one sentence both readers get, for any state of the controls — computed for a
-   * candidate state so the announcement can describe the table the user is ABOUT to get.
+   * The one sentence both readers get, for any state of the controls — computed for a candidate
+   * state so the announcement can describe the table the user is ABOUT to get.
    */
   const summaryOf = (state: HistoryFilterState, targetPage: number, size: number) => {
     const rows = applyHistoryFilters(matches, state);

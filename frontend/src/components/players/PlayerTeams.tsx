@@ -19,20 +19,7 @@ type PlayerTeamsProps = {
   name: string;
 };
 
-/**
- * The teams this player belongs to, each row opening its page.
- *
- * 🔑 This is what creates the PLAYER → TEAM direction of navigation. Until now the graph only
- * ran the other way: a team page links to its roster's players, and nothing led back up.
- *
- * ⚠️ `isCaptain` DESCRIBES THE PROFILE BEING READ, not the visitor — the opposite referent from
- * the identically named field of `GET /teams`, which is why the contract declares a separate
- * `PlayerTeam` schema instead of reusing `TeamListItem`. Hence "Captain" here where `TeamCard`
- * writes "You are the captain": the same crown on the wrong head is a claim, not a typo.
- *
- * Nothing private is disclosed: a team's full roster is already readable by any signed-in
- * account (`GET /teams/{id}`), and teams appear by name in every ladder's standings.
- */
+/** The teams this player belongs to, each row opening its page. */
 export function PlayerTeams({ teams, name }: PlayerTeamsProps) {
   return (
     <section className="flex flex-col gap-3.5">

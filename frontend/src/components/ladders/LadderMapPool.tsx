@@ -11,11 +11,8 @@ type LadderMapPoolProps = {
 };
 
 /**
- * The map pool of the ladder's GAME — the very table `POST /matches` draws from, served by
- * `GET /ladders/{id}`, so this screen cannot advertise a map the server would never pick.
- *
- * The caller hides the whole section when the pool is empty: a game without maps is not an
- * error state, it simply has nothing to say here.
+ * The map pool of the ladder's GAME — the very table `POST /matches` draws from, served by `GET
+ * /ladders/{id}`, so this screen cannot advertise a map the server would never pick.
  */
 export function LadderMapPool({ maps, gameName }: LadderMapPoolProps) {
   return (
@@ -27,8 +24,6 @@ export function LadderMapPool({ maps, gameName }: LadderMapPoolProps) {
         slot draws {MAPS_PER_MATCH} of them at random — one per game of the Bo3.
       </p>
 
-      {/* `role="list"` is explicit on purpose: Safari drops list semantics from a `<ul>`
-          that is laid out with flex. */}
       <ul role="list" className="flex flex-wrap gap-2">
         {maps.map((map) => (
           <li key={map}>

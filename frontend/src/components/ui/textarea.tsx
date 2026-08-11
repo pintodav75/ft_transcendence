@@ -5,13 +5,6 @@ import { cn } from '@/lib/utils';
 type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement>;
 
 // Calqué sur Input, en multi-ligne (pas de hauteur fixe h-12, padding vertical).
-//
-// 🔑 `border-border-control` et NON `border-border-subtle` : la bordure d'un champ de saisie
-// n'est pas décorative, c'est elle qui dit où commence la zone où l'on tape, et WCAG 1.4.11
-// lui impose 3:1. `border-subtle` ne donne que 1,30:1 contre la carte et 1,42:1 contre le
-// fond du champ — le champ est alors sans contour pour qui voit mal. `border-control` donne
-// 3,17:1 et 3,47:1. C'est le token que `Input` et `Select` portent déjà, et le commentaire
-// qui le déclare dans `index.css` nomme les trois : input, select, textarea.
 export function Textarea({ className, ...props }: TextareaProps) {
   return (
     <textarea

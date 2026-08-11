@@ -20,34 +20,12 @@ type AcceptSlotPanelProps = {
   teamId: string;
   /** The match has started: the caller routes to its sheet. */
   onAccepted: (matchId: string) => void;
-  /**
-   * The slot vanished under us (another camp took it, or it passed its deadline). The panel
-   * is about to be unmounted by the board's refetch, so the message has to travel UP — a
-   * failure rendered inside a component that is disappearing is a message nobody reads.
-   */
+  /** The slot vanished under us (another camp took it, or it passed its deadline). */
   onVanished: (message: string) => void;
   onClose: () => void;
 };
 
-/**
- * Composing the line-up an acceptance commits — 2v2+ only.
- *
- * An inline DISCLOSURE inside the slot's own row, not a modal: `ConfirmDialog` is a
- * confirmation box, and trapping focus around a five-checkbox form the user may well abandon
- * halfway is exactly what a native `<dialog>` should not be used for (same reasoning as
- * `CreateMatchPanel`, which opens a slot with the very same control).
- *
- * ⚠️ IT IS ONLY EVER MOUNTED ON A SLOT THE SERVER DECLARED ACCEPTABLE. `canAccept` already
- * proves I captain a team here whose roster holds enough LINKED players — so "not enough
- * players" cannot be reached from this panel, and the picker's greying is a courtesy, not the
- * gate.
- *
- * ⚠️ NO REACT HOOK FORM AND NO ZOD HERE, unlike every other form of the repo, and the reason
- * is that there is nothing for them to validate: the only rule is "exactly `size` ids", the
- * control physically cannot select more, and the submit button is disabled below it. A schema
- * would produce an error message that can never be rendered. The server's own refusals are
- * mapped by `acceptMatchErrorMessage` — that is where the real validation lives.
- */
+/** Composing the line-up an acceptance commits — 2v2+ only. */
 export function AcceptSlotPanel({
   id,
   slot,
@@ -79,8 +57,8 @@ export function AcceptSlotPanel({
       {
         onSuccess: ({ match }) => onAccepted(match.id),
         onError: (error) => {
-          // The board is about to drop this row (the mutation invalidates it), taking the
-          // panel and its message with it. Hand the news to the page, which survives.
+          // The board is about to drop this row (the mutation invalidates it), taking the panel
+          // and its message with it. Hand the news to the page, which survives.
           if (isSlotGone(error)) onVanished(acceptMatchErrorMessage(error, members));
         },
       },
@@ -99,8 +77,7 @@ export function AcceptSlotPanel({
       aria-labelledby={headingId}
       className="flex flex-col gap-4 rounded-control border border-border-subtle bg-surface-card-strong p-4"
     >
-      {/* `tabIndex={-1}` only so focus can be MOVED here on open; it never joins the tab
-          order afterwards. */}
+
       <h3 id={headingId} ref={headingRef} tabIndex={-1} className="focus-ring text-sm label-caps-black">
         Field your line-up · {formatMatchDate(slot.scheduledAt, 'long')}
       </h3>
@@ -112,9 +89,7 @@ export function AcceptSlotPanel({
       )}
 
       {teamQuery.isError && (
-        // ONE block for the failure — message and way out together. They used to sit either
-        // side of the `teamQuery.data` branch, under the same condition, which read as two
-        // unrelated states.
+        // ONE block for the failure — message and way out together.
         <>
           <Callout tone="danger">
             Your roster could not be loaded, so no line-up can be composed. Reload the page and

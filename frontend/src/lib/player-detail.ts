@@ -8,7 +8,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 export type PublicUser = components['schemas']['PublicUser'];
 export type Friendship = components['schemas']['Friendship'];
-// Solo ranking  — Elo, record and rank
+// Solo ranking — Elo, record and rank
 export type PlayerRanking = components['schemas']['PlayerRanking'];
 // Team ranking
 export type PlayerTeam = components['schemas']['PlayerTeam'];
@@ -16,14 +16,7 @@ export type PlayerTeam = components['schemas']['PlayerTeam'];
 type PublicUserResponse =
   paths['/users/{pseudo}']['get']['responses'][200]['content']['application/json'];
 
-/**
- * Client-only state attached to an already cached profile.
- *
- * Blocking makes the profile endpoint return 404, so refetching cannot tell an open page why
- * it disappeared. The successful block mutation marks the cached response instead. A later
- * successful refetch after unblocking replaces the whole response and therefore clears this
- * marker without a second store or any manual cleanup.
- */
+/** Client-only state attached to an already cached profile. */
 export type PlayerProfile = PublicUserResponse & { __clientBlocked?: true };
 
 export const ViewerRole = {
@@ -46,8 +39,7 @@ export function getViewerRole(
   return ViewerRole.Stranger;
 }
 
-// cta = call to action
-// add friend? accept friend? pending?
+// cta = call to action add friend? accept friend? pending?
 export type FriendCta = 'add' | 'accept' | 'pending' | 'none';
 
 export function friendCta(
@@ -62,16 +54,15 @@ export function friendCta(
   return friendship.requesterId === viewerId ? 'pending' : 'accept';
 }
 
-// Built once at module scope, an Intl formatter is expensive to
-// create and these options never change.
+// Built once at module scope, an Intl formatter is expensive to create and these options never
+// change.
 const joinDateFormat = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'long',
   year: 'numeric',
 });
 
-//  * When the account was created, for the "Member since" line.
-//  * `createdAt` arrives as an ISO **string**, not a `Date`
+// * When the account was created, for the "Member since" line.
 
 export function formatJoinDate(iso: string) {
   const date = new Date(iso);
@@ -80,28 +71,17 @@ export function formatJoinDate(iso: string) {
   return joinDateFormat.format(date);
 }
 
-//  * When the two accounts became friends
+// * When the two accounts became friends
 export function formatFriendsSince(friendship: Friendship | null | undefined) {
   if (friendship?.status !== 'accepted') return null;
 
   return formatJoinDate(friendship.updatedAt);
 }
 
-/**
- * Prefix shared by every cached public profile.
- *
- * Friendship mutations can be triggered from the profile itself or from the social rail that
- * stays mounted beside it. Invalidating this prefix is what keeps an already-open profile in
- * sync when the action came from the rail.
- */
+/** Prefix shared by every cached public profile. */
 export const PLAYER_PROFILES_KEY = ['player'] as const;
 
-/**
- * Cache key of one public profile.
- *
- * Lowered: two spellings of one pseudo must not
- * become two cache entries holding the same user.
- */
+/** Cache key of one public profile. */
 export function playerQueryKey(pseudo: string) {
   return [...PLAYER_PROFILES_KEY, pseudo.toLowerCase()] as const;
 }
@@ -113,16 +93,7 @@ export function markPlayerProfileBlocked(queryClient: QueryClient, userId: strin
   );
 }
 
-/**
- * The profile behind a pseudo.
- *
- * NO client-side format gate, unlike `useTeam`: the backend's `:pseudo` param carries no
- * schema at all, so there is no such thing as a malformed pseudo to catch before spending
- * a request — anything unknown is simply a 404.
- *
- * ⚠️ That 404 also covers "one of us has blocked the other", deliberately, so the error
- * copy must never name blocking (see `lib/player-mutations.ts`).
- */
+/** The profile behind a pseudo. */
 export function usePlayer(pseudo: string) {
   return useQuery({
     queryKey: playerQueryKey(pseudo),

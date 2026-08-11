@@ -18,7 +18,7 @@ import { useMyTeams } from '@/lib/teams';
 /**
  * The single segment following `prefix` in `path`, when there is exactly one.
  *
- * ⚠️ The guard on `includes('/')` is what keeps a deeper path (`/games/cs2/whatever`) from
+ * The guard on `includes('/')` is what keeps a deeper path (`/games/cs2/whatever`) from
  * being fed to a route that takes ONE param.
  */
 function segmentAfter(path: string | undefined, prefix: string) {
@@ -28,24 +28,7 @@ function segmentAfter(path: string | undefined, prefix: string) {
   return segment.length > 0 && !segment.includes('/') ? segment : undefined;
 }
 
-/**
- * Where "back" actually leads, read from the history entry.
- *
- * 🔑 A browser never tells a page what is behind it, so the origin is written into the history
- * entry by the link that was clicked (`state={useBackFrom()}`, see `lib/back-navigation.ts`).
- * Reading it here is what stops this page from claiming "Back to my teams" to someone who
- * arrived from `/games/cs2` or from a match sheet — and who may well have no team at all.
- *
- * 🚨 THIS PAGE HAS FOUR INBOUND LINKS, and the label must hold for each. `GameLadderCard` and
- * the match sheet record their origin, so they get a truthful label; `LadderExcerpt` (a team
- * page) records none, and its fallback "Back to my teams" is already true. The fourth,
- * `solo-ladder.tsx`, DELIBERATELY records none: that link only exists on its "Not a solo
- * ladder" panel, so sending the visitor "back" would return them to an error screen —
- * "Back to my teams" is the better answer on a ladder played with a squad.
- *
- * ⚠️ The recorded origin is a PATH, never a name: naming the game would mean fetching it just
- * to label a button (same decision as `BackButton`'s `backLabel`).
- */
+/** Where "back" actually leads, read from the history entry. */
 function useBackDestination() {
   const backFrom = useRouterState({ select: (state) => state.location.state.backFrom });
 
@@ -95,24 +78,23 @@ function BackUp({ variant = 'button' }: { variant?: 'inline' | 'button' }) {
 }
 
 // Destination of the "See the full ladder" link of a team page: the ladder's identity, the
-// rules that actually govern a match on it, the map pool, and the WHOLE standings (the
-// excerpt only ever shows five rows around one team).
+// rules that actually govern a match on it, the map pool, and the WHOLE standings (the excerpt
+// only ever shows five rows around one team).
 export function LadderDetail() {
   const { ladderId } = useParams({ from: '/_authenticated/ladders/$ladderId' });
 
-  // Déjà en cache quand on arrive depuis /teams ou depuis une page équipe : TanStack partage
-  // la clé ['teams'], cette ligne ne coûte donc une requête que sur une arrivée par URL.
+  // Déjà en cache quand on arrive depuis /teams ou depuis une page équipe : TanStack partage la
+  // clé ['teams'], cette ligne ne coûte donc une requête que sur une arrivée par URL.
   const myTeams = useMyTeams();
 
-  // Mirrors the backend param schema: a malformed id can only ever come back as a 400, so
-  // the error state is rendered without spending a request — and without the red "Failed to
-  // load resource" line that request would leave in the console.
+  // Mirrors the backend param schema: a malformed id can only ever come back as a 400, so the
+  // error state is rendered without spending a request — and without the red "Failed to load
+  // resource" line that request would leave in the console.
   const validId = isValidLadderId(ladderId);
 
   const ladderQuery = useLadder(ladderId, validId);
-  // Fired in PARALLEL with the ladder, not after it: the standings are the bulk of this
-  // page, and chaining them behind a first round-trip would double the wait for the common
-  // case. `undefined` keeps the hook disabled while the id is malformed.
+  // Fired in PARALLEL with the ladder, not after it: the standings are the bulk of this page,
+  // and chaining them behind a first round-trip would double the wait for the common case.
   const rankingsQuery = useLadderRankings(validId ? ladderId : undefined);
 
   const rankings = rankingsQuery.data?.rankings;
@@ -162,8 +144,7 @@ export function LadderDetail() {
           aria-hidden="true"
           className="h-64 animate-pulse rounded-card border border-border-subtle bg-surface-card"
         />
-        {/* THE live region of this screen — there must only ever be one, and no other
-            element below carries `role="status"`. */}
+
         <p role="status" className="text-sm text-text-muted">
           Loading the ladder…
         </p>
@@ -174,24 +155,17 @@ export function LadderDetail() {
   const { ladder, game, maps } = ladderQuery.data;
 
   // Se retrouver dans un classement complet : on arrive ici depuis SA page équipe et sans
-  // repère la ligne se perd dans la liste. `LadderBoard` sait déjà surligner (l'extrait s'en
-  // sert), il lui manquait juste l'id.
-  // ⚠️ Un joueur a AU PLUS une équipe par ladder (contrainte `team_members_user_ladder_unique`),
-  // donc un `find` suffit — il n'y a pas d'ambiguïté à arbitrer.
+  // repère la ligne se perd dans la liste.
   const myTeamOnThisLadder = myTeams.data?.teams.find((team) => team.ladderId === ladder.id);
 
   return (
     <div className="flex min-w-0 flex-col gap-6 py-6">
-      {/* The 4th place the way back up is rendered — the three others are the dead-end panels
-          above. All four read the same origin, so none of them can drift into a lie on its
-          own. */}
+
       <BackUp variant="inline" />
 
       <div className="panel flex min-w-0 flex-col gap-8 p-6">
         <header className="space-y-1">
-          {/* Artwork du jeu, même idiome que `TeamHero` : bandeau + dégradé de lisibilité
-              bas-haut. ⚠️ Les 3 lignes sont passées dans `GameBanner` quand la page match en
-              a eu besoin (FT-4A, règle du second usage) — le dégradé n'est plus recopié. */}
+
           <GameBanner
             gameId={game.id}
             name={game.name}
@@ -204,8 +178,7 @@ export function LadderDetail() {
           <p className="flex flex-wrap items-center gap-2 pt-1 text-xs label-caps text-text-secondary">
             <span>{game.name}</span>
             <Pill tone="muted">{ladder.format}</Pill>
-            {/* Silent while the standings load: "0 ranked" would be a claim, not a
-                placeholder. */}
+
             {rankings && (
               <span>
                 {rankings.length} ranked {rankings.length === 1 ? 'competitor' : 'competitors'}

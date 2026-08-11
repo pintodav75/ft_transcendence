@@ -1,29 +1,23 @@
 import { useCallback, useState } from 'react';
 
 /**
- * Texte d'une région live `role="status"`, et la fonction qui l'y pose.
+ * Text of a role="status" live region, and the function that puts it there.
  *
- * Deux pièges de région live, tous deux rencontrés pour de vrai, sont traités ici pour que
- * les appelants n'aient pas à y penser :
+ * two live-region traps handled here so callers don't have to think about them:
+ *  - the same text twice is not re-announced (a reader only reads what CHANGES), so the region
+ *    is emptied then refilled on the next frame.
+ *  - reset() clears a message an action has made false, otherwise the region contradicts the screen.
  *
- * ① **Un texte identique n'est pas ré-annoncé.** Le lecteur d'écran ne lit que ce qui
- *    CHANGE : exclure @x, le réinviter, puis le ré-exclure serait silencieux la seconde
- *    fois. On vide donc la région avant de la remplir, sur la frame suivante.
- * ② **Une région ne doit pas garder un message périmé.** `reset()` existe pour ça : une
- *    action qui rend l'annonce précédente FAUSSE (ouvrir un créneau après en avoir annulé
- *    un) doit l'effacer, sinon la région contredit ce que l'écran affiche.
- *
- * ⚠️ Ce que ce hook NE fait PAS : monter la région. Elle doit vivre dans le DOM **avant**
- * son texte — une région insérée en même temps que son contenu n'est pas annoncée de façon
- * fiable, le lecteur d'écran doit déjà la surveiller quand elle se remplit.
+ * it does NOT mount the region. that has to already be in the DOM before its text — a region
+ * inserted together with its content isn't reliably announced.
  */
 export function useAnnouncement() {
   const [message, setMessage] = useState('');
 
   const announce = useCallback((text: string) => {
     setMessage('');
-    // Frame suivante : dans le même rendu, React verrait une valeur identique à la
-    // précédente et le DOM ne changerait pas — donc rien ne serait annoncé (piège ①).
+    // Next frame: in the same render React would see the same value as before, the DOM would
+    // not change, and nothing would be announced.
     requestAnimationFrame(() => setMessage(text));
   }, []);
 

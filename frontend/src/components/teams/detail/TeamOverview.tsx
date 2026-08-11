@@ -27,11 +27,7 @@ const formWord: Record<FormResult, string> = {
 type TeamOverviewProps = {
   team: TeamDetail;
   members: TeamMember[];
-  /**
-   * Pending invitations, shown read-only here. Always `[]` for a visitor because the key is
-   * absent from `GET /teams/{id}` for a non-member — so no role check is needed: a member
-   * legitimately sees who the captain has approached, a visitor simply receives nothing.
-   */
+  /** Pending invitations, shown read-only here. */
   invitations: TeamInvitation[];
   /** From the ROOT of GET /teams/{id}/matches — never recomputed from the roster. */
   isMember: boolean;
@@ -40,11 +36,7 @@ type TeamOverviewProps = {
   standing: RankingEntry | undefined;
   rankingsPending: boolean;
   rankingsError: boolean;
-  /**
-   * Captain only: opens the confirmation for withdrawing the open slot. Left out for every
-   * other role, which is what keeps this component role-blind — the PAGE knows who is
-   * looking, this block only renders what it is handed.
-   */
+  /** Captain only: opens the confirmation for withdrawing the open slot. */
   onCancelSlot?: (match: TeamMatch) => void;
 };
 
@@ -67,8 +59,7 @@ export function TeamOverview({
     <div className="flex flex-col gap-8">
       <section className="flex flex-col gap-3.5">
         <SectionTitle>Roster</SectionTitle>
-        {/* No `onCancelInvitation`: withdrawing an invitation is the captain's call, and
-            the captain has the Manage tab for it. */}
+
         <RosterChips
           members={members}
           provider={team.requiredProvider}
@@ -93,8 +84,6 @@ export function TeamOverview({
         ladderName={team.ladderName}
         isPending={rankingsPending}
         isError={rankingsError}
-        // ⚠️ Kept word for word: `ladder-detail.mjs` waits on this exact sentence to know the
-        // excerpt has finished loading before it measures the navigation that follows.
         emptyMessage="No team is ranked on this ladder yet."
       />
 
@@ -113,8 +102,7 @@ export function TeamOverview({
             )}
             <span className="ml-auto flex items-center gap-2">
               <Pill tone="open">Open slot</Pill>
-              {/* `nextOpenSlot` only ever returns a `pending` match with no opponent, so
-                  the button offered here is always one the server will accept. */}
+
               {onCancelSlot ? (
                 <InlineButton
                   tone="danger"

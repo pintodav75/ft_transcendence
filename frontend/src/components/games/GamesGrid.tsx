@@ -4,17 +4,14 @@ import { GamePosterTile, posterTileClasses } from '@/components/games/GamePoster
 import { formatsForGame, useLadders, useSortedGames } from '@/lib/games';
 
 /**
- * The poster grid of every game on the platform — self-contained, exactly like `TeamsCards`
- * and `SoloLadderCards`: it owns its requests and all three states, so the page stays a
- * layout.
+ * Poster grid of every game on the platform. Self-contained like TeamsCards and
+ * SoloLadderCards: it owns its requests and all three states, so the page stays a layout.
  *
- * ⚠️ NO AVATAR on the tiles. The emblem slot of `GamePosterTile` identifies a competitor; on
- * this grid it could only ever carry MY face, on all five tiles, which says nothing about the
- * game underneath. The subtitle carries the one thing that differs — the formats you can be
- * ranked in.
- *
- * Both queries are reference data cached for an hour and shared with the rail, `/teams` and
- * `/solo`, so this grid usually paints from cache without a single request.
+ * no avatar on the tiles — GamePosterTile's emblem slot identifies a competitor, and here it
+ * could only carry my own face on every tile. the subtitle carries what actually differs, the
+ * formats you can be ranked in.
+ * both queries are reference data cached an hour and shared with the rail, /teams and /solo,
+ * so this usually paints from cache with no request at all.
  */
 export function GamesGrid() {
   const { games, isLoading, isError } = useSortedGames();
@@ -39,8 +36,8 @@ export function GamesGrid() {
   }
 
   if (games.length === 0) {
-    // Defensive: the five games are created by a migration, so this is unreachable in
-    // practice. Rendering a sentence rather than nothing keeps the page from looking broken.
+    // Defensive: the five games are created by a migration, so this is unreachable in practice.
+    // Rendering a sentence rather than nothing keeps the page from looking broken.
     return (
       <p className="rounded-control border border-dashed border-border-subtle px-4 py-10 text-center text-sm text-text-muted">
         No game is open yet.
@@ -63,8 +60,8 @@ export function GamesGrid() {
           ? formatsForGame(laddersQuery.data.ladders, game.id)
           : [];
 
-        // A missing subtitle and a failed request must not look alike: the tile stays
-        // clickable either way, but it never claims "no ladder" on a request that failed.
+        // A missing subtitle and a failed request must not look alike: the tile stays clickable
+        // either way, but it never claims "no ladder" on a request that failed.
         const subtitle = laddersQuery.isPending
           ? 'Loading formats…'
           : laddersQuery.isError
@@ -75,8 +72,7 @@ export function GamesGrid() {
 
         return (
           <li key={game.id}>
-            {/* ⚠️ The tile does NOT render the link — the caller owns it, so `to`/`params`
-                stay type-checked as a pair by the router (see `GamePosterTile`). */}
+
             <Link to="/games/$gameId" params={{ gameId: game.id }} className={posterTileClasses}>
               <GamePosterTile
                 gameId={game.id}

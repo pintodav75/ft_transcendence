@@ -149,12 +149,6 @@ export function TwoFactorSettings({ announce }: TwoFactorSettingsProps) {
           </Button>
         ))}
 
-      {/* 🔑 `startSetup` est le SEUL handler qui part de `idle`, et `setMode('setup')` est sa
-          dernière instruction : quand la requête échoue, le mode ne bascule jamais. Sans cette
-          ligne, `actionError` est calculé puis rendu dans aucun des deux autres blocs — le
-          bouton clignote « Loading… » et l'utilisateur n'apprend rien, pas même un 429 qui lui
-          dirait d'attendre. `FormMessage` porte `role="alert"`, donc l'échec redevient aussi
-          audible (WCAG 3.3.1). Gardé par le check 8.1. */}
       {mode === 'idle' && actionError && <FormMessage>{actionError}</FormMessage>}
 
       {mode === 'setup' && (
@@ -164,21 +158,13 @@ export function TwoFactorSettings({ announce }: TwoFactorSettingsProps) {
           </p>
           {setup && (
             <>
-              {/* Pas de `bg-white` : le PNG rendu par le backend porte déjà sa marge blanche,
-                  et une couleur en dur sortirait des tokens du design system. */}
+
               <img
                 src={setup.qrCodeDataUrl}
                 alt="Two-factor authentication QR code"
                 className="size-44 rounded-control"
               />
 
-              {/* 🔑 Le secret est affiché, pas seulement encodé dans le QR. Sans lui, deux
-                  personnes ne peuvent PAS activer la 2FA du tout : celle dont l'application
-                  TOTP tourne sur la même machine (aucune caméra pour photographier son propre
-                  écran) et celle qui utilise un lecteur d'écran, pour qui une image de QR est
-                  muette. `openapi.yaml` documente ce champ comme « à saisir manuellement si
-                  besoin ». Neutre côté sécurité : c'est exactement ce que le QR contient déjà.
-                  `select-all` : un clic sélectionne la clé entière, prête à copier. */}
               <div className="flex flex-col gap-1.5">
                 <span className="text-sm text-text-secondary">
                   No camera? Enter this key in your app instead:

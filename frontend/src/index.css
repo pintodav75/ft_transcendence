@@ -15,57 +15,41 @@
   --color-surface-header: #0d121c;
   --color-border-subtle: #252d3e;
   --color-border-strong: #3a455c;
-  /* 🚨 LA BORDURE D'UN CHAMP N'EST PAS DÉCORATIVE : c'est elle qui dit où commence la zone
-     où l'on tape. WCAG 1.4.11 lui impose donc 3:1 contre ce qui l'entoure, alors qu'un simple
-     trait de séparation, lui, en est exempté. `border-subtle` plafonnait à **1,44:1** — le
-     champ était invisible pour qui voit mal. Ce token ne sert QU'AUX CONTRÔLES DE SAISIE
-     (input, select, textarea), pas aux cartes ni aux séparateurs : les repasser tous en
-     3:1 transformerait l'interface en grille de cases. Mesuré : 3,02 à 3,50:1 selon la
-     surface, donc au-dessus du seuil sur les cinq. */
+  /* Input controls ONLY (input, select, textarea, secondary/Google buttons) — never cards or
+     separators. A field's border says where you type, so WCAG 1.4.11 wants 3:1; a decorative
+     rule is exempt, and putting everything at 3:1 turns the UI into a grid of boxes.
+     Measured 3.02-3.50:1 depending on the surface. */
   --color-border-control: #5a6785;
 
   --color-text-primary: #f3f6fb;
   --color-text-secondary: #a9b2c7;
-  /* ⚠️ #707b94 À L'ORIGINE, SOUS WCAG AA SUR TROIS DES CINQ SURFACES de l'app : 4,23:1 sur
-     `surface-card`, 4,02:1 sur `surface-card-strong`, 4,42:1 sur `surface-header` — pour un
-     seuil de 4,5:1. Le token est posé 131 fois, c'était donc la dette de contraste la plus
-     répandue du front, et le seul obstacle mesuré au module « accessibilité WCAG 2.1 AA ».
-     #78849e tient 4,54:1 sur la PIRE des cinq surfaces, sans toucher un seul composant.
-     🔑 Toute nouvelle valeur se vérifie contre `card-strong` (#151c2a), la plus claire des
-     cinq : celle qui passe là passe partout. */
+  /* 4.54:1 on the worst of the five surfaces. Check any new value against card-strong
+     (#151c2a), the lightest one — what passes there passes everywhere. */
   --color-text-muted: #78849e;
 
   --color-arena-red: #ff3f68;
   --color-arena-blue: #3f7dff;
   --color-arena-red-soft: #35131f;
   --color-arena-blue-soft: #10203b;
-  /* Bleu LISIBLE sur --color-arena-blue-soft. `--color-arena-blue` y tombe à 4,32:1,
-     sous le 4,5:1 exigé par WCAG AA pour du texte de 12px : mesuré sur la pastille
-     « Open slot », la seule du repo à poser de l'arena-blue en TEXTE sur le fond soft
-     (ailleurs c'est un fond, une bordure, un dégradé ou une lueur, non concernés).
-     Cette nuance donne 4,96:1 et reste le même bleu à l'œil. Le rouge, lui, passe déjà
-     à 4,88:1 : on ne touche pas ce qui est conforme. */
+  /* Blue readable as TEXT on --color-arena-blue-soft (4.96:1). --color-arena-blue itself only
+     gets 4.32:1 there. Used by the "Open slot" pill; elsewhere arena-blue is a background, a
+     border or a glow, which this doesn't concern. The red already passes at 4.88:1. */
   --color-arena-blue-soft-foreground: #4f8aff;
   --color-action-primary: #343579;
-  /* ⚠️ #5053a4 À L'ORIGINE, à 2,53–2,93:1 selon la surface : sous le seuil de 3:1 que
-     WCAG 1.4.11 impose au contour qui identifie un bouton. #6266b8 garde exactement la même
-     teinte violette et tient 3,34:1 au pire. */
+  /* Outline that identifies a button, so WCAG 1.4.11 wants 3:1 — this holds 3.34:1 at worst. */
   --color-action-primary-border: #6266b8;
-  /* Indigo LISIBLE en TEXTE sur nos surfaces de carte. `--color-action-primary-border`
-     est une couleur de BORDURE : posée en texte sur `--color-surface-card-strong` elle
-     tombe à 2,53:1, loin sous le 4,5:1 exigé par WCAG AA (mesuré sur la pastille
-     PLAYER/TEAM des résultats de recherche, seul endroit du repo qui la détournait en
-     couleur de texte). Cette nuance garde exactement la même teinte (238°) et donne
-     4,75:1 sur `surface-card-strong` et 4,99:1 sur `surface-card`. */
+  /* Indigo readable as TEXT on card surfaces: 4.75:1 on surface-card-strong, 4.99:1 on
+     surface-card. Don't use --color-action-primary-border for text, it's a BORDER colour and
+     drops to 2.53:1. Used by the PLAYER/TEAM pill in search results. */
   --color-action-primary-card-foreground: #7c7fd4;
   --color-action-primary-hover: #424596;
   --color-action-primary-foreground: #ffffff;
   --color-focus-ring: #777ae0;
   --color-success: #25d49a;
 
-  /* Voile posé DERRIÈRE une surface du top-layer (`::backdrop` d'un <dialog> modal).
-     Plus sombre que le voile par défaut du navigateur (rgba(0,0,0,.1)), qui laisse
-     l'arrière-plan lisible et fait douter de ce qui est cliquable. */
+  /* Scrim behind a top-layer surface (a modal <dialog>'s ::backdrop). Darker than the
+     browser default (rgba(0,0,0,.1)), which leaves the background readable and makes it
+     unclear what is still clickable. */
   --color-scrim: rgb(4 6 12 / 0.72);
 
   --color-google-button: #0a0a0a;
@@ -78,11 +62,10 @@
   --color-rank-silver: #c7d0d4;
   --color-rank-bronze: #bf7145;
 
-  /* Largeur du rail social (312 px). C'est un TOKEN et pas un `w-78` recopié parce que deux
-     éléments qui ne se voient pas doivent s'accorder dessus : le rail lui-même, et la bande
-     de fenêtres de conversation flottantes (`ChatWindowStack`), ancrée juste à sa gauche via
-     `calc(var(--spacing-social-rail) + …)`. Élargir le rail sans ce lien faisait passer les
-     fenêtres SOUS lui, en silence. */
+  /* Width of the social rail. A token and not a copied `w-78` because two things that can't
+     see each other have to agree on it: the rail, and the floating chat windows
+     (ChatWindowStack) anchored just left of it via calc(var(--spacing-social-rail) + ...).
+     Widen the rail without this and the windows silently slide under it. */
   --spacing-social-rail: 19.5rem;
 
   --radius-card: 8px;

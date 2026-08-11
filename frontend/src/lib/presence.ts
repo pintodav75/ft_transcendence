@@ -14,19 +14,7 @@ export type Presence = 'online' | 'offline' | 'unknown';
  */
 export type PresenceStatus = 'ready' | 'waiting' | 'unavailable';
 
-/**
- * 🚨 A FIRST CONNECTION IS NOT AN OUTAGE. The friends list comes back from the same origin
- * in a few milliseconds while the WebSocket still has a handshake to finish, so keying the
- * fallback on `hasPresenceSnapshot` alone flashed "not available right now" on a perfectly
- * healthy page load, every single load.
- *
- * `open` counts as waiting too: the socket is up but `initial_presence` has not arrived yet
- * — the same in-flight moment, and it is also what a successful reconnection goes through.
- *
- * Lives here rather than in a slot: [FS-1]'s friends list and [FS-3]'s conversation header
- * answer the exact same question, and two copies of this rule would drift apart the day one
- * of them is fixed.
- */
+/** A FIRST CONNECTION IS NOT AN OUTAGE. */
 export function presenceStatusOf(
   hasPresenceSnapshot: boolean,
   connectionState: RealtimeConnectionState,
@@ -38,13 +26,7 @@ export function presenceStatusOf(
     : 'unavailable';
 }
 
-/**
- * Presence of ONE person, for a screen that shows a single partner rather than two groups.
- *
- * ⚠️ Returns `unknown` as soon as the snapshot is stale: the ids the store still holds are
- * the ones from BEFORE the drop, and rendering "Offline" from them would state, in the app's
- * own voice, something the server never said.
- */
+/** Presence of ONE person, for a screen that shows a single partner rather than two groups. */
 export function presenceOf(
   userId: string,
   onlineFriendIds: string[],

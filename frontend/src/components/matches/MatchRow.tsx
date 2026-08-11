@@ -1,6 +1,6 @@
-/*
- * One entry of a match history, as a table row — the layout used from `sm` up.
- * `MatchCard` renders the same entry below `sm`; what they share lives in `match-entry.tsx`.
+/**
+ * One entry of a match history, as a table row — the layout used from `sm` up. `MatchCard`
+ * renders the same entry below `sm`; what they share lives in `match-entry.tsx`.
  */
 
 import {
@@ -55,12 +55,11 @@ export function MatchRow<M extends MatchHistoryMatch>({
       </td>
 
       {showLadder && (
-        // Two lines rather than one: the ladder's own name ("Counter-Strike 2 5v5") repeats
-        // the format, and laying the game over it keeps the column narrow enough that the
-        // Status column stays in view at the table's minimum width.
+        // Two lines rather than one: the ladder's own name ("Counter-Strike 2 5v5") repeats the
+        // format, and laying the game over it keeps the column narrow enough that the Status
+        // column stays in view at the table's minimum width.
         <td className={cn('px-3 py-3 whitespace-nowrap', muted)}>
-          {/* ⚠️ NEITHER LINE IS `text-text-muted`. That token measures 4.23:1 on a card — below
-              AA — and is already a ticketed design-system debt with 45 usages. */}
+
           <span className="block text-xs font-semibold text-text-primary">
             {ladder?.game ?? EM_DASH}
           </span>
@@ -74,8 +73,7 @@ export function MatchRow<M extends MatchHistoryMatch>({
 
       {showLineup && (
         <td className={cn('px-3 py-3 font-mono text-xs text-text-muted', muted)}>
-          {/* Truncated on purpose: a long pseudo used to push the Status column out of
-              the visible area, and the status is what the row is read for. */}
+
           <span className="block max-w-24 truncate" title={lineup}>
             {lineup ?? EM_DASH}
           </span>

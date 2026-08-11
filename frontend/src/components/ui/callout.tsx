@@ -12,23 +12,21 @@ const toneClasses: Record<CalloutTone, string> = {
 
 type CalloutProps = {
   /**
-   * `success` for something that worked, `muted` for a neutral notice or a dead end,
-   * `danger` for a state that needs someone else to act (a dispute an admin must settle).
+   * `success` for something that worked, `muted` for a neutral notice or a dead end, `danger`
+   * for a state that needs someone else to act (a dispute an admin must settle).
    */
   tone?: CalloutTone;
   children: ReactNode;
   /**
-   * `status` when the box APPEARS as the result of an action a screen reader must hear.
-   * Left out for prose that is simply part of the page. Deliberately not `alert`: a failure
-   * belongs in `FormMessage`, which already carries that role and the red tone.
+   * `status` when the box APPEARS as the result of an action a screen reader must hear. Left
+   * out for prose that is simply part of the page.
    */
   role?: 'status';
   className?: string;
 };
 
-// Full-width notice box: the "something happened" banner of the teams screens (team
-// created, player invited, roster full). Extracted at its FOURTH occurrence — the same
-// class string had been copied into two pages and two components.
+// Full-width notice box: the "something happened" banner of the teams screens (team created,
+// player invited, roster full).
 export function Callout({ tone = 'muted', children, role, className }: CalloutProps) {
   return (
     <p

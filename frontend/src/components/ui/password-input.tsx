@@ -6,9 +6,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 // ComponentPropsWithRef, not InputHTMLAttributes: same prop set PLUS `ref`, which React 19
-// passes to function components like any other prop. Needed as soon as a caller has to move
-// focus into the field — `ConfirmDialog` focuses the first field of a form dialog on open.
-// Same note as `Button` and `Input`.
+// passes to function components like any other prop.
 type PasswordInputProps = Omit<ComponentPropsWithRef<'input'>, 'type'> & {
   hidePasswordLabel?: string;
   showPasswordLabel?: string;
