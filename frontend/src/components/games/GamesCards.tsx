@@ -45,7 +45,7 @@ export function GamesCards() {
 
             {/* affordance badge: fades out once the info takes over */}
             <span className="absolute bottom-2 right-2 rounded-full bg-black/50 p-1.5 text-white transition group-hover:opacity-0 group-focus-within:opacity-0">
-              <Info className="size-6" />
+              <Info aria-hidden="true" className="size-6" />
             </span>
 
             {/* info overlay: hidden at rest, revealed on hover/focus */}

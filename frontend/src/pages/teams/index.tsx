@@ -104,7 +104,7 @@ export function Teams() {
     <div className="panel flex flex-col gap-4 p-6">
       <header className="space-y-1">
         <p className="flex items-center gap-2 text-xs label-caps text-success">
-          <Users className="size-4" /> Squads
+          <Users aria-hidden="true" className="size-4" /> Squads
         </p>
         <h1 ref={pageHeadingRef} tabIndex={-1} className="focus-ring rounded-control text-3xl label-caps-black">
           My teams

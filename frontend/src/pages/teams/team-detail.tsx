@@ -40,7 +40,7 @@ const MANAGE_TAB: TabItem = { id: 'manage', label: 'Manage' };
 function BackToTeams() {
   return (
     <Link to="/teams" className={backLinkClasses}>
-      <ArrowLeft className="size-4" />
+      <ArrowLeft aria-hidden="true" className="size-4" />
       My teams
     </Link>
   );

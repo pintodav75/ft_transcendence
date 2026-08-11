@@ -51,10 +51,10 @@ export function AuthNav({ className }: { className?: string }) {
           nom seraient impossibles à distinguer dans la liste des repères. */}
       <nav aria-label="Account" className="flex flex-col gap-0.5">
         <MenuItem to="/profile">
-          <UserPen className="size-4" /> Profile
+          <UserPen aria-hidden="true" className="size-4" /> Profile
         </MenuItem>
         <MenuItem onClick={() => setConfirming(true)}>
-          <LogOut className="size-4" /> Logout
+          <LogOut aria-hidden="true" className="size-4" /> Logout
         </MenuItem>
       </nav>
 

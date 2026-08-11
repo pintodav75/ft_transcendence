@@ -41,7 +41,7 @@ const TABS: TabItem[] = [
 function BackToSolo() {
   return (
     <Link to="/solo" className={backLinkClasses}>
-      <ArrowLeft className="size-4" />
+      <ArrowLeft aria-hidden="true" className="size-4" />
       Solo ladders
     </Link>
   );

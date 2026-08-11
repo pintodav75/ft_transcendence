@@ -110,7 +110,7 @@ export function MobileHeader() {
             aria-controls={openPanel === 'nav' ? 'mobile-nav-panel' : undefined}
             className="-ml-2"
           >
-            <Menu className="size-5" />
+            <Menu aria-hidden="true" className="size-5" />
           </IconButton>
 
           <SiteLogo compact className="text-3xl" />
@@ -171,7 +171,7 @@ export function MobileHeader() {
             <div className="mb-3 flex items-center justify-between">
               <SiteLogo className="text-2xl" />
               <IconButton onClick={() => setOpenPanel(null)} aria-label="Close navigation menu">
-                <X className="size-5" />
+                <X aria-hidden="true" className="size-5" />
               </IconButton>
             </div>
 

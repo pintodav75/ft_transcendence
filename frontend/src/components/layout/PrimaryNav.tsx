@@ -41,22 +41,22 @@ export function PrimaryNav() {
   return (
     <nav aria-label="Primary navigation" className="flex flex-col gap-0.5">
       <MenuItem to="/home">
-        <House className="size-4" /> Home
+        <House aria-hidden="true" className="size-4" /> Home
       </MenuItem>
       <MenuItem to="/teams">
-        <Flag className="size-4" /> My teams
+        <Flag aria-hidden="true" className="size-4" /> My teams
       </MenuItem>
       <MenuItem to="/solo">
-        <User className="size-4" /> Solo
+        <User aria-hidden="true" className="size-4" /> Solo
       </MenuItem>
       <MenuItem to="/games">
-        <Gamepad2 className="size-4" /> Games
+        <Gamepad2 aria-hidden="true" className="size-4" /> Games
       </MenuItem>
       <MenuItem to="/matchmaking">
-        <Swords className="size-4" /> Matchmaking
+        <Swords aria-hidden="true" className="size-4" /> Matchmaking
       </MenuItem>
       <MenuItem to="/history">
-        <History className="size-4" /> History
+        <History aria-hidden="true" className="size-4" /> History
       </MenuItem>
 
       {/* 🔑 « Arbitration », délibérément PAS « Disputes » : un joueur a des litiges lui aussi
@@ -96,7 +96,7 @@ export function PrimaryNav() {
             ) : null
           }
         >
-          <Gavel className="size-4" /> Arbitration
+          <Gavel aria-hidden="true" className="size-4" /> Arbitration
         </MenuItem>
       )}
     </nav>
