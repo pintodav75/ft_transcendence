@@ -484,3 +484,63 @@ se déconnecter d'abord.
 manuelle 10/10, zoom 200 %, `scenarios/profile.mjs` **37 → 55 checks**, campagne complète
 **28 scénarios / 467 checks / 0 rouge**. 🔑 Les trois checks les plus précieux ont été **vérifiés
 en remettant le défaut dans le code**.
+
+---
+
+## 13 août 2026 — reprise après absence : master avait bougé, et le bloc README de David
+
+### Ce qui était arrivé sur master pendant l'absence (6 → 10 août)
+
+Quatre commits poussés par les coéquipiers, **du code, pas de la doc** — master local était donc
+périmé de 4 commits au retour :
+
+- `fbb0ffe` (Walid, 6 août) — réduit la **zone cliquable des liens de profil** dans le rail social.
+- `d662048` (William, 9 août) — **simplifie la `SearchBar`** du rail (extraction d'un
+  `DefaultRowRender`, ~330 lignes retouchées).
+- `38fe49b` (William, 10 août) — **recherche d'adversaire, tri et pagination sur `/history`**,
+  front **et** back. Ajoute `order=asc|desc` à `GET /search`, un composant `ui/pagination.tsx`,
+  et refond les composants de match (`match-entry.tsx` remplace `MatchDateLink`,
+  `MatchOpponentLink`, `MatchSideCard`, `match-sheet-click.ts`).
+- `6f5f7d3` (William, 10 août) — **retire les devtools du routeur** et nomme le champ de recherche.
+
+31 fichiers, +1122/−1185. ✅ `openapi.yaml` **et** `api-types.gen.ts` régénérés et committés
+ensemble : l'invariant #8 a été respecté sans qu'on ait à le rappeler.
+
+**Deux conséquences qu'on doit connaître :**
+
+1. 🚨 **« Advanced search » change d'écran de démonstration.** Le back accepte maintenant un sens
+   de tri, et le code est prudent là où il faut l'être : les deux `ORDER BY` sont écrits **en
+   toutes lettres** dans deux branches, jamais interpolés — une direction de tri ne peut pas être
+   un paramètre lié, donc l'écrire littéralement rend l'injection impossible **par construction**,
+   sans rien devoir à la validation Zod en amont. ⚠️ **Mais aucun écran n'expose ce réglage** : la
+   barre du rail n'a toujours pas de bouton de tri. En revanche `/history` a une vraie recherche
+   d'adversaire, un **sens de tri choisi par l'utilisateur** et une pagination, plus une phrase de
+   région live qui annonce combien de matchs sont affichés et dans quel ordre. **Le module se
+   démontre là, pas sur la barre du rail.**
+2. ✅ **Le faux positif `axe` de [F4] n'a plus de cause.** Les 2 violations de double `contentinfo`
+   sur `/profile` venaient du pied de page des devtools TanStack Router ; ils sont retirés du code.
+   La leçon de méthode (relancer la même sonde sur une autre route pour distinguer la page du
+   décor) reste, l'occurrence disparaît.
+
+### `docs(readme): remplir la contribution individuelle de David` (`fcd02a7`)
+
+Premier des 4 blocs de la section 9 du README. **Choix de forme, à réutiliser pour les 3 autres :**
+
+- **~15 lignes, pas 40.** Le premier bloc rempli fixe la norme que les 3 autres vont imiter : un
+  pavé de 350 mots suivi de trois blocs de 30 mots donnerait à *lire* un déséquilibre de charge
+  qui n'existe pas. La section sert à prouver que les 4 ont contribué et à donner des accroches au
+  correcteur — l'examen réel est oral.
+- **Ton direct, vocabulaire simple**, pas de formule d'école (« single source of truth »,
+  « structurally impossible » ont été retirés au profit de « the reference for the API », « simply
+  cannot happen »). Orthographe et grammaire **propres** malgré tout : c'est un document noté.
+- 🚨 **Rien sur les tests**, conformément à la décision du 3 août. Le blocage raconté (la course
+  puis l'interblocage sur l'acceptation croisée, cf. `pieges.md` #14/#15/#21) est formulé comme un
+  **diagnostic** — « j'ai décalé une des deux requêtes de quelques millisecondes » — et non comme
+  une suite de tests livrée, qu'on ne pourrait pas montrer.
+- Le contenu s'appuie sur ce que **le dépôt lui attribue** (116 commits sur 194), donc il concorde
+  avec un `git log --author` si le correcteur le lance.
+
+### Piège d'environnement (voir `pieges.md` #25)
+
+Une bonne partie de la séance est partie dans un `docker` injoignable depuis WSL alors que Docker
+Desktop tournait. Cause : l'interrupteur **WSL Integration** était éteint pour la distribution.
