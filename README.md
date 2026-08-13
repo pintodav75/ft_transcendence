@@ -436,9 +436,35 @@ set (lucide). Components are extended, never copied: the rule the team enforced 
 
 _What I built:_
 
+I took care of the platform: the database, the API and the infrastructure.
+
+I designed the schema, and I keep `openapi.yaml` as the reference for the API — the frontend
+types are generated from it, we never write them by hand. On the server I did the
+authentication (JWT tokens, Google login, two-factor), the teams and their invitations, the
+whole competitive cycle (open a slot, accept it, schedule the match, submit the score, ELO,
+the 24-hour jobs), the disputes and the arbitration, the notifications and the search.
+
+On the infrastructure side I set up the single origin in HTTPS, the certificates and the
+migrations that run on their own at startup, and the environment check that stops the server
+if a variable is missing. The goal was simple: `docker compose up -d --build`, and it works.
+
 _What blocked me:_
 
+Concurrency. The rule "one active match per team" looks easy to write, but a check in the code
+is never atomic: between the moment I read the database and the moment I write to it, someone
+else can already have changed it. And when I added locks to fix that, I got a worse problem —
+two players who accept each other's slot at the same time block each other, PostgreSQL kills
+one of the two transactions, and a normal action ends in a 500.
+
 _How I got past it:_
+
+I redo the check inside the transaction, under a PostgreSQL advisory lock, so the check and
+the write can't be separated anymore. And I always take the locks in the same order, sorted,
+so the deadlock simply cannot happen.
+
+The hard part was seeing the bug in the first place. Sending both requests at the exact same
+moment never reproduced it. I had to shift one of them by a few milliseconds and try again for
+each shift. Then it failed every time.
 
 ### Adrien — `acattet` — Project Manager
 
