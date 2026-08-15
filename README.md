@@ -470,9 +470,24 @@ each shift. Then it failed every time.
 
 _What I built:_
 
+I worked on the frontend: the design system (routing, compenents, ...), the account settings
+page (manage informations, 2FA activation, ...) and the accessibility of the whole application
+(WCAG 2.1 AA norms).
+
 _What blocked me:_
 
+Every keyboard focus of the confirmation dialogs was rendered conditionally. Cancelling the
+dialog sent the focus back to the top of the page. Someone who navigates by keyboard had to
+tab through the whole page again to come back. It is an accessibility issue.
+Nothing reported it (no console warning or automated scanner error) because at the instant it
+looks the markup is correct.
+
 _How I got past it:_
+
+Unmounting the component of the dialog rips it out of the browser's top layer instead, and
+there is nobody left to hand the focus back to.
+The dialog is now always mounted and driven by its `open` prop, and the thirteen places that
+open one pass a boolean rather than the condition.
 
 ### Walid — `wacista` — Tech Lead
 

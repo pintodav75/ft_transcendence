@@ -25,7 +25,6 @@ import { useAuthStore } from '@/stores/auth-store';
  * uploadFile (XHR — fetch has no upload-progress event).
  */
 type AvatarUploaderProps = {
-  /** The page's single live region — see the note in `pages/profile.tsx`. */
   announce: (message: string) => void;
 };
 

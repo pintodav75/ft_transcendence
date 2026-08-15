@@ -1,5 +1,3 @@
-// la baniere en haut de la home viewport
-
 import { Link } from '@tanstack/react-router';
 
 import { buttonClasses } from '@/components/ui/button-variants';
@@ -11,7 +9,6 @@ export function HeroBanner() {
       aria-label="Welcome to VSMODE"
       className="relative isolate overflow-hidden rounded-card border border-border-subtle shadow-card"
     >
-      {/* background art */}
       <img
         src={bgUrl}
         alt=""

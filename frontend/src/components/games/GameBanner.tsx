@@ -8,10 +8,6 @@ type GameBannerProps = {
   className?: string;
 };
 
-/**
- * The game's artwork as a header strip, with the bottom-to-top readability gradient every
- * "dossier" header uses.
- */
 export function GameBanner({ gameId, name, className }: GameBannerProps) {
   return (
     <div aria-hidden="true" className={cn('relative overflow-hidden', className)}>

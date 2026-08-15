@@ -28,7 +28,6 @@ export function Profile() {
         <h1 className="text-3xl label-caps-black">Profile</h1>
 
         <div className="flex flex-1 flex-col justify-around gap-12 @lg:gap-8">
-          {/* Row 1: identity (left) | profile (right) */}
           <div className="flex flex-col gap-8 @lg:flex-row @lg:items-start @lg:justify-evenly">
 
             <div className="flex flex-col items-center gap-4 text-center @lg:mt-6 @lg:w-56 @lg:shrink-0">
@@ -49,7 +48,6 @@ export function Profile() {
 
           <hr className="border-border-subtle" />
 
-          {/* Row 3: security (password | 2FA) */}
           <div className="flex flex-col gap-8 @lg:flex-row @lg:items-start @lg:justify-evenly">
             <PasswordChange announce={announcement.announce} />
             <TwoFactorSettings announce={announcement.announce} />

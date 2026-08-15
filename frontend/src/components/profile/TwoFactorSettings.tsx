@@ -24,7 +24,6 @@ type Mode = 'idle' | 'setup' | 'disabling';
 type Setup = { secret: string; qrCodeDataUrl: string };
 
 type TwoFactorSettingsProps = {
-  /** The page's single live region — see the note in `pages/profile.tsx`. */
   announce: (message: string) => void;
 };
 
