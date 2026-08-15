@@ -37,18 +37,7 @@ type CreateMatchPanelProps = {
   onClose: () => void;
 };
 
-/**
- * Captain's slot opener: an inline DISCLOSURE panel, not a modal.
- *
- * `ConfirmDialog` is a confirmation box, not a form container — a native `<dialog>` holding
- * a nine-field form would trap focus around a task the user may well want to abandon
- * halfway. The panel sits between the header and the tab strip, and the button that opened
- * it carries `aria-expanded`.
- *
- * ⚠️ THERE IS NO 1v1 PATH HERE. `POST /matches` describes a solo mode with no line-up, but a
- * team cannot exist on a 1v1 ladder (`routes/teams.ts` refuses it in 400), so `team.format`
- * is always 2v2/3v3/5v5 and the line-up is always required. Solo will get its own page.
- */
+/** Captain's slot opener: an inline DISCLOSURE panel, not a modal. */
 export function CreateMatchPanel({
   id,
   team,
@@ -68,9 +57,8 @@ export function CreateMatchPanel({
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   /**
-   * "Now", frozen when the panel opens rather than read at every render — a moving `now`
-   * would silently drop the option the captain is about to click. It is refreshed on the one
-   * event that proves it went stale: the 400 saying the slot just passed.
+   * "Now", frozen when the panel opens rather than read at every render — a moving `now` would
+   * silently drop the option the captain is about to click.
    */
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -81,10 +69,8 @@ export function CreateMatchPanel({
 
   // A team's format is always 2/3/5 here (see the warning above), so the size is exact.
   const lineupSize = Number.parseInt(team.format, 10);
-  // ⚠️ `undefined` (still loading, or the request failed) is NOT the same as an empty
-  // history, and `matches ?? []` would flatten the difference: both pre-emptions below would
-  // silently switch off — no greyed-out quarter, no cap notice — while the screen kept
-  // looking perfectly normal. Unknown stays unknown, and is said out loud.
+  // `undefined` (still loading, or the request failed) is NOT the same as an empty history, and
+  // `matches ??
   const engagements = matches ? engagementTimes(matches, nowMs) : undefined;
   const openSlots = matches ? openSlotCount(matches, nowMs) : undefined;
   const atCap = openSlots !== undefined && openSlots >= MAX_OPEN_SLOTS;
@@ -115,10 +101,7 @@ export function CreateMatchPanel({
 
   /**
    * Both inputs of the pre-emption, or nothing at all — the ladder's rules AND the team's own
-   * schedule are needed to grey a quarter out. Bundling them in ONE object keeps the rule in
-   * a single place: the notice below and the `blocked` flag are then two readings of the same
-   * decision, and cannot drift apart. Missing either one means nothing is greyed out and the
-   * 409 stays the net, which is said out loud further down.
+   * schedule are needed to grey a quarter out.
    */
   const preempt =
     lockoutMinutes !== undefined && engagements !== undefined
@@ -135,15 +118,14 @@ export function CreateMatchPanel({
   const dayField = register('day');
 
   useEffect(() => {
-    // The panel appears BELOW the button that opened it: without this, a keyboard user
-    // would Tab through the whole header again to reach the first field.
+    // The panel appears BELOW the button that opened it: without this, a keyboard user would
+    // Tab through the whole header again to reach the first field.
     headingRef.current?.focus();
   }, []);
 
   const submit = handleSubmit((values) => {
     // `new Date(y, m, d, h, min, 0, 0)` produced the epoch behind this value — never a
-    // hand-built string, which would guess at the time zone. Every UTC offset on Earth is a
-    // multiple of 15 min, so a local quarter is always a UTC quarter.
+    // hand-built string, which would guess at the time zone.
     const scheduledAt = new Date(Number(values.time)).toISOString();
 
     createMatch.mutate(
@@ -152,25 +134,12 @@ export function CreateMatchPanel({
         onSuccess: () => onCreated(scheduledAt),
         onError: (error) => {
           // The chosen quarter slipped under the 15-minute bound while the panel sat open.
-          // Showing the message without redrawing the list would let the next click fail
-          // exactly the same way.
           if (isExpiredSlotError(error)) {
             const freshNow = Date.now();
             setNowMs(freshNow);
             setValue('time', '');
 
-            // FX-MIDNIGHT — la liste des jours vient d'être régénérée à partir de `freshNow`.
-            // Si le panneau est resté ouvert AU PASSAGE DE MINUIT, le `day` en mémoire est
-            // minuit de la veille : il ne correspond plus à aucune `<option>`. Le menu
-            // affichait alors un jour, le formulaire en retenait un autre, et la liste
-            // d'heures sortait vide (« No quarter left on this day »).
-            // ⚠️ On RECALCULE ici : `days` et `firstUsableDay` du rendu courant sont dérivés
-            // de l'ANCIEN `nowMs` (le `setNowMs` ci-dessus ne prend effet qu'au rendu
-            // suivant), les réutiliser réécrirait la valeur périmée qu'on veut corriger.
-            // ⚠️ On ne remet PAS le jour au premier utilisable de façon inconditionnelle :
-            // un capitaine qui avait choisi « dans 3 jours » n'a aucune raison d'être ramené
-            // à aujourd'hui parce qu'un quart d'heure vient de passer. On ne touche au
-            // champ que s'il désigne un jour qui n'existe plus.
+            // La liste des jours vient d'être régénérée à partir de `freshNow`.
             const freshDays = slotDays(freshNow);
             const stillListed = freshDays.some((day) => day.value === getValues('day'));
             if (!stillListed) {
@@ -200,8 +169,7 @@ export function CreateMatchPanel({
   return (
     <section id={id} aria-labelledby={headingId} className="panel flex flex-col gap-5 p-5">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* `tabIndex={-1}` only so focus can be MOVED here on open; it stays out of the
-            tab order afterwards. */}
+
         <h2 id={headingId} ref={headingRef} tabIndex={-1} className="focus-ring text-lg label-caps-black">
           Open a match slot
         </h2>
@@ -212,8 +180,7 @@ export function CreateMatchPanel({
 
       {atCap ? (
         <>
-          {/* The 409 stays the real rampart; this only avoids a request whose answer is
-              already known — same idiom as the full roster in TeamInvitePlayer. */}
+
           <Callout tone="muted">
             This team already holds {MAX_OPEN_SLOTS} open slots on this ladder. Cancel one from
             the Matches tab before opening another.
@@ -232,9 +199,8 @@ export function CreateMatchPanel({
               <Select
                 id={dayId}
                 aria-invalid={Boolean(dayError)}
-                // Without this, a screen reader announces "invalid" and stops there: the
-                // reason sits in an element nothing points at. Same wiring as every other
-                // field of the repo (register, login, TeamIdentity).
+                // Without this, a screen reader announces "invalid" and stops there: the reason
+                // sits in an element nothing points at.
                 aria-describedby={dayError ? dayErrorId : undefined}
                 {...dayField}
                 onChange={(event) => {
@@ -258,8 +224,8 @@ export function CreateMatchPanel({
               <Select
                 id={timeId}
                 aria-invalid={Boolean(timeError)}
-                // Both the "no quarter left" hint and the error are announced with the
-                // field: whichever is on screen is the one that explains it.
+                // Both the "no quarter left" hint and the error are announced with the field:
+                // whichever is on screen is the one that explains it.
                 aria-describedby={
                   [times.length === 0 ? timeHintId : null, timeError ? timeErrorId : null]
                     .filter(Boolean)
@@ -270,8 +236,8 @@ export function CreateMatchPanel({
               >
                 <option value="">Pick a time…</option>
                 {times.map((slot) => (
-                  // Present but DISABLED, never removed: a captain who cannot find 21:30
-                  // has to be able to see why it is gone.
+                  // Present but DISABLED, never removed: a captain who cannot find 21:30 has to
+                  // be able to see why it is gone.
                   <option key={slot.value} value={slot.value} disabled={slot.blocked}>
                     {slot.label}
                     {slot.blocked ? ' — already engaged' : ''}
@@ -293,8 +259,7 @@ export function CreateMatchPanel({
             </p>
           ) : preempt === null ? (
             // Covers BOTH missing inputs: this ladder's rules (`lockoutMinutes`) and this
-            // team's own schedule (its match history). The consequence is the same either
-            // way, so it gets one honest sentence rather than two near-identical ones.
+            // team's own schedule (its match history).
             <Callout tone="muted">
               {lockoutMinutes === undefined
                 ? 'This ladder’s rules could not be loaded, '
@@ -315,10 +280,10 @@ export function CreateMatchPanel({
             control={control}
             name="lineup"
             render={({ field }) => (
-              // The whole selector moved to `components/matches/LineupPicker.tsx` at its
-              // second use ([F-MM], where a captain composes the line-up he ACCEPTS a slot
-              // with): same fieldset, same tiles, same counter — only the state stays here,
-              // in this form.
+              // The whole selector moved to `components/matches/LineupPicker.tsx` at its second
+              // use (the matchmaking board, where a captain composes the line-up he ACCEPTS a
+              // slot with): same
+              // fieldset, same tiles, same counter — only the state stays here, in this form.
               <LineupPicker
                 members={members}
                 value={field.value}

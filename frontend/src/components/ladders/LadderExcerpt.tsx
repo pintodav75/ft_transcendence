@@ -11,8 +11,7 @@ type LadderExcerptProps = {
   rankings: RankingEntry[] | undefined;
   /**
    * The consulted competitor's line, or `undefined` when there is none yet: we then show the
-   * top of the board. A line is created by the FIRST match RESULT — on a solo ladder there is
-   * no enrolment at all, so "no line" is simply what every new account looks like.
+   * top of the board.
    */
   standing: RankingEntry | undefined;
   /** Whose row to highlight — a team on `/teams/$teamId`, a player on `/solo/$ladderId`. */
@@ -26,14 +25,8 @@ type LadderExcerptProps = {
 };
 
 /**
- * Slice of `GET /ladders/{ladderId}/rankings` around the consulted competitor — the same
- * cached response that feeds the header stats, so this costs no extra request. The rows
- * themselves live in `LadderBoard`: the ladder page shows the very same board in full.
- *
- * ⚠️ MOVED here from `components/teams/detail/` by [F-SOLO] (rule of the second use): the solo
- * ladder page shows the same excerpt around a PLAYER, and a solo page importing
- * "teams/detail" would say the opposite of what the code does. The only behavioural change is
- * `teamId` becoming the discriminated `self` — see `LadderBoard`.
+ * Slice of `GET /ladders/{ladderId}/rankings` around the consulted competitor — the same cached
+ * response that feeds the header stats, so this costs no extra request.
  */
 export function LadderExcerpt({
   rankings,
@@ -54,8 +47,8 @@ export function LadderExcerpt({
           <Link
             to="/ladders/$ladderId"
             params={{ ladderId }}
-            // Moved to `sectionLinkClasses` when `/home`'s slot teaser became its second
-            // reader — same rendered markup, one definition.
+            // Moved to `sectionLinkClasses` when `/home`'s slot teaser became its second reader
+            // — same rendered markup, one definition.
             className={sectionLinkClasses()}
           >
             See the full ladder

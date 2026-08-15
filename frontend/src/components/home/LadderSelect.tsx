@@ -1,10 +1,5 @@
-// Game + ladder picker, controlled by the parent.
-//
-// Options:
-//   mode="ladder" (default) — pick a game then a format; emits a ladder id.
-//   mode="game"             — pick a game only, no format row; emits a game id.
-//   excludeSolo             — (ladder mode) drop 1v1 ladders and games with none.
-//   all                     — add an "All" button; picking it emits '' (no filter).
+// Game + ladder picker, controlled by the parent. Options: mode="ladder" (default) — pick a
+// game then a format; emits a ladder id.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -20,22 +15,20 @@ type LadderSelectProps = {
   value: string | undefined;
   // Add an "All" button; selecting it emits '' (empty filter) and is the default.
   all?: boolean;
-  // Restrict the game buttons to this subset of game ids — used by a filter bar
-  // over an existing collection ("my teams"), where offering a game the user
-  // owns nothing in can only lead to an empty list. Omitted = every game.
-  // "All" is never affected: it shows even when this is empty.
+  // Restrict the game buttons to this subset of game ids — used by a filter bar over an
+  // existing collection ("my teams"), where offering a game the user owns nothing in can only
+  // lead to an empty list.
   gameIds?: string[];
 } & (
   | {
-      // Default: pick a game, then a format inside it. `excludeSolo` drops 1v1
-      // ladders and any game left with none (POST /teams rejects solo with a 400).
+      // Default: pick a game, then a format inside it. `excludeSolo` drops 1v1 ladders and any
+      // game left with none (POST /teams rejects solo with a 400).
       mode?: 'ladder';
       onChange: (ladderId: string | undefined) => void;
       excludeSolo?: boolean;
       // Ladder selected on load instead of "first game, first format" — used by
-      // `/teams?create=<id>` ([F-GAMES]), so a user who picked a ladder on a game
-      // page does not have to pick it again. Ignored when it is not in the usable
-      // list (unknown id, or a solo ladder under `excludeSolo`).
+      // `/teams?create=<id>`, so a user who picked a ladder on a game page does not
+      // have to pick it again.
       initialLadderId?: string;
     }
   | {
@@ -57,15 +50,15 @@ export function LadderSelect(props: LadderSelectProps) {
   const [gameId, setGameId] = useState<string>();
   const [error, setError] = useState<string>();
 
-  // Read onChange through a ref so the fetch below never re-runs because the
-  // parent re-rendered with a fresh arrow function.
+  // Read onChange through a ref so the fetch below never re-runs because the parent re-rendered
+  // with a fresh arrow function.
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   });
 
-  // Both lists are small and static, so fetch them once and filter in memory
-  // rather than re-querying /ladders on every game change.
+  // Both lists are small and static, so fetch them once and filter in memory rather than
+  // re-querying /ladders on every game change.
   useEffect(() => {
     Promise.all([
       apiFetch<{ games: Game[] }>('/games'),
@@ -84,8 +77,7 @@ export function LadderSelect(props: LadderSelectProps) {
         setGames(playableGames);
 
         // A ladder asked for by the caller wins over every default below — but only if it
-        // really is one of the usable ladders. An unknown id (or a solo one under
-        // `excludeSolo`) falls through and the picker behaves exactly as before.
+        // really is one of the usable ladders.
         const preset = initialLadderId
           ? usableLadders.find((ladder) => ladder.id === initialLadderId)
           : undefined;
@@ -114,9 +106,8 @@ export function LadderSelect(props: LadderSelectProps) {
     [ladders, gameId],
   );
 
-  // Narrowed here rather than in the fetch above: `gameIds` usually comes from
-  // a query that resolves after this one, so the list has to re-narrow on every
-  // render instead of once. Four games — filtering them costs nothing.
+  // Narrowed here rather than in the fetch above: `gameIds` usually comes from a query that
+  // resolves after this one, so the list has to re-narrow on every render instead of once.
   const shownGames = gameIds ? games.filter((game) => gameIds.includes(game.id)) : games;
 
   function selectGame(nextGameId: string) {
@@ -174,8 +165,6 @@ export function LadderSelect(props: LadderSelectProps) {
         ))}
       </div>
 
-      {/* Shown from a single ladder up: even with only one format (e.g. LoL's
-          5v5), the user must see which ladder their team is being created on. */}
       {!onlyGame && gameLadders.length > 0 && (
         <div className="flex flex-wrap gap-4">
           {gameLadders.map((ladder) => (

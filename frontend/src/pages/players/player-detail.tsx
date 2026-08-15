@@ -1,5 +1,5 @@
-// Public profile of one player, at /players/$pseudo.
-// `ViewerRole` still gates what a STRANGER may do to the account (befriend, block).
+// Public profile of one player, at /players/$pseudo. `ViewerRole` still gates what a STRANGER
+// may do to the account (befriend, block).
 
 import { useState } from 'react';
 import { Ban, SmilePlus, UserCheck, UserMinus, X } from 'lucide-react';
@@ -26,10 +26,7 @@ import {
   getViewerRole,
   usePlayer,
 } from '@/lib/player-detail';
-// 🔑 THE MUTATIONS COME FROM THE SOCIAL RAIL'S LAYER, not from a copy of it. Every one of
-// these acts changes a list the rail is showing one column away — friends, sent requests,
-// received requests, blocked players — and these hooks are the only place that knows which.
-// Only the WORDS stay page-specific, in `lib/player-mutations.ts`.
+// THE MUTATIONS COME FROM THE SOCIAL RAIL'S LAYER, not from a copy of it.
 import {
   useBlockUser,
   useCancelFriendRequest,
@@ -52,9 +49,7 @@ import type { Friendship, PublicUser } from '@/lib/player-detail';
 function PlayerErrorPanel({ title, message }: { title: string; message: string }) {
   return (
     <ErrorPanel title={title} message={message}>
-      {/* This page is reached from a roster chip, a ladder row, a line-up or the search bar,
-          so there is no one page it "came from". `/teams` is the same neutral anchor the team
-          page's own dead ends use. */}
+
       <Link to="/teams" className={buttonClasses('secondary')}>
         My teams
       </Link>
@@ -63,22 +58,9 @@ function PlayerErrorPanel({ title, message }: { title: string; message: string }
 }
 
 /**
- * 🚨 GOING FROM ONE PLAYER TO THE NEXT DOES NOT REMOUNT THIS ROUTE — only the param changes,
- * so React keeps the same component instance and EVERY piece of local state below survives
- * the navigation. Measured, on the real app: sending a friend request to Bob and then opening
- * Erin's profile through the search bar left "Friend request sent to…" on screen, re-rendered
- * with ERIN's name — a message claiming an act that never happened, on top of a profile that
- * may well already be a friend. The mutation results, the live-region text, the two dialog
- * flags and `blocked` were all affected; `blocked` is the worst of them, since it would have
- * shown "You blocked Erin" to someone who blocked Bob.
- *
- * 🔑 THE KEY IS THE FIX. Keying on the pseudo makes React discard the instance and build a
- * fresh one, which is the only remedy that covers state added LATER without anyone
- * remembering this. Resetting field by field in an effect would also flash the stale message
- * for a frame, since effects run after paint.
- *
- * Lowercased for the same reason `playerQueryKey` is: two spellings of one pseudo are one
- * player, and re-keying on the casing alone would throw away a perfectly valid instance.
+ * GOING FROM ONE PLAYER TO THE NEXT DOES NOT REMOUNT THIS ROUTE — only the param changes, so
+ * React keeps the same component instance and EVERY piece of local state below survives the
+ * navigation.
  */
 export function PlayerDetail() {
   const { pseudo } = useParams({ from: '/_authenticated/players/$pseudo' });
@@ -87,46 +69,36 @@ export function PlayerDetail() {
 }
 
 function PlayerProfile({ pseudo }: { pseudo: string }) {
-  // The signed-in user's ID, not their pseudo: it answers both "is this my own page" and
-  // "whose friend request is this". Selector form so the page re-renders on the user, not on
-  // every token refresh.
+  // The signed-in user's ID, not their pseudo: it answers both "is this my own page" and "whose
+  // friend request is this".
   const connectedUserId = useAuthStore((state) => state.user?.id);
-  // THE live region of this page. Both actions report through this one — which is why the
-  // `Callout` below deliberately carries no `role="status"`: two regions compete for the
-  // reading, and a `[role="status"]` selector picks whichever comes first.
+  // THE live region of this page.
   const announcement = useAnnouncement();
-  // Blocking destroys an existing friendship server-side and is not undoable from this page,
-  // so it goes through a confirmation. Sending a friend request does not: the worst case is
-  // a request the other player declines.
+  // Blocking destroys an existing friendship server-side and is not undoable from this page, so
+  // it goes through a confirmation.
   const [blockConfirming, setBlockConfirming] = useState(false);
-  // Unfriending gets a confirmation for the same reason "Leave team" does: it is one click
-  // that undoes a mutual relationship. WITHDRAWING a request you sent does not — that is
-  // undone by clicking once more.
+  // Unfriending gets a confirmation for the same reason "Leave team" does: it is one click that
+  // undoes a mutual relationship.
   const [unfriendConfirming, setUnfriendConfirming] = useState(false);
   const playerQuery = usePlayer(pseudo);
   const sendFriendRequest = useSendFriendRequest();
   const blockUser = useBlockUser();
-  // ⚠️ TWO DIFFERENT HOOKS ON ONE ROUTE. `DELETE /friends/{id}` both unfriends and withdraws a
-  // request I sent — the server tells them apart from the row's status. They stay separate here
-  // because they invalidate different lists in the rail (friends vs sent requests), they carry
-  // different wording, and one reports inside a dialog while the other reports on the page.
+  // TWO DIFFERENT HOOKS ON ONE ROUTE. `DELETE /friends/{id}` both unfriends and withdraws a
+  // request I sent — the server tells them apart from the row's status.
   const unfriend = useRemoveFriend();
   const cancelRequest = useCancelFriendRequest();
   const rejectRequest = useRejectFriendRequest();
 
   const friendship = playerQuery.data?.friendship;
   // The mutation writes this marker into the shared query cache, whichever component started
-  // the block. A successful refetch after unblocking replaces the response and removes it.
+  // the block.
   const blocked = playerQuery.data?.__clientBlocked === true;
 
-  // This guard intentionally precedes the query error guard. Another social action may refetch
-  // every active profile while this player is still blocked; its expected 404 must not replace
-  // the more useful screen that explains the block and where to undo it.
+  // This guard intentionally precedes the query error guard.
   if (blocked) {
     return (
       <div className="flex flex-col gap-6 py-6">
-        {/* The live region STAYS MOUNTED across this switch: unmounting it with the profile
-            would drop the "is now blocked" announcement before a screen reader ever read it. */}
+
         <p role="status" className="sr-only">
           {announcement.message}
         </p>
@@ -144,9 +116,8 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
     return (
       <div className="flex flex-col gap-6 py-6">
         {status === 404 ? (
-          // ⚠️ Wording covers TWO cases on purpose: no such pseudo, and a profile hidden
-          // because one of the two accounts blocked the other. The API conflates them to
-          // protect the blocker, so this copy must not claim the account does not exist.
+          // Wording covers TWO cases on purpose: no such pseudo, and a profile hidden because
+          // one of the two accounts blocked the other.
           <PlayerErrorPanel
             title="Profile not available"
             message="This profile could not be opened."
@@ -164,9 +135,7 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
   if (playerQuery.isPending) {
     return (
       <div className="flex flex-col gap-6 py-6">
-        {/* Mounted while loading too, like the team page's own back link: it depends on the
-            history, not on the profile, so hiding it would take the way out away for exactly
-            as long as the request lasts. */}
+
         <BackButton />
         {/* Same footprint as the loaded header, so the layout does not jump on arrival. */}
         <div
@@ -187,8 +156,8 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
   const cta = friendCta(friendship, connectedUserId);
   const name = user.displayName ?? user.pseudo;
   const joinedOn = formatJoinDate(user.createdAt);
-  // `null` for every relationship that is not an accepted one, which is what drops the
-  // second stat cell rather than dashing it.
+  // `null` for every relationship that is not an accepted one, which is what drops the second
+  // stat cell rather than dashing it.
   const friendsSince = formatFriendsSince(friendship);
   const acting =
     sendFriendRequest.isPending ||
@@ -200,14 +169,14 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
   const canInteract = role === ViewerRole.Stranger || role === ViewerRole.Friend;
 
   function handleSendFriendRequest(target: PublicUser) {
-    // A new attempt supersedes the other action's feedback: "Friend request sent" sitting
-    // next to "Blocked" leaves the visitor unsure which one just happened.
+    // A new attempt supersedes the other action's feedback: "Friend request sent" sitting next
+    // to "Blocked" leaves the visitor unsure which one just happened.
     blockUser.reset();
     announcement.reset();
 
     sendFriendRequest.mutate(target.id, {
-      // `outcome`, not the raw payload: `POST /friends` ACCEPTS when the other side had
-      // already asked, and the hook reads which of the two happened off `friendship.status`.
+      // `outcome`, not the raw payload: `POST /friends` ACCEPTS when the other side had already
+      // asked, and the hook reads which of the two happened off `friendship.status`.
       onSuccess: (outcome) => {
         announcement.announce(
           outcome === 'auto-accepted'
@@ -282,18 +251,14 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
     });
   }
 
-  // Visible feedback DERIVED from the mutations — it holds no state of its own to keep in
-  // sync, which is most of the point of moving these onto TanStack Query. Errors win over
-  // successes: a failed retry must not leave the previous success on screen.
-  //
-  // ⚠️ A BLOCK FAILURE IS ABSENT ON PURPOSE: it is rendered inside the dialog, which stays
-  // open on error. Reporting it here too would say the same thing twice, in two places.
+  // Visible feedback DERIVED from the mutations — it holds no state of its own to keep in sync,
+  // which is most of the point of moving these onto TanStack Query.
   function actionFeedback(): { tone: CalloutTone; text: string } | null {
     if (sendFriendRequest.isError) {
       return { tone: 'danger', text: sendFriendRequestErrorMessage(sendFriendRequest.error) };
     }
-    // The withdraw has no dialog of its own, so this is where its failure surfaces. Its
-    // sibling `unfriend` is absent for the opposite reason — it reports inside its dialog.
+    // The withdraw has no dialog of its own, so this is where its failure surfaces. Its sibling
+    // `unfriend` is absent for the opposite reason — it reports inside its dialog.
     if (cancelRequest.isError) {
       return { tone: 'danger', text: cancelFriendRequestErrorMessage(cancelRequest.error) };
     }
@@ -309,27 +274,21 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
             : `Friend request sent to ${name}.`,
       };
     }
-    // ⚠️ NO "is now blocked" LINE HERE, and its absence is the whole point: a successful block
-    // replaces the page (see `blocked`), so this callout would only ever have said it beside
-    // an "Add friend" button offering to befriend the person just blocked.
+    // NO "is now blocked" LINE HERE, and its absence is the whole point: a successful block
+    // replaces the page (see `blocked`), so this callout would only ever have said it beside an
+    // "Add friend" button offering to befriend the person just blocked.
 
     return null;
   }
 
-  // Actions on SOMEONE ELSE'S account — a friend included, since a friend can still be
-  // blocked. Empty for the owner: this page is read-only, editing lives at /profile.
-  //
-  // LABELLED buttons, not the icon-only `IconMenuItem` this page used to carry: that
-  // component writes its label in a HOVER TOOLTIP and nowhere else, which is no label at
-  // all on a touch screen. Its own docblock scopes it to the right-hand nav rail.
+  // Actions on SOMEONE ELSE'S account — a friend included, since a friend can still be blocked.
+  // Empty for the owner: this page is read-only, editing lives at /profile.
   function relationshipActions() {
     if (!canInteract) return null;
 
     return (
       <>
-        {/* Every one of these is disabled while ANY of them is in flight: they all hit the
-            same pair of accounts, and blocking someone mid-friend-request is a race the
-            backend would settle in an order nobody chose. */}
+
         {cta === 'add' && (
           <Button disabled={acting} onClick={() => handleSendFriendRequest(user)}>
             <SmilePlus aria-hidden="true" className="mr-2 size-4" />
@@ -337,9 +296,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
           </Button>
         )}
 
-        {/* Same handler and same request as "add" — `POST /friends` accepts by posting
-            back. Only the label changes, because offering to "send a friend request" to
-            someone who already sent you one is nonsense. */}
         {cta === 'accept' && (
           <Button disabled={acting} onClick={() => handleSendFriendRequest(user)}>
             <UserCheck aria-hidden="true" className="mr-2 size-4" />
@@ -347,10 +303,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
           </Button>
         )}
 
-        {/* ⚠️ `POST /friends/{id}/reject`, NOT the DELETE used to withdraw: that one
-            answers 400 on a request sent TO me and points here. Same outcome (the row is
-            deleted), different authorisation — only the addressee may refuse. No
-            confirmation: either of you can ask again. */}
         {cta === 'accept' && friendship && (
           <Button
             variant="secondary"
@@ -362,8 +314,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
           </Button>
         )}
 
-        {/* `DELETE /friends/{id}` on a pending row I own withdraws it. No confirmation:
-            one more click sends it again. */}
         {cta === 'pending' && friendship && (
           <Button
             variant="secondary"
@@ -383,11 +333,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
           </Button>
         )}
 
-        {/* ⚠️ `secondary`, NOT the `danger` the team page gives "Leave team". Both are
-            destructive, but leaving a team is a member's only exit and belongs in the
-            reading path, whereas blocking is a rare escalation — a full-red button as loud
-            as "Add friend" on every stranger's profile reads as an invitation. The red
-            stays on the icon, which is where it identifies the action without shouting. */}
         <Button variant="secondary" disabled={acting} onClick={() => setBlockConfirming(true)}>
           <Ban aria-hidden="true" className="mr-2 size-4 text-arena-red" />
           Block
@@ -397,17 +342,13 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
   }
 
   const feedback = actionFeedback();
-  // `?.trim()` and not just a null check: `bio` is a free-text column, so " " is a value
-  // the API will happily store and the page must still treat as "nothing written".
+  // `?.trim()` and not just a null check: `bio` is a free-text column, so " " is a value the
+  // API will happily store and the page must still treat as "nothing written".
   const bio = user.bio?.trim();
 
   return (
     <div className="flex min-w-0 flex-col gap-6 py-6">
-      {/* 🔑 THIS PAGE HAS NO PARENT, which is exactly what `BackButton` was written for: a
-          player is reached from a ladder's standings, a solo ladder, a roster chip, a match
-          line-up, a history row and the search bar, so there is no one page to hard-code a
-          link to — it reads the origin off the history entry instead. `solo.mjs` (S13d) guards
-          both its presence and the fact that its label NAMES that origin. */}
+
       <BackButton />
 
       <PlayerHero
@@ -419,9 +360,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
         actions={relationshipActions()}
       />
 
-      {/* MOUNTED FOR THE WHOLE LIFE OF THE PAGE, only its text changes: a region inserted
-          into the DOM together with its content is not reliably announced. `sr-only` is
-          absolutely positioned, so an empty region costs no layout. */}
       <p role="status" className="sr-only">
         {announcement.message}
       </p>
@@ -432,38 +370,21 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
         <SectionTitle>Bio</SectionTitle>
         <div className="panel p-4">
           {bio ? (
-            // `whitespace-pre-line`: the field accepts newlines and losing them collapsed
-            // every multi-line bio into one paragraph.
+            // `whitespace-pre-line`: the field accepts newlines and losing them collapsed every
+            // multi-line bio into one paragraph.
             <p className="whitespace-pre-line text-sm text-text-secondary">{bio}</p>
           ) : (
-            // ⚠️ `text-text-secondary`, not `text-text-muted`: muted on a card measures
-            // 4,23:1, under AA, and is already a ticketed debt — no reason to add a 46th
-            // usage to it here.
+            // `text-text-secondary`, not `text-text-muted`: muted on a card measures 4,23:1,
+            // under AA, and is already a known debt — no reason to add a 46th usage to it
+            // here.
             <p className="text-sm text-text-secondary">{name} has not written a bio yet.</p>
           )}
         </div>
       </section>
 
-      {/* Bio says WHO, rankings say AT WHAT LEVEL, teams say WITH WHOM — the profile answered
-          only the first of the three until [F-PLAYER].
-
-          🚨 NEITHER A MATCH HISTORY NOR THE LINKED GAME ACCOUNTS BELONG HERE — product
-          decision of 31/07, on privacy grounds: what someone plays and which accounts they own
-          are read on THEIR OWN profile, not on a stranger's. They live at `/history` and, for
-          the linked accounts, on `/profile` ([F4B]). Do not re-propose them for this page. */}
       <PlayerRankings rankings={rankings} name={name} />
       <PlayerTeams teams={teams} name={name} />
 
-      {/* Mounted for as long as the actions are — closing it by unmounting would leave the
-          browser nothing to restore focus to. Gated on the role rather than always mounted:
-          an owner reading their own page has no business carrying a hidden "Block this
-          player?" heading in their DOM.
-
-          🚨 `canInteract`, NOT `Stranger`. The "Block" button is offered to a FRIEND too — and
-          falling out with someone you know is the ordinary reason to block at all — but this
-          dialog only existed for strangers, so on a friend's profile the button armed a state
-          nobody rendered: one click, nothing on screen, no error, no request. Its wording was
-          already written for this case ("any friendship between you is removed"). */}
       {canInteract && (
         <ConfirmDialog
           open={blockConfirming}
@@ -484,9 +405,6 @@ function PlayerProfile({ pseudo }: { pseudo: string }) {
         />
       )}
 
-      {/* A second dialog beside the first rather than one multiplexing both: the two texts
-          share nothing, and a single instance would have to re-derive which act it is showing
-          on every render. Same call as the team page's two dialogs. */}
       {friendship && (
         <ConfirmDialog
           open={unfriendConfirming}

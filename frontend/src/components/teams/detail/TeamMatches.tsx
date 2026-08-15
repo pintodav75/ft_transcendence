@@ -12,28 +12,20 @@ type TeamMatchesProps = {
   isError: boolean;
   isMember: boolean;
   /**
-   * Captain only: opens the confirmation for withdrawing an open slot. Its mere presence
-   * is what adds the actions column — the role check lives on the page, not here.
+   * Captain only: opens the confirmation for withdrawing an open slot. Its mere presence is
+   * what adds the actions column — the role check lives on the page, not here.
    */
   onCancelSlot?: (match: TeamMatch) => void;
   /**
-   * Handle sur l'historique des matchs, utilisé comme point d'atterrissage du focus après
-   * une annulation de créneau (cf. `ConfirmDialog.returnFocusRef`) : la ligne qui portait le
-   * bouton disparaît, cet élément NOMME la liste d'où elle vient de partir.
-   *
-   * ⚠️ `HTMLElement` et non `HTMLDivElement` depuis [FX-TABLE] : selon la largeur, il se pose
-   * sur la région défilante du tableau ou sur le `<ul>` des cartes — voir `MatchHistoryTable`.
+   * Handle sur l'historique des matchs, utilisé comme point d'atterrissage du focus après une
+   * annulation de créneau (cf.
    */
   historyRef?: Ref<HTMLElement>;
 };
 
 /**
  * Match history tab of a TEAM page — the adapter between `GET /teams/{id}/matches` and the
- * shared `MatchHistoryTable` (moved out of this file by [F-SOLO], rule of the second use).
- *
- * Everything team-specific lives here and nowhere else: the opponent is always a team, the
- * line-up column is real, the prose talks about a team, and the dispute notice keeps the
- * `role="status"` it has carried since FT-2A.
+ * shared `MatchHistoryTable` (moved out of this file, rule of the second use).
  */
 export function TeamMatches({
   matches,
@@ -66,8 +58,7 @@ export function TeamMatches({
       : null,
     // ABSENT (not null) for a non-member: `undefined` is what drops the whole column.
     lineup: match.lineup ? formatLineup(match.lineup.self) : undefined,
-    // FT-4A — a member opens the sheet of EVERY row, a visitor only of a completed one. Same
-    // rule as the guard of `GET /matches/{id}`, so no link on this page can lead to a 403.
+    // A member opens the sheet of EVERY row, a visitor only of a completed one.
     canOpenSheet: isMember || match.status === 'completed',
   }));
 

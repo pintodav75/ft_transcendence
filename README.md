@@ -343,7 +343,7 @@ users ──< team_members >── teams ──> ladders ──> games ──< g
 | Real-time chat                   | Native WebSocket, direct messages, conversation list, multiple windows, online presence.                                 | Walid       |
 | Notifications                    | 17 live notification types, bell with unread count, mark one/all as read.                                                | Walid       |
 | Social rail                      | Persistent panel on every authenticated page: friends, conversations, notifications, search and requests.                 | Walid       |
-| Advanced search                  | Global search over players and teams, filtered by type, paginated, alphabetically ordered.                               | Walid       |
+| Advanced search                  | Global search over players and teams, filtered by type, paginated, alphabetically ordered.                               | William       |
 | Teams                            | Creation, roster, captaincy, logo upload, invitation cycle, leaving and dissolution, with engagement guards.              | William     |
 | Ladders and ELO                  | Per-ladder rankings for teams and solo players, ELO computed transactionally on match completion.                        | William     |
 | Challenge-based matchmaking      | Opening and cancelling a slot, browsing open slots with an eligibility verdict, accepting a challenge.                    | William     |
@@ -384,7 +384,7 @@ during the evaluation.
 | **Two-factor auth**       | TOTP with `speakeasy`, QR enrolment, and a short-lived token scoped to the verification endpoint only.                       |
 | **File upload**           | Avatars and team logos to MinIO, dispute evidence to a private bucket; client-side type and 2 MB validation, preview, progress bar. |
 | **Notification system**   | 17 event types written inside the business transaction and pushed after commit, so a notification never describes a rollback. |
-| **Advanced search**       | Global search over players and teams, type filter, pagination, backed by prefix indexes on lowercased columns.                |
+| **Advanced search**       | Global search over players and teams, type filter, pagination, ordering on matches in history.                |
 | **Custom design system**  | 26 reusable components and a full token set. Justified below.                                                                |
 
 ### Justification — Module of choice: the competitive cycle (Major)
@@ -486,9 +486,24 @@ _How I got past it:_
 
 _What I built:_
 
+I helped set up the foundations of the front end, its basic components, the artistic
+direction, the route system.
+I wrote the left rail navigation bar and its search feature. Also the pages it leads to,
+such as the user profile, the team page, the history, a ranking page...
+
 _What blocked me:_
 
+All the new technologies I had to learn and how to implement, react, typescript, tanstack etc...
+Having to write the front and keep everything accessible made the code so much more complex with
+lots of helper and utilities that weren't immediately obvious, for example all the aria attributes
+or css classes to use.
+Also the sheer amount of pages to build, the scope of the project is ambitious. 
+
 _How I got past it:_
+
+Lot of YT videos watching and documentation reading to get an understanding on the different
+technology. AI support to get the right CSS names and do some redundant work. Using some
+automated debug tool such as axe.
 
 ---
 

@@ -15,10 +15,8 @@ type MatchHeaderProps = {
   /** Id of the `<h1>`, so the page can name its own landmark with it. */
   headingId: string;
   /**
-   * Handle on the `<h1>`, so the page can move focus onto it — the landing point when
-   * reporting a result destroys the control that had focus ([FT-4B], FX-FOCUS rule). Same
-   * idiom as `SectionTitle`: a heading is stable and NAMES what the reader has landed on,
-   * where a bare container announces nothing.
+   * Handle on the `<h1>`, so the page can move focus onto it — the landing point when reporting
+   * a result destroys the control that had focus.
    */
   headingRef?: Ref<HTMLHeadingElement>;
 };
@@ -30,20 +28,14 @@ function matchTitle(sides: MatchSide[], match: MatchSheet) {
 
   const solo = isSoloMatch(match);
   if (away) return `${sideName(home, solo)} vs ${sideName(away, solo)}`;
-  // ⚠️ A single side is not proof the slot is still open — an expired slot is cancelled by the
-  // job and keeps exactly this shape. Titling it "open slot" contradicts the CANCELLED pill
-  // sitting two lines below it.
+  // A single side is not proof the slot is still open — an expired slot is cancelled by the job
+  // and keeps exactly this shape.
   return match.status === 'pending'
     ? `${sideName(home, solo)} — open slot`
     : `${sideName(home, solo)} — withdrawn slot`;
 }
 
-/**
- * Identity of the sheet: game artwork, who plays whom, on which ladder, when, in what state.
- *
- * The ladder, its format and the game's name come from the match payload itself (B16 serves
- * `match.ladder`), so the page needs no second round-trip to title itself.
- */
+/** Identity of the sheet: game artwork, who plays whom, on which ladder, when, in what state. */
 export function MatchHeader({ match, sides, headingId, headingRef }: MatchHeaderProps) {
   const { ladder } = match;
   // Same rule as the team page: "Chess 1v1" next to "Chess · 1v1" reads three times the same
@@ -62,8 +54,6 @@ export function MatchHeader({ match, sides, headingId, headingRef }: MatchHeader
         <Swords aria-hidden="true" className="size-4" /> Match
       </p>
 
-      {/* `tabIndex={-1}` makes the heading focusable BY SCRIPT ONLY: it never joins the tab
-          order, so nothing changes for someone simply tabbing through the page. */}
       <h1
         id={headingId}
         ref={headingRef}
@@ -78,9 +68,7 @@ export function MatchHeader({ match, sides, headingId, headingRef }: MatchHeader
         <Pill tone="muted">{ladder.format}</Pill>
         {extraName && <span>{extraName}</span>}
         <span className="normal-case">{formatMatchDate(match.scheduledAt, 'long')}</span>
-        {/* ⚠️ `opponent` is what tells "Open slot" from "Scheduled", and this payload has no
-            such field: on the sheet, having an opponent IS having a second side. Passing
-            `match` alone would label every accepted-but-not-started match an open slot. */}
+
         <MatchStatusPill
           match={{
             status: match.status,

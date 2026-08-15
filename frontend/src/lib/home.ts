@@ -12,32 +12,16 @@ import type { Game, RequiredProvider } from '@/lib/games';
 import type { HistoryMatch, MatchLabeller } from '@/lib/history';
 
 /**
- * Read side of `/home` — the landing screen of a signed-in account.
+ * Read side of /home. The page only holds what is ACTIONABLE (no game grid, no team list —
+ * those tabs exist), so every block is conditional and onboarding is the default content.
  *
- * 🚨 `/home` IS NOT A MIRROR OF THE OTHER TABS, and that is the decision that shapes this whole
- * module. No game grid (`/games` exists), no team list (`/teams` exists): the page holds only
- * what is ACTIONABLE — what needs me now. Everything here is therefore conditional, which is
- * exactly why the onboarding block is not a bonus but the page's DEFAULT content: a brand new
- * account has none of the six other blocks.
- *
- * 🔑 THE BUDGET IS FIVE REQUESTS, AND FOUR OF THE FIVE LAND ON A CACHE KEY ANOTHER SCREEN
- * ALREADY USES — `['games']` (`/games`), `EXTERNAL_ACCOUNTS_KEY` (`/solo` and `/profile`),
- * `['matches', 'me', 'all']` (`/history`) and `MY_INVITATIONS_KEY` (`/teams`). `/home` is a READER of
- * the app's caches, so arriving on it never makes a later page slower.
- *
- * ⚠️ THE FIFTH IS THE EXCEPTION, AND IT IS NOT AN ACCIDENT: the open-slot teaser has its OWN
- * cache entry, distinct from `/matchmaking`'s board. `openSlotsKey` IS the whole filter object,
- * and `limit: 3` is part of it — so `{acceptableOnly:true, limit:3}` and the board's
- * `{gameId, format, acceptableOnly}` can never collide. That is deliberate (see
- * `lib/matchmaking.ts`): they are two different lists, and sharing an entry would mean one
- * screen serving the other's truncation. The teaser costs one request; the board keeps its key
- * byte-identical to what it was before `/home` existed.
- *
- * 🚨 AND `GET /ladders` IS DELIBERATELY *NOT* AMONG THEM. Naming the ladder of a row is the one
- * thing that would have cost a sixth request; `matchLabeller` already falls back to
- * `<game> <format>` (see `useHomeLabeller`), so the page reads correctly without it. This is a
- * real constraint, not an accident: `f-nav`'s `N5` check measures it, and it is what keeps the
- * search bar's "the ladder table costs nothing until somebody searches" guarantee provable.
+ * budget is 5 requests, 4 of them on cache keys another screen already uses (['games'],
+ * EXTERNAL_ACCOUNTS_KEY, ['matches','me','all'], MY_INVITATIONS_KEY). /home reads the app's
+ * caches, it never makes a later page slower.
+ * the 5th is the open-slots teaser, which has its OWN entry: openSlotsKey is the whole filter
+ * object and limit:3 is part of it, so it can't collide with /matchmaking's board and one
+ * screen can't serve the other's truncation.
+ * GET /ladders is deliberately not in there — matchLabeller falls back to `<game> <format>`.
  */
 
 // ------------------------------------------------------------------ queries
@@ -45,17 +29,7 @@ import type { HistoryMatch, MatchLabeller } from '@/lib/history';
 /** How many open slots the teaser shows before sending the reader to `/matchmaking`. */
 export const HOME_SLOTS_LIMIT = 3;
 
-/**
- * Names the ladder of every row WITHOUT `GET /ladders`.
- *
- * ⚠️ THE FALLBACK IS EXACT FOR 8 LADDERS OUT OF 9, NOT ALL 9 — do not read this as an
- * equality. `matchLabeller(undefined, games)` renders `<game> <format>`, which is verbatim the
- * name of Chess 1v1, Counter-Strike 2 5v5, League of Legends 5v5, Rocket League 1v1/2v2/3v3 and
- * Valorant 2v2/5v5. The exception is **« Counter-Strike 2 2v2 (Wingman) »**, which comes out as
- * « Counter-Strike 2 2v2 »: still unambiguous (a ladder IS the pair game × format, enforced by
- * `ladders_game_format_unique`), but it loses the nickname. That is the price of not spending a
- * sixth request on this screen, and it is a price we chose — not a guarantee.
- */
+/** Names the ladder of every row WITHOUT `GET /ladders`. */
 export function useHomeLabeller(games: Game[] | undefined): MatchLabeller {
   return matchLabeller(undefined, games);
 }
@@ -67,9 +41,9 @@ export function useHomeData() {
   const matchesQuery = useMyMatchHistory();
   const invitationsQuery = useMyTeamInvitations();
   /**
-   * ⚠️ `acceptableOnly` is what makes this block safe to render without a verdict: the server
-   * only returns slots this account could actually take, so there is no refusal to phrase and
-   * no button to grey out. `limit: 3` keeps it a teaser — `/matchmaking` is the board.
+   * `acceptableOnly` is what makes this block safe to render without a verdict: the server only
+   * returns slots this account could actually take, so there is no refusal to phrase and no
+   * button to grey out.
    */
   const slotsQuery = useOpenSlots({ acceptableOnly: true, limit: HOME_SLOTS_LIMIT });
 
@@ -78,25 +52,7 @@ export function useHomeData() {
 
 // -------------------------------------------------------- §5.1 linked accounts
 
-/**
- * Which providers this platform requires that I have NOT linked.
- *
- * 🚨 THREE-VALUED, and the third value is the whole point: `undefined` means UNKNOWN (a request
- * is in flight, or it failed), which is not the same as "nothing is missing". The banner must
- * stay hidden in that case — the same discipline `hasLinkedProvider` applies to the solo page,
- * for the same reason: shouting a red alarm on data we do not have would be a lie, and hiding
- * it costs nothing.
- *
- * ⚠️ DRIVEN BY THE DATA, NEVER BY A HARD-CODED LIST. The requirement is `games.required_provider`
- * (served as `requiredProvider`), so adding a game lights this up for free. `GET /games` already
- * filters `is_active` server-side, so every game returned really does demand its account.
- *
- * 🔑 THE SCOPE IS EVERY GAME OF THE PLATFORM, not just the ones I have a team on. Narrowing it to
- * "my" games would mean the reminder never fires for a brand new account — which is precisely
- * its audience.
- *
- * Ordered by the front's display order (`sortGames`) so the sentence is stable between renders.
- */
+/** Which providers this platform requires that I have NOT linked. */
 export function missingProviders(
   games: Game[] | undefined,
   accounts: ExternalAccount[] | undefined,
@@ -115,13 +71,7 @@ export function missingProviders(
   return missing;
 }
 
-/**
- * « Steam and Riot », « Steam, Riot and Epic ».
- *
- * `Intl.ListFormat` rather than a hand-rolled join: it puts the conjunction in the right place
- * for any length, and it is in the platform — no dependency for three words. Locale FIXED to
- * `en-GB` like every other formatter of this repo, never the browser's.
- */
+/** « Steam and Riot », « Steam, Riot and Epic ». */
 const providerListFormat = new Intl.ListFormat('en-GB', { style: 'long', type: 'conjunction' });
 
 export function formatProviderList(names: string[]) {
@@ -144,37 +94,22 @@ export type UpcomingMatch = {
    * gains its second side by being accepted, which moves it to `in_progress`.
    */
   isOpenSlot: boolean;
-  /**
-   * When `cancelExpiredSlots` will withdraw an unaccepted slot — `null` on anything else.
-   *
-   * 🔑 THIS IS THE ONE GENUINELY NEW PIECE OF INFORMATION ON THE PAGE. The job cancels a
-   * `pending` slot as soon as it falls under `MIN_LEAD_MINUTES` of its OWN kick-off (the instant
-   * nobody can accept it any more), and nothing else in the app ever shows that deadline.
-   * ⚠️ It is NOT the 24 h rule — that one belongs to the reported-score job and lives on the
-   * "Matches on the clock" section.
-   */
+  /** When `cancelExpiredSlots` will withdraw an unaccepted slot — `null` on anything else. */
   withdrawnAtMs: number | null;
 };
 
 /**
- * The commitments ahead of me, soonest first.
+ * The commitments ahead of me, soonest first. Two statuses qualify:
+ *   - in_progress: someone accepted, it will be played. kept even past kick-off, otherwise it
+ *     vanishes between kick-off and the score being reported.
+ *   - pending: my own open slot, while kick-off is still ahead. past that the job is about to
+ *     cancel it and the row says so through withdrawnAtMs.
+ * awaiting_confirmation and disputed are behind me, not ahead — they have their own section.
  *
- * Two statuses qualify, and only two:
- *   • `in_progress` — accepted by somebody, so it WILL be played. Kept even once its kick-off
- *     has passed: a match under way is still the next thing on my schedule, and dropping it
- *     would make it vanish from the page between kick-off and the score being reported.
- *   • `pending` — my own open slot, kept while its kick-off is still ahead. Past that it is a
- *     dead line the job is about to cancel, and the row says so through `withdrawnAtMs`.
- *
- * `awaiting_confirmation` and `disputed` are deliberately absent: they are behind me, not ahead,
- * and they have their own section (the 24 h clock).
- *
- * ⚠️ `scheduledAt` is an ISO **string** that can be null (invariant #8) — `new Date(null)`
- * silently yields 1970, so an unparsable or missing date drops the row instead of sorting it
- * to the dawn of time.
- *
- * Sorted ascending and tie-broken by id: the kick-offs are constrained to a quarter-hour grid,
- * so ties are frequent, and without a second criterion two rows could swap on a refetch.
+ * scheduledAt is an ISO string that can be null, and new Date(null) gives 1970, so an
+ * unparsable date drops the row instead of sorting it to the dawn of time.
+ * tie-broken by id: kick-offs sit on a quarter-hour grid so ties are common, and without it
+ * two rows swap on a refetch.
  */
 export function upcomingMatches(matches: HistoryMatch[], nowMs: number): UpcomingMatch[] {
   const rows: UpcomingMatch[] = [];
@@ -200,21 +135,7 @@ export function upcomingMatches(matches: HistoryMatch[], nowMs: number): Upcomin
   return rows.sort((a, b) => a.atMs - b.atMs || a.match.id.localeCompare(b.match.id));
 }
 
-/**
- * « in 18h 43m », « in 43 min », « in 3 days ».
- *
- * 🚨 EVERY UNIT IS SPELLED OUT, AND THAT IS A CORRECTION OF A REAL DEFECT. The first version
- * rendered `in ${hours} h ${minutes}` with the minutes padded to two digits — « in 18 h 43 »,
- * which the eye reads as the CLOCK TIME 18:43, and « in 18 h 03 » is not distinguishable from
- * one at all. It was not a theoretical risk: this very page prints real clock times right beside
- * it (a kick-off at `22:00`, a withdrawal at `21:45`), so the two were guaranteed to be confused.
- * Carrying the `m` is what makes the number a duration. Do not drop it back for tidiness.
- *
- * ⚠️ NO IMPERATIVE, EVER, and no claim about who must act. A past kick-off reads « under way »
- * and nothing more: the payload of `GET /matches/me` never says who submitted a score, so
- * « report your score » would be false for a bench player, for a non-captain, and for the side
- * that has already reported — the exact trap `/history` had to walk back (« Waiting on you »).
- */
+/** « in 18h 43m », « in 43 min », « in 3 days ». */
 export function formatCountdown(atMs: number, nowMs: number) {
   const delta = atMs - nowMs;
 
@@ -227,9 +148,8 @@ export function formatCountdown(atMs: number, nowMs: number) {
   if (delta < DAY_MS) {
     const hours = Math.floor(delta / HOUR_MS);
     const minutes = Math.floor((delta % HOUR_MS) / MINUTE_MS);
-    // ⚠️ NO « in 19h 0m ». A zero minute count is not information, it reads as a rendering
-    // fault, and slots land on a quarter-hour grid so it comes up often. The column loses a
-    // little width uniformity; a value that looks broken costs more.
+    // NO « in 19h 0m ». A zero minute count is not information, it reads as a rendering fault,
+    // and slots land on a quarter-hour grid so it comes up often.
     if (minutes === 0) return `in ${hours}h`;
     // No zero-padding: with its unit attached, `3m` is unambiguous, and `03m` would be a
     // leftover of the clock format this deliberately stopped looking like.
@@ -240,14 +160,7 @@ export function formatCountdown(atMs: number, nowMs: number) {
   return `in ${days} day${days === 1 ? '' : 's'}`;
 }
 
-/**
- * `20:45` — the withdrawal deadline of an open slot.
- *
- * Time only, because the row already carries the full kick-off date right beside it; repeating
- * the day would push the line past the width this column has. `en-GB` keeps the 24-hour clock,
- * and the locale is hard-coded so the same slot reads identically for everyone (and so an audit
- * check comparing it does not depend on the host's locale).
- */
+/** `20:45` — the withdrawal deadline of an open slot. */
 const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 export function formatClockTime(atMs: number) {
@@ -256,21 +169,10 @@ export function formatClockTime(atMs: number) {
 
 // ------------------------------------------------- dismissing the §5.1 reminder
 
-/**
- * 🚨 THE KEY IS PREFIXED BY THE USER ID, AND THAT IS NOT A DETAIL. Three dev accounts
- * (`alice` / `bob` / `carol`) are juggled in the same Chrome all day, the console audit
- * included. On a shared key, one account dismissing the reminder would silently hide it for
- * the next — a defect that reproduces once, looks like a rendering bug, and is very hard to
- * pin on storage.
- */
+/** THE KEY IS PREFIXED BY THE USER ID, AND THAT IS NOT A DETAIL. */
 const DISMISS_PREFIX = 'ft:home:link-accounts-dismissed:';
 
-/**
- * ⚠️ EVERY ACCESS IS GUARDED. `localStorage` throws on a `SecurityError` (cookies blocked for
- * the origin), and reading it happens during the very first render: an exception there is a
- * white screen, not a missing banner. A storage that cannot be read simply means "not
- * dismissed", so the worst case is a reminder the user has to close again.
- */
+/** EVERY ACCESS IS GUARDED. */
 function readDismissed(userId: string | null) {
   if (!userId) return false;
   try {
@@ -290,16 +192,7 @@ function writeDismissed(userId: string | null) {
   }
 }
 
-/**
- * "Never show me this again", persisted per account.
- *
- * 🔑 THE STATE IS RE-DERIVED WHEN THE ACCOUNT CHANGES, rather than assumed to remount. Signing
- * out does unmount this page today, so a remount would be enough — but that is a property of
- * the router, not of this hook, and the day it changes the reminder would show the previous
- * user's answer. Adjusting state during render is React's documented pattern for exactly this
- * (no effect, no extra commit, no wasted paint) — an effect would render one frame with the
- * wrong answer on screen.
- */
+/** "Never show me this again", persisted per account. */
 export function useDismissibleReminder(userId: string | null) {
   const [dismissed, setDismissed] = useState(() => readDismissed(userId));
   const [knownUserId, setKnownUserId] = useState(userId);

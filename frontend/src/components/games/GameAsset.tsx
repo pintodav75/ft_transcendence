@@ -7,15 +7,13 @@ type GameAssetProps = {
   className?: string;
 };
 
-// Shared renderer for a game's visual asset (logo / icon / image): renders the
-// image, or a neutral placeholder if the asset is missing for that game. GameLogo,
-// GameIcon and GameImage are thin wrappers that pass the right asset + kind.
+// Shared renderer for a game's visual asset (logo / icon / image): renders the image, or a
+// neutral placeholder if the asset is missing for that game.
 export function GameAsset({ src, name, kind, className }: GameAssetProps) {
   if (!src) {
-    // A missing asset is our problem, not the visitor's: show the game's name on a
-    // neutral surface (same idiom as Avatar's fallback), keeping the caller's
-    // footprint so the layout doesn't shift. `role="img"` + `aria-label` keep it
-    // equivalent to the image it replaces for screen readers.
+    // A missing asset is our problem, not the visitor's: show the game's name on a neutral
+    // surface (same idiom as Avatar's fallback), keeping the caller's footprint so the layout
+    // doesn't shift.
     return (
       <div
         role="img"

@@ -6,30 +6,26 @@ import { ProgressBar } from '@/components/ui/progress-bar';
 import { IMAGE_ACCEPT_ATTRIBUTE, imageFileError } from '@/lib/image-file';
 import { cn } from '@/lib/utils';
 
-// The accepted types, the 2 MB cap and the two refusal sentences used to be declared right
-// here. They moved to `lib/image-file.ts` when the profile avatar became the second screen
-// to need them behind a DIFFERENT look (160 px round preview, its own buttons): a component
-// owns a presentation, not a validation rule — and a copied rule is one that drifts.
+// The accepted types, the 2 MB cap and the two refusal sentences used to be declared right here.
 
 type ImagePickerProps = {
   // Controlled like a native <input>: no "selected file" state lives in here.
   value: File | null;
   onChange: (file: File | null) => void;
-  // Set by the parent while an upload started elsewhere (see TeamCreation,
-  // which only uploads after the team itself exists) is in flight.
-  // null/undefined -> not uploading, 0-100 -> renders the progress bar.
+  // Set by the parent while an upload started elsewhere (see TeamCreation, which only uploads
+  // after the team itself exists) is in flight.
   progress?: number | null;
   disabled?: boolean;
-  // Accessible name for the picker ("Team logo") — also used in the button's
-  // aria-label and the empty/removed state.
+  // Accessible name for the picker ("Team logo") — also used in the button's aria-label and the
+  // empty/removed state.
   label: string;
   className?: string;
 };
 
-// The three front bullets of the File upload module live here: a button that
-// opens the native file picker, client-side MIME/size validation with a
-// readable message, a local preview, a progress bar, and a way to remove the
-// current pick — all in one reusable, controlled component.
+// The three front bullets of the File upload module live here: a button that opens the native
+// file picker, client-side MIME/size validation with a readable message, a local preview, a
+// progress bar, and a way to remove the current pick — all in one reusable, controlled
+// component.
 export function ImagePicker({
   value,
   onChange,
@@ -42,10 +38,8 @@ export function ImagePicker({
   const inputId = useId();
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Derived from `value`, computed at render rather than mirrored into state
-  // via an effect (react-hooks/set-state-in-effect). The effect below only
-  // handles the side effect that has no render-time equivalent: revoking the
-  // previous URL once it's no longer shown, and once more on unmount.
+  // Derived from `value`, computed at render rather than mirrored into state via an effect
+  // (react-hooks/set-state-in-effect).
   const previewUrl = useMemo(() => (value ? URL.createObjectURL(value) : null), [value]);
 
   useEffect(() => {
@@ -60,10 +54,9 @@ export function ImagePicker({
   function handleFileSelected(fileList: FileList | null) {
     const file = fileList?.[0];
 
-    // Reset the raw input value regardless of outcome: without this, picking
-    // the exact same (invalid) file twice in a row doesn't fire `onChange`
-    // the second time, so a fixed re-pick of the same path would silently do
-    // nothing.
+    // Reset the raw input value regardless of outcome: without this, picking the exact same
+    // (invalid) file twice in a row doesn't fire `onChange` the second time, so a fixed re-pick
+    // of the same path would silently do nothing.
     if (inputRef.current) inputRef.current.value = '';
 
     if (!file) return;
@@ -86,9 +79,7 @@ export function ImagePicker({
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       <div className="flex items-center gap-3">
-        {/* Real <input type="file"> stays in the DOM but hidden — a `<button>`
-            triggers it via .click() so the picker is reachable with Tab/Enter,
-            which a `hidden` file input alone would not be. */}
+
         <input
           ref={inputRef}
           id={inputId}
@@ -133,8 +124,6 @@ export function ImagePicker({
         ) : null}
       </div>
 
-      {/* Moved to `ui/progress-bar.tsx` by [F-DISPUTE] (rule of the second use — the evidence
-          picker needs the same bar). Rendered DOM unchanged, attributes included. */}
       {typeof progress === 'number' ? (
         <ProgressBar value={progress} label={`Uploading ${label.toLowerCase()}`} />
       ) : null}

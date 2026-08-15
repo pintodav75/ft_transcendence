@@ -7,10 +7,8 @@ type GameInfoProps = {
   playerCount?: number;
 };
 
-// Presentational overlay content for a game card: logo on top, then the ranking
-// formats and the registered player count grouped at the bottom. Data is passed
-// in by the parent (formats derived from /ladders, playerCount left undefined
-// until the backend can count players).
+// Presentational overlay content for a game card: logo on top, then the ranking formats and the
+// registered player count grouped at the bottom.
 export function GameInfo({ game, formats, playerCount }: GameInfoProps) {
   return (
     <div className="flex h-full flex-col items-center justify-between gap-4 p-4 pt-8 text-center">

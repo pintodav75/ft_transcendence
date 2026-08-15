@@ -11,13 +11,6 @@ type GameBannerProps = {
 /**
  * The game's artwork as a header strip, with the bottom-to-top readability gradient every
  * "dossier" header uses.
- *
- * Extracted at its second reader (the ladder page, then the match sheet — FT-4A): the two
- * were carrying the same three lines, including the exact gradient stops.
- *
- * `aria-hidden` is baked in on purpose: every caller writes the game's name in full just
- * below, so the strip is decoration. A screen reader announcing "Counter-Strike 2 image"
- * right before the heading that says "Counter-Strike 2" is noise, not information.
  */
 export function GameBanner({ gameId, name, className }: GameBannerProps) {
   return (

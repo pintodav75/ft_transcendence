@@ -19,7 +19,7 @@ import type { DisputeFile } from '@/lib/dispute-detail';
 /**
  * The message that goes with the attachment.
  *
- * ⚠️ MIRROR OF THE SERVER, NOT A STRICTER VERSION. `POST /disputes/{id}/evidence` trims the field
+ * MIRROR OF THE SERVER, NOT A STRICTER VERSION. `POST /disputes/{id}/evidence` trims the field
  * and answers 400 `message required` on an empty one — that is the whole rule, and in particular
  * there is NO maximum length. Adding one here would refuse something the API accepts, which is
  * the failure mode a mirror exists to avoid.
@@ -33,13 +33,7 @@ type EvidenceFormValues = z.infer<typeof evidenceSchema>;
 /** What the live region says once the server has answered. */
 const FILED_ANNOUNCEMENT = 'Evidence filed. It now appears at the end of the thread above.';
 
-/**
- * What the live region says when the dispute is settled while this tab sits open.
- *
- * ⚠️ It has to be ANNOUNCED, not merely displayed: the 409 triggers a refetch, the refetch turns
- * the file read-only, and the form that holds the error message unmounts underneath it. The live
- * region is the only thing left standing (see `isDisputeSettledElsewhere`).
- */
+/** What the live region says when the dispute is settled while this tab sits open. */
 const SETTLED_ELSEWHERE_ANNOUNCEMENT =
   'This dispute has just been settled, so it no longer accepts evidence. The file is now read-only.';
 
@@ -52,29 +46,12 @@ type EvidenceFormProps = {
   /**
    * The dispute was settled while this tab sat open (409): this panel is about to unmount under
    * the user, so the page has to announce it AND land the focus somewhere sensible — `<body>`
-   * throws a keyboard user back to the top of the document with nothing said (FX-FOCUS).
-   *
-   * ⚠️ THE PAGE DOES IT, NOT THIS COMPONENT, and that is not a style preference: React's compiler
-   * refuses a ref read from a closure handed to `handleSubmit`, which runs during render
-   * (`react-hooks/refs`). Passing the intent up is the fix, and it also puts the focus decision
-   * where the landing element lives.
+   * throws a keyboard user back to the top of the document with nothing said.
    */
   onSettledElsewhere: (announcement: string) => void;
 };
 
-/**
- * Files one piece of evidence: a file AND a message, in a single request.
- *
- * 🚨 IT RENDERS NOTHING AT ALL to anyone who may not act — a bench player, a team-mate who is not
- * captain, an admin who is not a party, or anyone at all once the dispute is settled. Same
- * discipline as `MatchResultPanel`: a button whose request the API is certain to refuse writes a
- * red line in the Chrome console, and a dirty console is a project-rejection criterion. The
- * verdict itself lives in `canSubmitEvidence`, so [F-ADMIN] can bolt its own controls onto this
- * page without touching the rule.
- *
- * 🚨 THERE IS NO CONVERSATION WITH THE ADMIN, and the copy must never imply one. A camp files
- * evidence, both camps read the thread, an admin rules. No route exists for anything else.
- */
+/** Files one piece of evidence: a file AND a message, in a single request. */
 export function EvidenceForm({
   file,
   nowMs,
@@ -122,25 +99,20 @@ export function EvidenceForm({
     // once the first progress event lands.
     setUploadProgress(0);
 
-    // `mutate`, not `mutateAsync`: a rejection lands in `submit.error` and is rendered below, so
-    // no promise is left unhandled in this handler.
+    // `mutate`, not `mutateAsync`: a rejection lands in `submit.error` and is rendered below,
+    // so no promise is left unhandled in this handler.
     submit.mutate(
       { file: attachment, message: values.message.trim() },
       {
         onSuccess: () => {
           reset({ message: '' });
           setAttachment(null);
-          /**
-           * ⚠️ NO FOCUS MOVE HERE, and it is deliberate. The panel stays mounted on success (the
-           * dispute is still open), so the submit button that had focus is still there — the
-           * FX-FOCUS rule is about a control being DESTROYED, and nothing is. Filing a second
-           * piece is a normal thing to do, and yanking focus up to the thread would fight it.
-           * The live region is what says the post landed.
-           */
+          /** NO FOCUS MOVE HERE, and it is deliberate. */
           onFiled(FILED_ANNOUNCEMENT);
         },
         // The 409 alone: its refetch turns the file read-only and unmounts this panel, so the
-        // message rendered below would flash and vanish unread. Everything else stays on screen.
+        // message rendered below would flash and vanish unread. Everything else stays on
+        // screen.
         onError: (error) => {
           if (isDisputeSettledElsewhere(error)) onSettledElsewhere(SETTLED_ELSEWHERE_ANNOUNCEMENT);
         },
@@ -149,8 +121,8 @@ export function EvidenceForm({
     );
   });
 
-  // Settled file, or someone who does not speak for a camp: no section at all. The verdict block
-  // at the top of the page already says the file is closed.
+  // Settled file, or someone who does not speak for a camp: no section at all. The verdict
+  // block at the top of the page already says the file is closed.
   if (blocker === 'settled' || blocker === 'not_a_party' || !mySide) return null;
 
   const solo = isSoloMatch(file.match);
@@ -160,8 +132,7 @@ export function EvidenceForm({
     return (
       <section className="flex min-w-0 flex-col gap-3.5">
         <SectionTitle>File evidence</SectionTitle>
-        {/* Deliberately NO control: the 24 h are up, so the job is about to cancel the dispute and
-            the API answers 409 — a button here would guarantee a red line in the console. */}
+
         <Callout tone="muted">
           The window has closed, so this dispute no longer accepts evidence. The match is about to
           be cancelled automatically.
@@ -190,8 +161,8 @@ export function EvidenceForm({
             id={messageId}
             rows={3}
             aria-invalid={Boolean(messageError)}
-            // Without this, a screen reader announces "invalid" and stops there: the reason sits
-            // in an element nothing points at.
+            // Without this, a screen reader announces "invalid" and stops there: the reason
+            // sits in an element nothing points at.
             aria-describedby={messageError ? `${messageHintId} ${messageErrorId}` : messageHintId}
             disabled={submit.isPending}
             className="focus-ring min-w-0 rounded-control border border-border-control bg-surface-input px-3 py-2 text-sm text-text-primary placeholder:text-text-muted disabled:cursor-not-allowed disabled:opacity-50"
@@ -206,8 +177,7 @@ export function EvidenceForm({
         </div>
 
         <div className="flex min-w-0 flex-col gap-2">
-          {/* A `<p>`, not a `<Label>`: the file input is hidden behind a button, so a label with
-              `htmlFor` would point at a control nobody can see. The button carries its own name. */}
+
           <p id={attachmentHintId} className="text-xs label-caps text-text-muted">
             Attachment
           </p>
@@ -219,8 +189,9 @@ export function EvidenceForm({
             }}
             progress={uploadProgress}
             disabled={submit.isPending}
-            // Both land on the picker's VISIBLE button, never on its hidden `<input type="file">`
-            // — that one is `display: none`, so anything carried there is announced to nobody.
+            // Both land on the picker's VISIBLE button, never on its hidden `<input
+            // type="file">` — that one is `display: none`, so anything carried there is
+            // announced to nobody.
             describedBy={attachmentError ? `${attachmentHintId} ${attachmentErrorId}` : attachmentHintId}
             invalid={Boolean(attachmentError)}
           />

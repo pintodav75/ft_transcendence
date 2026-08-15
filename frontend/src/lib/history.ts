@@ -10,8 +10,8 @@ import type { SoloMatch } from '@/lib/solo';
 import type { paths } from '@/lib/api-types.gen';
 
 /**
- * Read side of `/history` — every match of mine, all games and all ladders at once.
- There is no pagination and no cursor: one request returns the lot.
+ * Read side of `/history` — every match of mine, all games and all ladders at once. There is no
+ * pagination and no cursor: one request returns the lot.
  */
 type MyMatchesResponse =
   paths['/matches/me']['get']['responses'][200]['content']['application/json'];
@@ -22,9 +22,8 @@ export type HistoryMatch = SoloMatch;
 export type MatchFormat = HistoryMatch['format'];
 
 /**
- * My whole match history, in 1 request.
- * `'all'` can never collide with a real ladder: those are uuids. And the shared
- * `['matches', 'me']` prefix is what lets `useAcceptMatch` refresh both entries at once.
+ * My whole match history, in 1 request. `'all'` can never collide with a real ladder: those are
+ * uuids.
  */
 export function useMyMatchHistory() {
   return useQuery({
@@ -36,11 +35,8 @@ export function useMyMatchHistory() {
 
 // ------------------------------------------------------------------ identity
 
-// GET /matches/me ships ids, not names.
-// three row components on two pages have to print a ladder name, and hold only ids.
-// (UpcomingMatches, ActionRequired, HistoryMatches)
-// this Builds two lookup Maps
-// gameId → name and ladderId → name
+// GET /matches/me ships ids, not names. three row components on two pages have to print a
+// ladder name, and hold only ids.
 
 // matchLabeller returns:
 export type MatchLabeller = {
@@ -115,8 +111,8 @@ export type HistoryFilterState = {
   result?: 'win' | 'loss';
   ongoingOnly: boolean;
   /**
-   * 🔑 A SORT DIRECTION, NOT A FILTER — see `hasActiveHistoryFilters`, which deliberately
-   * ignores it.
+   * A SORT DIRECTION, NOT A FILTER — see `hasActiveHistoryFilters`, which deliberately ignores
+   * it.
    */
   oldestFirst: boolean;
 };
@@ -159,7 +155,7 @@ export function historySummary({
   to: number;
 }) {
   const matchWord = `match${total === 1 ? '' : 'es'}`;
-  //  THE ORDER IS NAMED IN **EVERY** VARIANT, and that is an accessibility requirement,
+  // THE ORDER IS NAMED IN **EVERY** VARIANT, and that is an accessibility requirement,
   const order = oldestFirst ? 'oldest first' : 'most recent first';
   const head = filtersActive
     ? `${matched} of ${total} ${matchWord} shown, ${order}.`
@@ -169,9 +165,7 @@ export function historySummary({
   return matched > to - from + 1 ? `${head} Showing ${from}–${to}.` : head;
 }
 
-/**
- * EVERY FILTER IS APPLIED CLIENT-SIDE,
- */
+/** EVERY FILTER IS APPLIED CLIENT-SIDE, */
 export function applyHistoryFilters(matches: HistoryMatch[], filters: HistoryFilterState) {
   const needle = filters.query.trim().toLowerCase();
 
@@ -185,9 +179,7 @@ export function applyHistoryFilters(matches: HistoryMatch[], filters: HistoryFil
   );
 }
 
-/**
- * The sort control: one direction, applied to the order the server already chose.
- */
+/** The sort control: one direction, applied to the order the server already chose. */
 export function applyHistoryOrder(matches: HistoryMatch[], oldestFirst: boolean) {
   return oldestFirst ? [...matches].reverse() : matches;
 }
@@ -206,9 +198,7 @@ export function historyPageCount(matched: number, pageSize: number) {
   return Math.max(1, Math.ceil(matched / pageSize));
 }
 
-/**
- * Clamps a page number against a list that may have shrunk under it.
- */
+/** Clamps a page number against a list that may have shrunk under it. */
 export function clampHistoryPage(page: number, matched: number, pageSize: number) {
   return Math.min(Math.max(page, 1), historyPageCount(matched, pageSize));
 }
@@ -253,9 +243,8 @@ export function historyFormatOptions(matches: HistoryMatch[], gameId: string | u
   );
 }
 
-// history with wins and losses → ['win', 'loss']
-// history with only wins → ['win']
-// empty history, or only ongoing matches with no result yet → []
+// history with wins and losses ['win', 'loss'] history with only wins ['win'] empty history, or
+// only ongoing matches with no result yet []
 export function historyResultOptions(matches: HistoryMatch[]) {
   return (['win', 'loss'] as const).filter((result) =>
     matches.some((match) => match.result === result),

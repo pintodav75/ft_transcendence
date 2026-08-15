@@ -1,9 +1,5 @@
-// Searchbar UI component.
-// it does a PREFIX search over players and teams, backed by `GET /search?...`.
-// You can either
-//    * supply your own render look for the rows
-// or
-//    * use the default one
+// Searchbar UI component. it does a PREFIX search over players and teams, backed by `GET
+// /search?...`.
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
@@ -78,13 +74,13 @@ function getPanelState(input: {
 
   if (tooShort) return { kind: 'too-short' };
 
-  // we check this first, if theres already results we dont display 'searching', we just
-  // keep showing the old result (instead of a blinking 'searching...')
+  // we check this first, if theres already results we dont display 'searching', we just keep
+  // showing the old result (instead of a blinking 'searching...')
   if (!error && results !== null) {
     return visible.length > 0 ? { kind: 'results', results: visible } : { kind: 'empty' };
   }
-  // Une erreur remet `results` à `null` (voir le `catch` de l'effet) : retaper repart donc en
-  // « Searching… », et le message d'erreur ne survit que tant que rien n'est reparti.
+  // Une erreur remet `results` à `null` (voir le `catch` de l'effet) : retaper repart donc en «
+  // Searching… », et le message d'erreur ne survit que tant que rien n'est reparti.
   if (loading) return { kind: 'searching' };
   if (error) return { kind: 'error', message: error };
 
@@ -107,7 +103,7 @@ export function SearchBar({
   const navigate = useNavigate();
   const fieldId = useId();
   const [query, setQuery] = useState('');
-  // `null` = no result yet  `[]` = server answered with no result.
+  // `null` = no result yet `[]` = server answered with no result.
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -191,13 +187,11 @@ export function SearchBar({
     visible: visibleResults,
   });
 
-  // Fermeture EXPLICITE du panneau. Elle ne peut pas se déduire du seul texte saisi : sinon
-  // rien ne le referme jamais, ni un clic ailleurs ni Escape, et il reste posé sur la nav.
+  // Fermeture EXPLICITE du panneau.
   const [dismissed, setDismissed] = useState(false); // explicit closing ( we cant guess it from input text alone)
   const showPanel = trimmed.length > 0 && !dismissed;
 
   // Fermeture au clic extérieur.
-  // depending on the panel type, the event is different
   const dismissEvent = panel === 'inline' ? 'click' : 'pointerdown';
 
   useEffect(() => {

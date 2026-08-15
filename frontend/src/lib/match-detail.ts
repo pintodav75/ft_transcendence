@@ -8,10 +8,10 @@ import { EM_DASH } from '@/lib/utils';
 import type { paths } from '@/lib/api-types.gen';
 
 /**
- * Everything that describes ONE match — `GET /matches/{id}` (B16).
+ * Everything that describes ONE match — `GET /matches/{id}`.
  *
- * ⚠️ `formatMatchDate` and `formatEloDelta` live here since FT-4A (rule of the second use):
- * written by FT-2A inside `lib/team-detail.ts`, they format a MATCH, not a team, and the
+ * `formatMatchDate` and `formatEloDelta` live here by the rule of the second use:
+ * they lived inside `lib/team-detail.ts`, but they format a MATCH, not a team, and the
  * match sheet is their second reader. Nothing was rewritten, only the file they live in —
  * `team-detail.ts` now reads them from this module, exactly as it already reads
  * `retryServerErrorsOnly` from `lib/ladders.ts`.
@@ -23,10 +23,10 @@ export type MatchSheet = MatchDetailResponse['match'];
 export type MatchSide = MatchDetailResponse['sides'][number];
 export type MatchSidePlayer = MatchSide['players'][number];
 
-// Mirrors the backend param schema (`z.uuid()` in routes/matches.ts): an id that cannot be
-// a uuid can only ever come back as a 400, so the page renders its error state without
-// spending a request — and without the red "Failed to load resource" line that request
-// would leave in the console. Same shape as `isValidTeamId`/`isValidLadderId`, deliberately.
+// Mirrors the backend param schema (`z.uuid()` in routes/matches.ts): an id that cannot be a
+// uuid can only ever come back as a 400, so the page renders its error state without spending a
+// request — and without the red "Failed to load resource" line that request would leave in the
+// console.
 const matchIdSchema = z.uuid();
 
 export function isValidMatchId(matchId: string) {
@@ -47,17 +47,8 @@ export function useMatch(matchId: string, enabled: boolean) {
 // ---------------------------------------------------------------- sides
 
 /**
- * The strict minimum needed to NAME a camp, described structurally rather than by one API
- * type — same discipline as `MatchStatusSource` in `components/matches/match-status.ts`.
- *
- * ⚠️ TWO SEPARATE TYPES, not one that carries every field. `sideName` never reads a logo and
- * `sideAvatarUrl` never reads a pseudo: a type must promise no more than the function uses, or
- * a payload that legitimately lacks the extra field becomes unassignable for nothing.
- *
- * 🔑 WIDENED BY [F-DISPUTE], and that is the whole point: `GET /disputes/{id}` serves a side
- * that is a strict SUBSET of `GET /matches/{id}`'s (no score, no Elo, no `submittedAt`), so the
- * dispute file reads THESE functions instead of restating the "no team ≠ 1v1" rule — the rule
- * that has already been got wrong twice (FT-4A, F-SOLO). Nothing here changed behaviour.
+ * The strict minimum needed to NAME a camp, described structurally rather than by one API type
+ * — same discipline as `MatchStatusSource` in `components/matches/match-status.ts`.
  */
 export type NamedSide = {
   team: { name: string } | null;
@@ -72,20 +63,6 @@ export type PicturedSide = {
 /**
  * Is this the 1v1 shape — the one where the PLAYER is the camp, so the sheet swaps the team
  * block for his avatar and pseudo?
- *
- * 🚨 Read from the LADDER'S FORMAT, never from `side.team === null` alone. `match_sides.team_id`
- * is `onDelete: 'set null'`, and `DELETE /teams/:id` only refuses a team engaged in a LIVE
- * match: a team whose matches are all `completed` CAN be dissolved, and its side then survives
- * with `team: null` on a 5v5 sheet that any authenticated account may read (B15 relaxed the
- * guard on a completed match). Reading that as "solo" renamed the camp after its first player,
- * linked to his profile, and DROPPED the five-player line-up — on the page whose whole point is
- * to show it. `format` is a closed enum in `openapi.yaml`, so the codegen hands us a literal
- * union: it is a contract, not a label.
- *
- * ⚠️ The parameter is STRUCTURAL since [F-DISPUTE] (`GET /disputes/{id}` serves its own `match`
- * block, deliberately, because `GET /matches/{id}` answers 403 to an admin on a `disputed`
- * match). `format` stays typed as `string` here on purpose: both payloads narrow it to the same
- * closed union, and demanding that union would buy nothing this comparison does not already do.
  */
 export function isSoloMatch(match: { ladder: { format: string } }) {
   return match.ladder.format === '1v1';
@@ -119,23 +96,12 @@ export function formatSideScore(side: MatchSide) {
   return side.score === null ? EM_DASH : String(side.score);
 }
 
-/**
- * The side that has already reported a result, while the other has not. Only ever one on an
- * `awaiting_confirmation` match — the second submission closes the match or opens a dispute.
- */
+/** The side that has already reported a result, while the other has not. */
 export function submittedSide(sides: MatchSide[]) {
   return sides.find((side) => side.submittedAt !== null);
 }
 
-/**
- * Did an admin settle this match instead of the two sides agreeing?
- *
- * ⚠️ DERIVED, because `GET /matches/{id}` cannot say it outright: it drops `disputeId` as
- * soon as the match leaves `disputed`. But an arbitration leaves a signature — a winner IS
- * set while BOTH final scores stay `null`, since an admin rules on a winner, not on a score
- * (`completeMatchWithElo(…, null, null)` in `routes/disputes.ts`). A normal closure always
- * writes the two scores.
- */
+/** Did an admin settle this match instead of the two sides agreeing? */
 export function settledByAdmin(match: MatchSheet, sides: MatchSide[]) {
   return (
     match.status === 'completed' &&
@@ -145,12 +111,9 @@ export function settledByAdmin(match: MatchSheet, sides: MatchSide[]) {
   );
 }
 
-// ---------------------------------------------------------------- reporting (FT-4B)
+// ---------------------------------------------------------------- reporting
 
-/**
- * The two statuses `POST /matches/{id}/result` accepts. Anything else answers 409, so the
- * screen must not offer a button — a red console line is a project-rejection criterion.
- */
+/** The two statuses `POST /matches/{id}/result` accepts. */
 const REPORTABLE_STATUSES = ['in_progress', 'awaiting_confirmation'];
 
 /** Why the viewer is NOT offered the result form. `null` = he may report right now. */
@@ -170,31 +133,7 @@ export type ReportEligibility = {
   blocker: ReportBlocker | null;
 };
 
-/**
- * May this viewer report a result on this match, and if not, why not?
- *
- * Mirror of the three guards `POST /matches/{id}/result` applies, in the SAME order the
- * backend applies them (who → status → time), so the reason we show can never contradict
- * the reason the server would give.
- *
- * 🚨 THE POINT OF THIS FUNCTION IS THE NEGATIVE. Every combination it refuses must render
- * NO button at all: a button whose request is guaranteed to fail writes a red line in the
- * Chrome console, and a dirty console is a rejection criterion for the whole project — not
- * a rough edge.
- *
- * 🔑 « This camp has no team » does NOT mean 1v1. `match_sides.team_id` is `set null` and a
- * team whose matches are all completed CAN be dissolved, so a 5v5 camp survives with
- * `team: null`. The LADDER'S FORMAT is the only authority (`isSoloMatch`) — reading the
- * missing team as "solo" is what renamed a camp after its first player in FT-4A. The
- * consequence here is a deliberate, conservative divergence from the backend: on a teamless
- * side of a TEAM ladder the server would fall back on "any aligned player", we offer
- * nothing. That state only exists on matches that are already `completed`, which are not
- * reportable anyway.
- *
- * @param meId `useAuthStore(state => state.user?.id)` — `undefined` while the session boots.
- * @param nowMs a FRESH clock, not one frozen at mount: this decides whether an action is
- * offered, so a stale `now` would hide the form for as long as the tab stays open.
- */
+/** May this viewer report a result on this match, and if not, why not? */
 export function canReportResult(
   match: MatchSheet,
   sides: MatchSide[],
@@ -205,8 +144,8 @@ export function canReportResult(
   const mySide =
     (meId
       ? sides.find((side) =>
-          // In 1v1 the PLAYER is the camp (the lineup holds exactly one name); from 2v2 up
-          // only the captain speaks for his team. Same split as the backend.
+          // In 1v1 the PLAYER is the camp (the lineup holds exactly one name); from 2v2 up only
+          // the captain speaks for his team. Same split as the backend.
           solo ? side.players.some((player) => player.id === meId) : side.team?.captainId === meId,
         )
       : undefined) ?? null;
@@ -221,8 +160,8 @@ export function canReportResult(
     return { mySide, opponent, blocker: 'wrong_status' };
   }
 
-  // `msUntil` returns `null` on a missing/unparsable instant — treated as "not started",
-  // the only safe reading: the server refuses to score a match with no `scheduled_at`.
+  // `msUntil` returns `null` on a missing/unparsable instant — treated as "not started", the
+  // only safe reading: the server refuses to score a match with no `scheduled_at`.
   const kickoffIn = msUntil(match.scheduledAt, nowMs);
   if (kickoffIn === null || kickoffIn > 0) {
     return { mySide, opponent, blocker: 'not_started' };
@@ -233,12 +172,7 @@ export function canReportResult(
 
 // ---------------------------------------------------------------- deadlines
 
-/**
- * How long the other side has to confirm or contest before the job closes the match on its
- * own. Mirror of `CONFIRM_TIMEOUT_MS` in `backend/src/jobs/index.ts` — duplicated on purpose,
- * for the same reason as `MIN_LEAD_MINUTES` in `lib/match-slots.ts`: the screen cannot
- * announce a deadline it does not know. The server stays the authority.
- */
+/** How long the other side has to confirm or contest before the job closes the match on its own. */
 export const CONFIRMATION_WINDOW_HOURS = 24;
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -246,10 +180,6 @@ const HOUR_MS = 60 * 60 * 1000;
 /**
  * Milliseconds from `nowMs` to an ISO instant — negative once it is past, `null` when the
  * instant is absent or unparsable.
- *
- * ⚠️ `scheduledAt`/`submittedAt`/`completedAt` are ISO **strings** that can be `null`, never
- * `Date` objects — and `new Date(null)` silently yields 1970 instead of failing, which is
- * exactly what this guard exists for.
  */
 export function msUntil(iso: string | null, nowMs: number): number | null {
   if (!iso) return null;
@@ -270,11 +200,7 @@ export function confirmationMsLeft(side: MatchSide | undefined, nowMs: number) {
   return submitted + CONFIRMATION_WINDOW_HOURS * HOUR_MS - nowMs;
 }
 
-/**
- * A rough, human duration: "3 days", "5 h 20 min", "12 min". Deliberately coarse — this
- * sheet answers "roughly when", and a seconds-accurate countdown would need a timer whose
- * only product is a repaint per second.
- */
+/** A rough, human duration: "3 days", "5 h 20 min", "12 min". */
 export function formatDuration(ms: number) {
   const total = Math.max(0, Math.round(ms / 60_000));
   if (total < 1) return 'less than a minute';
@@ -290,11 +216,8 @@ export function formatDuration(ms: number) {
 
 // ---------------------------------------------------------------- formatting
 
-// Built once at module scope: an Intl formatter is expensive to create and these options
-// never change.
-// 🔑 `en-GB`, ET PAS `en-US` — voir le docblock de `slotDayFormat` dans `lib/match-slots.ts` :
-// noms anglais, mais ordre jour-mois et horloge 24 h conservés. Locale FIGÉE, jamais celle du
-// navigateur.
+// Built once at module scope: an Intl formatter is expensive to create and these options never
+// change.
 const shortDateFormat = new Intl.DateTimeFormat('en-GB', {
   day: '2-digit',
   month: 'short',
@@ -311,9 +234,8 @@ const longDateFormat = new Intl.DateTimeFormat('en-GB', {
 });
 
 /**
- * `scheduledAt` / `completedAt` are ISO **strings** that can be `null` — and
- * `new Date(null)` silently yields 1970 instead of failing, so the null check is the
- * whole point of this helper.
+ * `scheduledAt` / `completedAt` are ISO **strings** that can be `null` — and `new Date(null)`
+ * silently yields 1970 instead of failing, so the null check is the whole point of this helper.
  */
 export function formatMatchDate(iso: string | null, style: 'short' | 'long' = 'short') {
   if (!iso) return EM_DASH;

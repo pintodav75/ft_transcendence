@@ -544,3 +544,12 @@ Premier des 4 blocs de la section 9 du README. **Choix de forme, à réutiliser 
 
 Une bonne partie de la séance est partie dans un `docker` injoignable depuis WSL alors que Docker
 Desktop tournait. Cause : l'interrupteur **WSL Integration** était éteint pour la distribution.
+
+## 15 août 2026 — `simplify-match` : dégraissage des commentaires du front
+
+`e9bc0c2` — **204 fichiers, +2 017 / −7 435**, dont **171 en commentaires seuls** (code identique,
+vérifié en comparant les deux versions commentaires retirés). Les 33 autres simplifient
+`/matchmaking` et ses composants. `tsc -b --noEmit` vert, **rien repassé à l'écran ni à la console**.
+🚨 **Renverse la ligne de `[FIX-LANDING-RAIL]`** (« le commentaire EST la documentation ») : un
+commentaire garde la règle et le pointeur, l'histoire va dans `docs/`. → `CLAUDE.md`, Conventions →
+**Commentaires**. Branche **pas encore mergée** sur `master`.

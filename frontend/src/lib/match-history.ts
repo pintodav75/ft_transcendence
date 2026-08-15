@@ -1,21 +1,15 @@
 import { EM_DASH } from '@/lib/utils';
 
 /**
- * Derivations over a LIST OF MATCH ROWS — "what is my recent form", "which slot is still
- * waiting for an opponent", "how many disputes are open", "how do I print this score".
+ * Derivations over a list of match rows: recent form, which slot is still waiting for an
+ * opponent, how many disputes are open, how to print a score.
+ * Shared by the team history and the solo history.
  *
- * ⚠️ Written by FT-2A/FT-2C inside `lib/team-detail.ts`, whose only reader was a team's
- * history. [F-SOLO] is the second one: `GET /matches/me` was aligned on the very same payload
- * by B-SOLO, and the solo page asks the exact same four questions of it. They MOVED here
- * (rule of two), with no logic rewritten — only the file they live in and the shape of their
- * inputs, which is now STRUCTURAL.
- *
- * 🔑 WHY THE INPUTS ARE STRUCTURAL, AND WHY `opponent` IS TYPED `object | null`. The two
- * routes describe an opponent differently: `GET /teams/{id}/matches` serves a bare
- * `{ id, name, logoUrl }` (a team, always), `GET /matches/me` serves a union discriminated by
- * `type` (a user in 1v1, a team from 2v2 up). Nothing here reads INSIDE that object — these
- * functions only ever ask "is there an opponent at all?" — so the widest honest type is the
- * right one. Naming either concrete shape would force the other caller to lie.
+ * inputs are structural, and `opponent` is typed `object | null` on purpose: the two routes
+ * describe an opponent differently (GET /teams/{id}/matches serves a plain team, GET
+ * /matches/me a union discriminated by `type`). nothing here reads inside that object, it only
+ * asks "is there an opponent at all", so naming either concrete shape would force the other
+ * caller to lie.
  */
 
 // ------------------------------------------------------------------ recent form
@@ -29,11 +23,7 @@ export type FormMatch = {
   disputeStatus?: 'open' | 'resolved' | null;
 };
 
-/**
- * Last results, most recent first — the history is already sorted by `scheduledAt`
- * DESC. Matches without an outcome (open slot, in progress) are skipped; a match an
- * admin still has to settle counts as an unknown, not as a loss.
- */
+/** Last results, most recent first — the history is already sorted by `scheduledAt` DESC. */
 export function recentForm(matches: FormMatch[], limit = 5) {
   const form: { id: string; result: FormResult }[] = [];
 
@@ -50,8 +40,8 @@ export function recentForm(matches: FormMatch[], limit = 5) {
 // ------------------------------------------------------------------- open slots
 
 /**
- * What "is this an open slot?" reads. See the module docblock for why `opponent` is
- * `object | null` rather than either route's concrete shape.
+ * What "is this an open slot?" reads. See the module docblock for why `opponent` is `object |
+ * null` rather than either route's concrete shape.
  */
 export type SlotMatch = {
   status: string;
@@ -64,17 +54,7 @@ export function isCancellableSlot(match: Pick<SlotMatch, 'status' | 'opponent'>)
   return match.status === 'pending' && match.opponent === null;
 }
 
-/**
- * The soonest slot still waiting for an opponent.
- *
- * Generic so the caller gets ITS OWN row type back — the team page needs a `TeamMatch` (to
- * read its line-up) and the solo page a `SoloMatch`, and widening the return to `SlotMatch`
- * would strip both.
- *
- * ⚠️ Members only in practice on a team ladder: the backend strips opponent-less matches from
- * a non-member's history. On a solo ladder the question does not arise — `GET /matches/me`
- * only ever returns my own matches.
- */
+/** The soonest slot still waiting for an opponent. */
 export function nextOpenSlot<M extends SlotMatch>(matches: M[]): M | undefined {
   return matches
     .filter(isCancellableSlot)
@@ -91,18 +71,7 @@ export function openDisputeCount(matches: { disputeStatus?: 'open' | 'resolved' 
 
 // ------------------------------------------------------------------- opponent
 
-/**
- * How to render the other side of a match row.
- *
- * `kind: 'gone'` is the one that needs saying out loud: an absent opponent has several causes
- * and only some of them mean "nobody yet". A team that was dissolved, or a player who deleted
- * his account, really did play — printing an em dash there erases him in silence.
- *
- * ⚠️ Lives HERE and not in `lib/solo.ts`, where [F-SOLO] first wrote it: the type describes
- * ANY history's opponent cell (`MatchRow` renders it for a team page too), so hosting it in a
- * solo module made `components/matches/` depend on `lib/solo` — a dependency pointing the
- * wrong way. The MAPPER stays in `lib/solo.ts`: it is tied to the `GET /matches/me` payload.
- */
+/** How to render the other side of a match row. */
 export type MatchOpponentView =
   | { kind: 'team'; id: string; name: string }
   | { kind: 'user'; pseudo: string; name: string }

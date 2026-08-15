@@ -21,9 +21,9 @@ import { cn } from '@/lib/utils';
 import type { CreateTeamFormValues } from '@/lib/create-team-schema';
 import type { TeamDetail } from '@/lib/team-detail';
 
-// The SAME name rule as team creation, taken from the creation schema instead of
-// restated: two copies of "1 to 50, trimmed" would drift the day the backend bound
-// moves, and the mismatch would only show up as a 400 in production.
+// The SAME name rule as team creation, taken from the creation schema instead of restated: two
+// copies of "1 to 50, trimmed" would drift the day the backend bound moves, and the mismatch
+// would only show up as a 400 in production.
 const renameSchema = createTeamSchema.pick({ name: true });
 type RenameValues = Pick<CreateTeamFormValues, 'name'>;
 
@@ -40,12 +40,12 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const rename = useUpdateTeam(team.id);
-  // A SECOND instance of the same hook on purpose: rename and "remove logo" both go
-  // through PATCH /teams/{id}, but sharing one mutation would make the logo's failure
-  // land under the name field (and vice versa).
+  // A SECOND instance of the same hook on purpose: rename and "remove logo" both go through
+  // PATCH /teams/{id}, but sharing one mutation would make the logo's failure land under the
+  // name field (and vice versa).
   const clearLogo = useUpdateTeam(team.id);
-  // `setUploadProgress` is handed to the hook, which forwards it to uploadFile's XHR —
-  // that is the only source of a real upload percentage (fetch has no such event).
+  // `setUploadProgress` is handed to the hook, which forwards it to uploadFile's XHR — that is
+  // the only source of a real upload percentage (fetch has no such event).
   const uploadLogo = useUploadTeamLogo(team.id, setUploadProgress);
 
   const {
@@ -66,8 +66,8 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
   // `useWatch` rather than the form's `watch()`: the latter is flagged by
   // react-hooks/incompatible-library (it breaks the compiler's memoization).
   const name = useWatch({ control, name: 'name' });
-  // PATCH with an unchanged body is a pointless round trip, and an EMPTY body is a 400 —
-  // so the button is disabled until the name really differs.
+  // PATCH with an unchanged body is a pointless round trip, and an EMPTY body is a 400 — so the
+  // button is disabled until the name really differs.
   const unchanged = name.trim() === team.name;
   const nameError = errors.name?.message;
 
@@ -76,12 +76,12 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
 
     try {
       await rename.mutateAsync({ name: values.name.trim() });
-      // Re-baselines the form on the value the server now holds, so the Save button goes
-      // back to "nothing to save" instead of staying enabled against a stale default.
+      // Re-baselines the form on the value the server now holds, so the Save button goes back
+      // to "nothing to save" instead of staying enabled against a stale default.
       reset({ name: values.name.trim() });
     } catch (error) {
-      // 409 = name already taken on this ladder, and it belongs UNDER the field. Anything
-      // else is form-level. The mapping lives in team-mutations, not here.
+      // 409 = name already taken on this ladder, and it belongs UNDER the field. Anything else
+      // is form-level. The mapping lives in team-mutations, not here.
       const { field, message } = updateTeamErrorMessage(error);
       setError(field ?? 'root.server', { type: 'server', message });
     }
@@ -89,17 +89,17 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
 
   function handleLogoPicked(file: File | null) {
     setLogoFile(file);
-    // ImagePicker also calls onChange(null) from its own "Remove" button — that only
-    // drops the local pick, it must not touch the team.
+    // ImagePicker also calls onChange(null) from its own "Remove" button — that only drops the
+    // local pick, it must not touch the team.
     if (!file) return;
 
     clearLogo.reset();
-    // 0 rather than null: ImagePicker renders its progress bar (and disables itself) as
-    // soon as `progress` is a number, so the bar exists from the very first byte.
+    // 0 rather than null: ImagePicker renders its progress bar (and disables itself) as soon as
+    // `progress` is a number, so the bar exists from the very first byte.
     setUploadProgress(0);
     uploadLogo.mutate(file, {
-      // The uploaded logo is now the team's logo, served from /media: the local blob
-      // preview has nothing left to show.
+      // The uploaded logo is now the team's logo, served from /media: the local blob preview
+      // has nothing left to show.
       onSuccess: () => setLogoFile(null),
       onSettled: () => setUploadProgress(null),
     });
@@ -112,12 +112,6 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
     <section className="flex flex-col gap-3.5">
       <SectionTitle>Identity</SectionTitle>
 
-      {/* Nom et logo côte à côte : ce sont les deux SEULS champs modifiables d'une
-          équipe, et empilés ils laissaient la moitié droite des 616 px de la colonne
-          centrale vide sur toute la hauteur. Une seule colonne sous `sm`, où deux
-          colonnes de ~150 px écraseraient à la fois le champ et le sélecteur d'image.
-          `min-w-0` sur les deux enfants : sans lui un enfant de grille prend sa taille
-          de contenu minimale et déborde au lieu de se contraindre. */}
       <div className="grid gap-x-6 gap-y-6 sm:grid-cols-2">
         <form onSubmit={submit} noValidate className="flex min-w-0 flex-col gap-2">
           <Label htmlFor={nameFieldId}>Team name</Label>
@@ -128,8 +122,7 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
             aria-describedby={nameError ? errorId : countId}
             {...register('name')}
           />
-          {/* No native `maxLength` (repo convention: Zod decides), so the counter is the
-              only thing that explains why a submission is about to be refused. */}
+
           <p
             id={countId}
             className={cn(
@@ -147,9 +140,6 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
             </p>
           ) : null}
 
-          {/* `mt-auto` colle le bouton au bas de la colonne : les deux colonnes ont des
-              hauteurs de contenu différentes, sans ça « Save name » flotte au milieu
-              face au bloc logo. */}
           <div className="mt-auto flex pt-1">
             <Button type="submit" disabled={unchanged || isSubmitting}>
               {isSubmitting ? 'Saving…' : 'Save name'}
@@ -160,9 +150,7 @@ export function TeamIdentity({ team }: TeamIdentityProps) {
         <div className="flex min-w-0 flex-col gap-2">
           <Label>Team logo</Label>
           <div className="flex flex-wrap items-center gap-3">
-            {/* Current logo, straight from the server. `logoUrl` is EITHER a relative
-                /media/… path (upload) OR an absolute https URL (typed in) — <img src>
-                accepts both, so nothing needs to normalise it. */}
+
             {logoFile ? null : (
               <Avatar
                 src={team.logoUrl ?? undefined}

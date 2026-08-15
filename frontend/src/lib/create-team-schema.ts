@@ -1,13 +1,13 @@
 import { z } from 'zod';
 
 // Miroir front de POST /teams (backend/src/routes/teams.ts) : mêmes bornes que
-// `createTeamSchema` côté serveur, qui reste la source de vérité — on valide ici
-// pour un retour instantané, pas pour remplacer la validation back.
+// `createTeamSchema` côté serveur, qui reste la source de vérité — on valide ici pour un retour
+// instantané, pas pour remplacer la validation back.
 export const NAME_MAX_LENGTH = 50;
 
 export const createTeamSchema = z.object({
-  // Piloté par LadderSelect (boutons, pas un <input>) : la seule règle qui
-  // compte côté client est "un ladder a été choisi".
+  // Piloté par LadderSelect (boutons, pas un <input>) : la seule règle qui compte côté client
+  // est "un ladder a été choisi".
   ladderId: z.string().min(1, 'Pick a ladder.'),
   name: z
     .string()

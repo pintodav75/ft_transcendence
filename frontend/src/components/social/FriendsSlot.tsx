@@ -24,36 +24,20 @@ import type { Friend } from '@/lib/friends';
 import type { Presence, PresenceStatus } from '@/lib/presence';
 
 type FriendsSlotProps = {
-  /**
-   * Under 1024 px the social panel is a full-screen `aria-modal` overlay ([FS-0]). Opening a
-   * player page from here without closing it would leave the visitor BEHIND that overlay, on
-   * a page they cannot reach — so every navigating link calls this, exactly like the panel's
-   * own "my profile" link already does. `undefined` on desktop, where the rail is permanent.
-   */
+  /** Under 1024 px the social panel is a full-screen `aria-modal` overlay. */
   onNavigate?: () => void;
   /**
    * Posts a sentence in the ONE live region of the rail, which `SocialPanel` owns and mounts
-   * (see the comment there). This slot deliberately has no `role="status"` of its own: the
-   * rail is on screen on every authenticated page, so a region per slot would compete with
-   * the page's own region and with the three slots still to come.
+   * (see the comment there).
    */
   announce: (text: string) => void;
-  /**
-   * Opens the conversation with that friend ([FS-3]). The panel owns "which conversation is
-   * open" — this slot only says WHO, because the Messages tab it switches to is a sibling
-   * that this slot cannot reach.
-   */
+  /** Opens the conversation with that friend. */
   onOpenConversation: (friend: Friend) => void;
 };
 
 /**
  * The "Friends" tab of the social rail: who my friends are, which of them are connected right
  * now, and the two relationship actions (remove, block).
- *
- * 🔑 TWO SOURCES, JOINED AT RENDER. The list itself is server data (TanStack Query, one HTTP
- * call) and presence is live client state (the realtime store fed by the single WebSocket of
- * [FS-0]). A friend connecting must NOT refetch the list — it only moves a row from one group
- * to the other, which is what `splitByPresence` does on the next render.
  */
 export function FriendsSlot({ onNavigate, announce, onOpenConversation }: FriendsSlotProps) {
   const { data, isPending, isError, refetch } = useFriends();
@@ -67,39 +51,19 @@ export function FriendsSlot({ onNavigate, announce, onOpenConversation }: Friend
   const block = useBlockUser();
 
   /**
-   * Landing point for the focus when a confirmed action destroys the row — and with it the
-   * "⋮" button that opened the dialog. Without it the browser has nothing to restore to and
-   * drops focus on `<body>`, sending a keyboard user back to the top of the page.
-   *
-   * It is the SLOT's heading and not a group's, because a group can vanish too: removing the
-   * only online friend takes the whole "Online" section with it.
-   *
-   * 🔑 AND THAT HEADING IS VISIBLE, which is the point. Parked on a `sr-only` title, focus
-   * came back from the dialog onto a node nobody can see: a sighted keyboard user just
-   * watched the focus ring VANISH with no idea where the next Tab would start. `SectionTitle`
-   * is the repo's idiom for exactly this — a visible `<h2>`, `tabIndex={-1}` so it never
-   * joins the tab order, and a `focus-ring` when script sends focus to it.
+   * Landing point for the focus when a confirmed action destroys the row — and with it the "⋮"
+   * button that opened the dialog.
    */
   const headingRef = useRef<HTMLHeadingElement>(null);
-  // Read ONCE for the whole list rather than per row: it names the page the player profile
-  // goes back to, and it is the same page for every row.
+  // Read ONCE for the whole list rather than per row: it names the page the player profile goes
+  // back to, and it is the same page for every row.
   const backFrom = useBackFrom();
 
   const friends = data?.friends ?? [];
 
   /**
-   * 🚨 FOCUS IS PARKED ON THE HEADING **BEFORE** THE DIALOG OPENS, and this is not
-   * belt-and-braces — without it the confirmation loses focus for good.
-   *
-   * `ConfirmDialog` remembers `document.activeElement` at `showModal()` time and, on close,
-   * only falls back to `returnFocusRef` when that element is GONE from the DOM. Here the
-   * element that was clicked is a menu item that the very same render unmounts, so by the
-   * time the effect runs the active element is already `<body>` — which is connected, always.
-   * The fallback would therefore never fire and the platform would "restore" focus to
-   * `<body>`, dropping a keyboard user at the top of the page.
-   *
-   * Parking focus on the slot's own heading first makes the opener a node that survives
-   * everything, so the platform restores it by itself — on cancel as well as on success.
+   * FOCUS IS PARKED ON THE HEADING **BEFORE** THE DIALOG OPENS, and this is not belt-and-braces
+   * — without it the confirmation loses focus for good.
    */
   function askToRemove(friend: Friend) {
     headingRef.current?.focus();
@@ -121,8 +85,8 @@ export function FriendsSlot({ onNavigate, announce, onOpenConversation }: Friend
     const friend = friendToRemove;
     if (!friend) return;
 
-    // 🚨 `friendshipId`, NOT `friend.id`: the relation, not the person. Both are strings, so
-    // the mix-up compiles perfectly and answers 404 forever.
+    // `friendshipId`, NOT `friend.id`: the relation, not the person. Both are strings, so the
+    // mix-up compiles perfectly and answers 404 forever.
     remove.mutate(friend.friendshipId, {
       onSuccess: () => {
         setFriendToRemove(null);
@@ -150,26 +114,11 @@ export function FriendsSlot({ onNavigate, announce, onOpenConversation }: Friend
     <div
       className="flex flex-col gap-3 p-3"
       onKeyDown={(event) => {
-        /**
-         * 🚨 WHILE A CONFIRMATION IS OPEN, KEYS STOP HERE. Under 1024 px this panel is a
-         * hand-rolled `aria-modal` overlay whose Escape *and* Tab handlers live on
-         * `document` (`MobileHeader`) — and its "a child dialog is open" guard looks for a
-         * `[role="dialog"]` ATTRIBUTE, which a native `<dialog>` does not carry. Left alone:
-         * Escape would close the confirmation AND the whole panel, and the overlay's own tab
-         * trap would fight the one the browser already gives a modal `<dialog>`, stranding
-         * focus on its last button.
-         *
-         * Nothing else in the slot can receive a key while the modal is up (the rest of the
-         * document is inert), so stopping here costs nothing and cannot mask a shortcut.
-         */
+        /** WHILE A CONFIRMATION IS OPEN, KEYS STOP HERE. */
         if (confirming) event.stopPropagation();
       }}
     >
-      {/* Names the tab ON SCREEN — the tab strip above is icon-only, so without this line
-          nothing written says which tab is open — and doubles as the focus landing point
-          when a confirmed action destroys the row that had focus (see `headingRef`). It is
-          rendered outside `FriendsContent` so it survives every state, including the empty
-          one an action can switch to. */}
+
       <SectionTitle headingRef={headingRef}>Friends</SectionTitle>
 
       <FriendsContent
@@ -211,8 +160,6 @@ export function FriendsSlot({ onNavigate, announce, onOpenConversation }: Friend
         returnFocusRef={headingRef}
       />
 
-      {/* A second instance rather than one dialog with swapped copy: same pattern as the team
-          page, and it keeps each dialog's text tied to the state that opens it. */}
       <ConfirmDialog
         open={friendToBlock !== null}
         title="Block this player?"
@@ -271,8 +218,7 @@ function FriendsContent({
   if (isPending) {
     return (
       <div className="flex flex-col gap-2">
-        {/* Three boxes the height of a real row, so the panel does not jump when the data
-            lands. `aria-hidden`: the sentence below is what a screen reader needs, not this. */}
+
         {[0, 1, 2].map((row) => (
           <div
             key={row}
@@ -311,28 +257,19 @@ function FriendsContent({
   const rowProps = { backFrom, onNavigate, onMessage, onRemove, onBlock };
 
   /**
-   * ⚠️ NO SNAPSHOT = NO SPLIT. The store drops `hasPresenceSnapshot` while the socket
-   * reconnects, and the ids it still holds are the ones from BEFORE the drop. Sorting them
-   * into "Online" and "Offline" would state, in the app's own voice, something the server has
-   * not confirmed — and the honest half of that lie (everyone offline) is the one users would
-   * act on. So the list stays whole, unordered by presence.
-   *
-   * What CHANGES between the two cases is only what we say about it: a first connection is
-   * still in progress (nothing to report), a lost one is a real limitation of the screen.
+   * NO SNAPSHOT = NO SPLIT. The store drops `hasPresenceSnapshot` while the socket reconnects,
+   * and the ids it still holds are the ones from BEFORE the drop.
    */
   if (presenceStatus !== 'ready') {
     return (
       <div className="flex flex-col gap-2">
         {presenceStatus === 'waiting' ? (
           // Deliberately NOT a Callout: this is the normal first second of the page, not a
-          // warning to frame in a box. Same muted one-liner as the loading state above, so
-          // the two reads as one continuous "still coming" rather than as an incident.
+          // warning to frame in a box.
           <p className="text-xs text-text-muted">Checking who is online…</p>
         ) : (
-          // True for both cases that get here — a connection that dropped and is retrying,
-          // and one that was refused and will not come back. "Reconnecting…" would be a guess
-          // on the second. No `role`: this is a state of the screen, not the result of an
-          // action, and the rail already owns exactly one live region (`SocialPanel`).
+          // True for both cases that get here — a connection that dropped and is retrying, and
+          // one that was refused and will not come back.
           <Callout tone="muted" className="px-3 py-2 text-xs">
             Who is online is not available right now.
           </Callout>
@@ -351,8 +288,7 @@ function FriendsContent({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* The online group is rendered EVEN WHEN EMPTY: "who can I play with right now" is the
-          question this tab is opened for, and an absent section answers it only by implication. */}
+
       <FriendGroup
         title={`Online — ${online.length}`}
         listLabel="Friends online"
@@ -361,8 +297,7 @@ function FriendsContent({
         emptyText="Nobody is online right now."
         {...rowProps}
       />
-      {/* The offline group, on the other hand, disappears when it is empty: everyone is
-          already listed above, so an empty "Offline" line would be pure noise. */}
+
       <FriendGroup
         title={`Offline — ${offline.length}`}
         listLabel="Friends offline"
@@ -437,19 +372,7 @@ type FriendRowProps = {
   onBlock: (friend: Friend) => void;
 };
 
-/**
- * One friend: a link to their profile, plus the two actions.
- *
- * 🔑 THE LINE ITSELF IS `PersonRow`, shared with [FS-5]'s three lists. It is what carries the
- * "the row is not entirely clickable" rule (an interactive element nested inside an `<a>` is
- * invalid HTML that browsers repair by splitting the DOM) and the double `min-w-0` that keeps a
- * long pseudo from pushing the buttons out of the 312 px rail. What stays here is the only part
- * that knows about friendship: WHICH controls the row carries.
- *
- * The presence dot is drawn only when presence is actually KNOWN, and it is never spoken: the
- * list this row belongs to is already named "Friends online" / "Friends offline", so a screen
- * reader is told once, on entering the list, instead of on every single row.
- */
+/** One friend: a link to their profile, plus the two actions. */
 function FriendRow({
   friend,
   presence,
@@ -467,10 +390,7 @@ function FriendRow({
       onNavigate={onNavigate}
       actions={
         <>
-          {/* Chatting is what this rail is FOR, so it gets its own control instead of hiding
-              one click deep in the "⋮" menu. Named after the row for the same reason the menu
-              is: a column of identical "Send a message" buttons says nothing about which one
-              is which. */}
+
           <IconButton
             size="sm"
             aria-label={`Send a message to @${friend.pseudo}`}

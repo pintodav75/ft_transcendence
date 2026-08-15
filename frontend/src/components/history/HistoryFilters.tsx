@@ -13,9 +13,8 @@ type HistoryFiltersProps = {
   formats: MatchFormat[];
   results: ('win' | 'loss')[];
   /**
-   * `typed` marks a change that came from the text box, one keystroke at a time — the page
-   * uses it to hold its screen-reader announcement until the typing pauses. Every other
-   * control is one deliberate act and leaves it `false`.
+   * `typed` marks a change that came from the text box, one keystroke at a time — the page uses
+   * it to hold its screen-reader announcement until the typing pauses.
    */
   onChange: (filters: HistoryFilterState, typed?: boolean) => void;
 };
@@ -41,7 +40,7 @@ export function HistoryFilters({
 
       <div className="flex min-w-48 flex-1 basis-full flex-col gap-2 sm:basis-64">
         <Label htmlFor={searchFieldId}>Opponent</Label>
-        {/*`type="search"` for the platform's own clear button (⌫ on iOS, ✕ in Chrome) */}
+        {/*`type="search"` for the platform's own clear button (⌫ on iOS, in Chrome) */}
         <Input
           id={searchFieldId}
           type="search"
@@ -75,8 +74,8 @@ export function HistoryFilters({
         <Select
           id={formatFieldId}
           value={filters.format ?? ''}
-          // Matched AGAINST the options we rendered rather than cast: `event.target.value` is
-          // a plain string, and asserting it into a closed union is how a value nobody offers
+          // Matched AGAINST the options we rendered rather than cast: `event.target.value` is a
+          // plain string, and asserting it into a closed union is how a value nobody offers
           // ends up in the state.
           onChange={(event) =>
             onChange({
@@ -115,8 +114,6 @@ export function HistoryFilters({
         </Select>
       </div>
 
-      {/* A real <label> wrapping a real checkbox: the whole sentence is the click target and
-          the accessible name, with no ARIA and no JS. */}
       <label className="flex min-h-12 cursor-pointer items-center gap-2.5">
         <input
           type="checkbox"

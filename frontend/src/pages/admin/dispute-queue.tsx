@@ -23,16 +23,11 @@ function evidenceText(count: number) {
   return count === 1 ? '1 piece of evidence' : `${count} pieces of evidence`;
 }
 
-/**
- * One camp: its logo (or the player's avatar in 1v1) and its name.
- *
- * `alt=""` on the picture is deliberate — the name sits right beside it, and a described image
- * would make a screen reader say the camp twice.
- */
+/** One camp: its logo (or the player's avatar in 1v1) and its name. */
 function Camp({ side, solo }: { side: DisputeQueueSide | undefined; solo: boolean }) {
   if (!side) {
-    // The contract types `sides` as a list, so "fewer than two" is representable even though the
-    // domain never produces it. Degrading to a readable dash beats crashing the whole queue.
+    // The contract types `sides` as a list, so "fewer than two" is representable even though
+    // the domain never produces it.
     return <span className="text-sm text-text-muted">—</span>;
   }
 
@@ -51,28 +46,14 @@ function Camp({ side, solo }: { side: DisputeQueueSide | undefined; solo: boolea
   );
 }
 
-/**
- * One file waiting on an arbiter.
- *
- * 🚨 `format` IS THE ONLY AUTHORITY FOR "1v1". A `team: null` does NOT mean solo —
- * `match_sides.team_id` is `set null`, so a dissolved team leaves its camp teamless on a 5v5
- * file. Reading the missing team as "solo" is the bug this repo has already shipped twice
- * (FT-4A, F-SOLO); `isSoloMatch` is the shared rule and it reads the LADDER'S format.
- *
- * ⚠️ NO `ariaLabel` ON THE LINK, AND THAT IS A CHOICE. An `aria-label` REPLACES the content of a
- * link, so anyone browsing by links would hear only what we remembered to put in it — the defect
- * review caught on `/home` (H9). Here the natural concatenation of the children already reads as
- * a full sentence ("Alpha vs Bravo, Counter-Strike 2, 5v5, 15 Aug 21:00, 2 pieces of evidence,
- * 6 h 12 min left"), and it cannot drift from the screen because it IS the screen.
- */
+/** One file waiting on an arbiter. */
 function QueueRow({ entry, nowMs }: { entry: DisputeQueueEntry; nowMs: number }) {
-  // The shared rule takes a match-shaped object; the queue serves the format flat. Adapting here
-  // rather than re-testing `=== '1v1'` locally is what keeps ONE definition of "this is solo".
+  // The shared rule takes a match-shaped object; the queue serves the format flat.
   const solo = isSoloMatch({ ladder: { format: entry.format } });
   const [home, away] = entry.sides;
   // Same rule as the team page, the match sheet and the dispute file: "Chess 1v1" next to
-  // "Chess · 1v1" says the same thing three times, so the ladder's own name is kept only when it
-  // adds something.
+  // "Chess · 1v1" says the same thing three times, so the ladder's own name is kept only when
+  // it adds something.
   const extraName = ladderSubtitle(entry.ladderName, entry.gameName, entry.format);
 
   const age = disputeAgeMs(entry, nowMs);
@@ -81,13 +62,12 @@ function QueueRow({ entry, nowMs }: { entry: DisputeQueueEntry; nowMs: number })
   return (
     <MatchLineLink
       target={{ kind: 'dispute', disputeId: entry.id }}
-      // Every row of this page is a dispute, so the accent is constant — but it is READ from the
-      // shared mapping rather than written as `border-l-arena-red`, so a row here keeps matching
-      // the same match everywhere else in the app.
+      // Every row of this page is a dispute, so the accent is constant — but it is READ from
+      // the shared mapping rather than written as `border-l-arena-red`, so a row here keeps
+      // matching the same match everywhere else in the app.
       accentClass={matchAccentClass('dispute')}
     >
-      {/* `basis-full` on both halves: the camps get their own line and the context its own,
-          whatever the width. `MatchLineLink` wraps, so nothing is clipped at 375 px. */}
+
       <span className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-1.5">
         <Camp side={home} solo={solo} />
         <span className="text-xs label-caps text-text-muted">vs</span>
@@ -101,11 +81,6 @@ function QueueRow({ entry, nowMs }: { entry: DisputeQueueEntry; nowMs: number })
         <span className="font-mono normal-case">{formatMatchDate(entry.scheduledAt)}</span>
         <span>{evidenceText(entry.evidenceCount)}</span>
 
-        {/* 🔑 L'INFORMATION QUI FAIT EXISTER CETTE PAGE. Un litige que personne ne tranche est
-            ANNULÉ au bout de 24 h : le match ne compte pour rien et aucun ELO ne bouge. Sans
-            l'échéance, la file n'est qu'une liste — l'arbitre ne peut pas voir lequel va expirer.
-            La durée porte son unité (`formatDuration`), donc « 6 h 12 min » ne se lit jamais
-            comme l'horaire « 6:12 » posé juste à côté (piège F-HOME). */}
         {left === null ? null : left > 0 ? (
           <span className="ms-auto font-bold text-text-primary">{formatDuration(left)} left</span>
         ) : (
@@ -127,44 +102,18 @@ function QueueRow({ entry, nowMs }: { entry: DisputeQueueEntry; nowMs: number })
 /**
  * `/admin/disputes` — the arbitration queue: every dispute still waiting on an admin, oldest
  * first.
- *
- * 🚨 IT IS A TAB OF ITS OWN, NEVER A SECTION OF `/home` (product decision, David). An admin is an
- * ordinary player too: he wants to live the app exactly like everyone else, with his arbiter's
- * work ON TOP. Folding that work into his player page is precisely what would break the
- * equivalence he asked to keep.
- *
- * 🚨 A NON-ADMIN NEVER SPENDS A REQUEST HERE. `GET /disputes` answers **403** to anyone else, and
- * a 403 writes a red line in the Chrome console — a project-rejection criterion, not a rough
- * edge. The screen below is rendered from the session alone, with `enabled: isAdmin` keeping the
- * query from ever firing. Same pattern the dispute file applies to a malformed id
- * (`isValidDisputeId`): when the refusal is CERTAIN, we render it instead of asking.
- *
- * ⚠️ THE ORDER IS THE SERVER'S. `GET /disputes` sorts by `createdAt` ascending — i.e. by how
- * close each file is to being cancelled — which is exactly the processing order. Nothing is
- * re-sorted here.
- *
- * ⚠️ ADMIN ACCOUNTS ARE MADE BY HAND IN THE DATABASE (`update users set is_admin = true`). There
- * is no promotion screen and there will not be one; nothing on this page implies otherwise.
  */
 export function DisputeQueue() {
   const isAdmin = useIsAdmin();
   const queueQuery = useDisputeQueue(isAdmin);
 
-  /**
-   * The instant the 24 h deadlines are measured against.
-   *
-   * Same pairing as the dispute file, `/matchmaking` and `/home`: a ticking clock so a tab left
-   * open keeps counting down, floored by `dataUpdatedAt` so a client clock running behind the
-   * server cannot drag the page backwards. Nothing here gates a BUTTON, so the direction costs
-   * nothing either way — but two screens showing the same deadline must compute it the same way.
-   */
+  /** The instant the 24 h deadlines are measured against. */
   const nowMs = Math.max(useSlotClock(), queueQuery.dataUpdatedAt);
 
   if (!isAdmin) {
     return (
       <div className="flex flex-col gap-6 py-6">
-        {/* Rendu SANS AUCUNE REQUÊTE : voir le docblock. Ce n'est pas une panne et ce n'est pas un
-            cul-de-sac — la page existe, elle ne concerne simplement pas ce compte. */}
+
         <ErrorPanel
           title="Reserved for admins"
           message="This is the arbitration queue: only the admins who settle disputes can open it. If one of your own matches is in dispute, it is on your history — open it from there to follow it and file your evidence."
@@ -207,9 +156,7 @@ export function DisputeQueue() {
             aria-hidden="true"
             className="h-32 animate-pulse rounded-card border border-border-subtle bg-surface-card"
           />
-          {/* THE live region of this branch — and the only one this page ever mounts. The loaded
-              branch has nothing to announce: its countdown ticks every 30 s, and reading that
-              aloud on every tick is the opposite of helpful. */}
+
           <p role="status" className="text-sm text-text-muted">
             Loading the arbitration queue…
           </p>
@@ -223,9 +170,8 @@ export function DisputeQueue() {
           </SectionTitle>
 
           {disputes.length === 0 ? (
-            // 🚨 `muted`, JAMAIS `danger` : « rien à arbitrer » est le cas NOMINAL d'une plateforme
-            // qui tourne bien, pas une panne. Le peindre en rouge apprendrait à l'arbitre à
-            // ignorer le rouge le jour où il compte vraiment.
+            // `muted`, JAMAIS `danger` : « rien à arbitrer » est le cas NOMINAL d'une
+            // plateforme qui tourne bien, pas une panne.
             <Callout tone="muted">
               No dispute is waiting on an arbiter right now. A file appears here as soon as two
               camps report different results for the same match.

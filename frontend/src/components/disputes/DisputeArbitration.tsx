@@ -28,7 +28,7 @@ import type { DisputeResolution, ResolveDisputeVariables } from '@/lib/dispute-m
 /**
  * The three outcomes the route accepts, as a closed list the screen can iterate.
  *
- * ⚠️ The ORDER is the one an arbiter thinks in — the two camps first, "I cannot separate them"
+ * The ORDER is the one an arbiter thinks in — the two camps first, "I cannot separate them"
  * last — and it happens to match the enum's own order, which keeps `side_0_wins` next to the
  * camp whose `sideIndex` is 0. Never reorder without re-reading that mapping.
  */
@@ -38,18 +38,7 @@ function isResolution(value: string): value is DisputeResolution {
   return (RESOLUTIONS as readonly string[]).includes(value);
 }
 
-/**
- * What the arbitration form holds.
- *
- * ⚠️ `resolution` IS A RAW STRING, exactly like `winnerSideId` in `matchResultSchema`: a radio
- * group only ever hands back a string, and `''` has to be able to mean "nothing picked yet"
- * rather than silently defaulting to an outcome. The enum is re-checked in `superRefine` and
- * narrowed by `isResolution` at submit — so the request body is typed without a single `as`.
- *
- * ⚠️ `notes` MIRRORS THE SERVER AND IS NOT STRICTER: the route trims it and caps it at
- * {@link RESOLUTION_NOTES_MAX}, and it is OPTIONAL. A ruling with no note is ordinary — the
- * verdict block already has a sentence for that case — so no `min(1)` here.
- */
+/** What the arbitration form holds. */
 const arbitrationSchema = z
   .object({
     resolution: z.string().min(1, 'Pick what happens to this match.'),
@@ -72,13 +61,7 @@ const arbitrationSchema = z
 
 type ArbitrationFormValues = z.infer<typeof arbitrationSchema>;
 
-/**
- * What the live region says when the file was settled while this tab sat open.
- *
- * ⚠️ ANNOUNCED, not merely displayed: the 409 triggers a refetch, the refetch turns the file
- * read-only, and this whole panel unmounts underneath the message. The page's live region is the
- * only thing left standing.
- */
+/** What the live region says when the file was settled while this tab sat open. */
 const SETTLED_ELSEWHERE_ANNOUNCEMENT =
   'This dispute has just been settled — by another admin, or by the 24-hour job. The file is now read-only.';
 
@@ -86,19 +69,9 @@ type DisputeArbitrationProps = {
   file: DisputeFile;
   /** Fresh clock from the page — the 24 h window must still be open. */
   nowMs: number;
-  /**
-   * Where focus goes once this panel disappears (it does, on every success): the page's `<h1>`.
-   * `<body>` is the wrong answer — a keyboard user is thrown back to the top of the document with
-   * nothing announced, the FX-FOCUS defect that already cost a ticket.
-   */
+  /** Where focus goes once this panel disappears (it does, on every success): the page's `<h1>`. */
   returnFocusRef: RefObject<HTMLElement | null>;
-  /**
-   * Hands the page the sentence to put in its ONE live region, AND lands the focus.
-   *
-   * 🚨 THE PAGE OWNS BOTH (invariant #11): `/disputes/$disputeId` already mounts a single
-   * `role="status"`, and a second live region would fight it for the reader — a `[role=status]`
-   * selector reads whichever it meets first. This panel never creates one.
-   */
+  /** Hands the page the sentence to put in its ONE live region, AND lands the focus. */
   onSettled: (announcement: string) => void;
 };
 
@@ -107,36 +80,11 @@ function campName(sides: DisputeSide[], sideIndex: 0 | 1, solo: boolean) {
   const side = sides.find((candidate) => candidate.sideIndex === sideIndex);
   if (side) return sideName(side, solo);
   // The contract types `sides` as a list, so "fewer than two" is representable even though a
-  // dispute cannot exist without both camps having reported. Naming the position beats printing
-  // `undefined` on the one control that decides a match.
+  // dispute cannot exist without both camps having reported.
   return sideIndex === 0 ? 'The first camp' : 'The second camp';
 }
 
-/**
- * The arbiter's controls — the ONLY exit from `disputed` other than the 24 h job. [F-ADMIN].
- *
- * 🚨 IT RENDERS NOTHING AT ALL to anyone who is not an admin, and nothing once the file is
- * settled. Same discipline as `EvidenceForm` and `MatchResultPanel`: a control whose request the
- * API is certain to refuse writes a red line in the Chrome console, and a dirty console is a
- * rejection criterion for the whole project.
- *
- * 🚨 IT DOES NOT TOUCH `DisputeVerdict`. Settling invalidates the file, the refetch flips that
- * component to its "Settled by an admin" state on its own, with the note attached — which is
- * exactly what it was written to do while waiting for this ticket.
- *
- * 🔑 THE WINDOW GUARD IS DELIBERATE AND IT COSTS SOMETHING, SO HERE IS WHY. Past the 24 h the
- * server still ACCEPTS a ruling until job C runs (tick: 60 s), and a ruling names a winner where
- * the job only ever cancels — so hiding the controls does remove an outcome that was reachable
- * for under a minute. It is hidden anyway, for the same reason `EvidenceForm` hides at the same
- * instant: the click is a coin toss against the job, and losing it is a 409, i.e. a red console
- * line. The muted notice SAYS why, so an arbiter does not read the missing form as a bug.
- *
- * ⚠️ THE `<dialog>` IS MOUNTED OUTSIDE `body()`, AT A STABLE POSITION. Success makes the button
- * that opened it disappear, and a `<dialog>` REMOVED from the DOM while open never runs its close
- * path — focus would land on `<body>` with nothing said. Same reason `MatchResultPanel` keeps
- * its own dialog at panel level, and why the only early `return null` below is on `isAdmin`,
- * which cannot change under the user.
- */
+/** The arbiter's controls — the ONLY exit from `disputed` other than the 24 h job. */
 export function DisputeArbitration({
   file,
   nowMs,
@@ -212,11 +160,8 @@ export function DisputeArbitration({
         );
       },
       /**
-       * ⚠️ The 409 ALONE closes the dialog. Everything else stays on screen and reads normally
-       * inside it. On a 409 the refetch makes `body()` render `null` — the opener disappears —
-       * but the dialog would stay open with its confirm button re-enabled at the end of
-       * `isPending`, and a second click would be a request the app KNOWS will be refused: another
-       * red line, on purpose.
+       * The 409 ALONE closes the dialog. Everything else stays on screen and reads normally
+       * inside it.
        */
       onError: (error) => {
         if (isDisputeSettledElsewhere(error)) {
@@ -255,9 +200,7 @@ export function DisputeArbitration({
       return (
         <section className="flex min-w-0 flex-col gap-3.5">
           <SectionTitle>Arbitration</SectionTitle>
-          {/* Deliberately NO control: the {DISPUTE_WINDOW_HOURS} h are up, so job C is about to
-              cancel this match and a ruling now is a coin toss against it. The notice says WHY,
-              so a missing form does not read as a rendering fault. */}
+
           <Callout tone="muted">
             The {DISPUTE_WINDOW_HOURS}-hour window has run out, so this dispute can no longer be
             settled by hand: the match is about to be cancelled automatically, and no Elo will be
@@ -288,8 +231,7 @@ export function DisputeArbitration({
             }
             className="flex min-w-0 flex-col gap-2 border-0 p-0"
           >
-            {/* A <legend>, not a <Label>: it names a GROUP of radios, not one control. The look
-                is shared through labelClasses() rather than by copying Label's class string. */}
+
             <legend className={labelClasses('mb-2')}>Outcome</legend>
 
             <div className="flex flex-col gap-2">
@@ -299,8 +241,8 @@ export function DisputeArbitration({
                     type="radio"
                     value={outcome.value}
                     // Marked on the CONTROLS, not just described on the group: without it a
-                    // screen reader reads the reason (through the fieldset) but never says which
-                    // control is refused.
+                    // screen reader reads the reason (through the fieldset) but never says
+                    // which control is refused.
                     aria-invalid={Boolean(resolutionError)}
                     disabled={resolve.isPending}
                     className="focus-ring size-4 shrink-0 accent-action-primary"
@@ -369,8 +311,8 @@ export function DisputeArbitration({
         }
         confirmLabel="Settle it"
         cancelLabel="Not yet"
-        // `danger`: it closes somebody else's match for good, and one of the three outcomes wipes
-        // the game off both records.
+        // `danger`: it closes somebody else's match for good, and one of the three outcomes
+        // wipes the game off both records.
         tone="danger"
         pending={resolve.isPending}
         error={resolve.isError ? resolveDisputeErrorMessage(resolve.error) : null}

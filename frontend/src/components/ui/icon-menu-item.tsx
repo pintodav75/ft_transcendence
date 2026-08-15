@@ -1,6 +1,5 @@
-// This is a button with only an icon, when you hover it, the LABEL is shown as tooltip.
-// This is used in the Right Navigation menu.
-// aria-label is for screen readers
+// This is a button with only an icon, when you hover it, the LABEL is shown as tooltip. This is
+// used in the Right Navigation menu.
 
 import type { ReactNode } from 'react';
 

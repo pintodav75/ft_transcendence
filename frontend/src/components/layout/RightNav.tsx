@@ -14,19 +14,19 @@ export function RightNav() {
           className="m-2 size-16 border border-border-strong shadow-[0_0_20px_-6px_var(--action-primary)]"
         />
         <IconMenuItem label="Match history">
-          <History className="size-6" />
+          <History aria-hidden="true" className="size-6" />
         </IconMenuItem>
         <IconMenuItem label="Notifications">
-          <Bell className="size-6" />
+          <Bell aria-hidden="true" className="size-6" />
         </IconMenuItem>
         <IconMenuItem label="Party">
-          <Users className="size-6" />
+          <Users aria-hidden="true" className="size-6" />
         </IconMenuItem>
       </div>
       <div className="flex flex-col items-center">
         {/* friends / chat */}
         <IconMenuItem label="Chat">
-          <MessagesSquare className="size-6" />
+          <MessagesSquare aria-hidden="true" className="size-6" />
         </IconMenuItem>
       </div>
     </div>

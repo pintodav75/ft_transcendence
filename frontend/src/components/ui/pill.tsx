@@ -4,10 +4,8 @@ import { cn } from '@/lib/utils';
 
 import type { ReactNode } from 'react';
 
-// NOTE: it's not only used for match results
-// an admin badge is tone="live", and "Friends" is tone="win"
-// open: blue
-// live: gold etc...
+// NOTE: it's not only used for match results an admin badge is tone="live", and "Friends" is
+// tone="win" open: blue live: gold etc...
 export type PillTone = 'open' | 'live' | 'dispute' | 'settled' | 'muted' | 'win' | 'loss';
 
 const toneClasses: Record<PillTone, string> = {

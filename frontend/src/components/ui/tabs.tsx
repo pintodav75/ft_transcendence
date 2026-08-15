@@ -21,14 +21,13 @@ type TabsProps = {
   variant?: 'default' | 'icon';
 };
 
-// Generic WAI-ARIA tab strip: it knows nothing of teams or matches, it renders whatever
-// `tabs` holds. Adding a tab is appending one entry — no change here (FT-2B does exactly
-// that for its captain-only "Manage" tab).
+// Generic WAI-ARIA tab strip: it knows nothing of teams or matches, it renders whatever `tabs`
+// holds.
 export function Tabs({ tabs, active, onSelect, idPrefix, label, variant = 'default' }: TabsProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Roving tabindex + arrow keys: the WAI-ARIA tabs pattern. Without it Tab would stop on
-  // every tab and the arrow keys would do nothing.
+  // Roving tabindex + arrow keys: the WAI-ARIA tabs pattern. Without it Tab would stop on every
+  // tab and the arrow keys would do nothing.
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const current = tabs.findIndex((tab) => tab.id === active);
     if (current === -1) return;
@@ -55,9 +54,8 @@ export function Tabs({ tabs, active, onSelect, idPrefix, label, variant = 'defau
         aria-label={label}
         onKeyDown={handleKeyDown}
         // No overflow-x-auto here: declaring a single axis forces the other one to `auto`
-        // instead of `visible`, so the buttons' `-mb-px` — the 1px they deliberately bite
-        // off the bottom hairline — was enough to raise a scrollbar. Three short tabs fit
-        // at 375px anyway (measured).
+        // instead of `visible`, so the buttons' `-mb-px` — the 1px they deliberately bite off
+        // the bottom hairline — was enough to raise a scrollbar.
         className="flex gap-1"
       >
         {tabs.map((tab) => {
@@ -109,11 +107,10 @@ export function Tabs({ tabs, active, onSelect, idPrefix, label, variant = 'defau
               tabIndex={selected ? 0 : -1}
               onClick={() => onSelect(tab.id)}
               className={cn(
-                // ⚠️ `px-3` SOUS 640 px, ET C'EST UNE EXIGENCE, PAS UN GOÛT : à 320 px — la largeur
-                // exacte que WCAG 1.4.10 impose de tenir sans défilement horizontal — les trois
-                // onglets en `px-4` dépassaient de 0,9 px et faisaient scroller la PAGE ENTIÈRE.
-                // On resserre plutôt que d'ajouter un `overflow-x-auto`, pour la raison expliquée
-                // sur le `role="tablist"` juste au-dessus.
+                // `px-3` SOUS 640 px, ET C'EST UNE EXIGENCE, PAS UN GOÛT : à 320 px — la
+                // largeur exacte que WCAG 1.4.10 impose de tenir sans défilement horizontal —
+                // les trois onglets en `px-4` dépassaient de 0,9 px et faisaient scroller la
+                // PAGE ENTIÈRE.
                 'focus-ring -mb-px border-b-2 px-3 py-3 text-xs label-caps transition sm:px-4',
                 selected
                   ? 'border-b-arena-red text-text-primary'

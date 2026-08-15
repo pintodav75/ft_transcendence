@@ -23,9 +23,7 @@ type MatchStateNoticeProps = {
   nowMs: number;
 };
 
-/**
- * What is happening RIGHT NOW, in one sentence
- */
+/** What is happening RIGHT NOW, in one sentence */
 export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps) {
   const kickoffIn = msUntil(match.scheduledAt, nowMs);
   const kickoff = formatMatchDate(match.scheduledAt, 'long');
@@ -80,8 +78,7 @@ export function MatchStateNotice({ match, sides, nowMs }: MatchStateNoticeProps)
         <strong className="text-text-primary">
           {reporter ? sideName(reporter, solo) : 'One side'} reported a result
         </strong>
-        {/* ⚠️ `reporter &&` first: without it, `undefined !== null` is TRUE and the sentence
-            would render an empty "( – )" when no side has reported. */}
+
         {reporter &&
           reporter.submittedScoreSelf !== null &&
           reporter.submittedScoreOpponent !== null && (

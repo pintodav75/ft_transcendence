@@ -15,21 +15,14 @@ import {
 import { useAuthStore } from '@/stores/auth-store';
 
 /**
- * Avatar section of /profile: pick a file, look at it big, then confirm or drop it.
+ * Avatar section of /profile: pick a file, see it big, confirm or drop it.
  *
- * 🔑 WHY THIS IS NOT `ui/image-picker.tsx` — the arbitration, so nobody has to redo it.
- * Sharing the COMPONENT would have meant switching off most of what it draws: its 56 px
- * thumbnail (this page shows the pick as a 160 px round avatar, the identity of the screen),
- * its round ⊕ trigger (this page names the action in words), and that trigger again while an
- * image waits behind Confirm/Cancel. Three presentation props to reuse a presentation is not
- * reuse — it is `EvidencePicker`'s conclusion, reached from the other side.
- *
- * WHAT IS GENUINELY SHARED IS SHARED, and that is the part that matters: the accepted types,
- * the 2 MB cap and the two refusal sentences live once in `lib/image-file.ts` and are used
- * by BOTH pickers, so the day the server raises the cap there is a single line to change.
- * The progress bar is `ui/progress-bar.tsx`, and the transfer that feeds it is `uploadFile`
- * (XHR — `fetch` has no upload-progress event). No class string of ImagePicker is reproduced
- * here: this control is a big round avatar over labelled buttons, not a thumbnail row.
+ * not ui/image-picker.tsx on purpose — reusing it would mean switching off most of what it
+ * draws (56 px thumbnail vs the 160 px round avatar this screen is built around, its round
+ * trigger vs named buttons). three presentation props to reuse a presentation isn't reuse.
+ * what IS shared is shared: accepted types, the 2 MB cap and the two refusal sentences live in
+ * lib/image-file.ts and serve both pickers. progress bar is ui/progress-bar.tsx, fed by
+ * uploadFile (XHR — fetch has no upload-progress event).
  */
 type AvatarUploaderProps = {
   /** The page's single live region — see the note in `pages/profile.tsx`. */
@@ -42,8 +35,8 @@ export function AvatarUploader({ announce }: AvatarUploaderProps) {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
-  // null = idle; a number (0-100) renders the bar. Set to 0 before the request leaves, so
-  // the bar exists from the very first byte rather than from the first progress event.
+  // null = idle; a number (0-100) renders the bar. Set to 0 before the request leaves, so the
+  // bar exists from the very first byte rather than from the first progress event.
   const [progress, setProgress] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +45,8 @@ export function AvatarUploader({ announce }: AvatarUploaderProps) {
   // button that opened it, so the browser would otherwise drop focus on <body>.
   const blockRef = useRef<HTMLDivElement>(null);
 
-  // Derived at render rather than mirrored into state via an effect; the effect below only
-  // does what has no render-time equivalent — releasing the previous URL.
+  // Derived at render rather than mirrored into state via an effect; the effect below only does
+  // what has no render-time equivalent — releasing the previous URL.
   const previewUrl = useMemo(
     () => (pickedFile ? URL.createObjectURL(pickedFile) : null),
     [pickedFile],
@@ -74,9 +67,9 @@ export function AvatarUploader({ announce }: AvatarUploaderProps) {
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
-    // Reset the raw input value whatever happens: without it, picking the exact same file
-    // twice in a row does not fire `change` the second time, so re-picking after a Cancel
-    // would silently do nothing.
+    // Reset the raw input value whatever happens: without it, picking the exact same file twice
+    // in a row does not fire `change` the second time, so re-picking after a Cancel would
+    // silently do nothing.
     event.target.value = '';
     if (!file) return;
 
@@ -130,9 +123,8 @@ export function AvatarUploader({ announce }: AvatarUploaderProps) {
 
   return (
     // `role="group"` + `aria-label` rather than a bare focusable <div>: this block is the
-    // landing point after an upload or a removal, and an unnamed container announces nothing
-    // on arrival. The other three sections get their name from their SectionTitle; this one
-    // has no visible heading — the page states the identity through the avatar itself.
+    // landing point after an upload or a removal, and an unnamed container announces nothing on
+    // arrival.
     <div
       ref={blockRef}
       tabIndex={-1}
@@ -140,13 +132,11 @@ export function AvatarUploader({ announce }: AvatarUploaderProps) {
       aria-label="Avatar"
       className="focus-ring flex flex-wrap items-center justify-center gap-4 rounded-card"
     >
-      {/* alt="" on purpose: the pseudo sits right next to it in the page, so a name here
-          would simply be read twice. */}
+
       <Avatar src={previewUrl ?? user.avatarUrl} fallback={initials} className="size-40 shrink-0" />
 
       <div className="flex flex-col gap-2">
-        {/* The real input stays in the DOM but hidden, and a <button> triggers it via
-            .click(): a bare hidden file input is not reachable with Tab/Enter. */}
+
         <input
           ref={inputRef}
           type="file"
@@ -183,14 +173,9 @@ export function AvatarUploader({ announce }: AvatarUploaderProps) {
 
         {progress === null ? null : <ProgressBar value={progress} label="Uploading avatar" />}
 
-        {/* ⚠️ Not while the dialog is open: it renders the SAME `error` itself, and mounting a
-            sentence twice means a screen reader can meet it twice — the copy behind a modal is
-            inert today, but that is the dialog's doing, not ours. One failure, one message. */}
         {error && !confirmingRemoval ? <FormMessage>{error}</FormMessage> : null}
       </div>
 
-      {/* Removal is irreversible — the MinIO object is destroyed — and the button sits a few
-          pixels from the one that merely picks a new image. */}
       <ConfirmDialog
         open={confirmingRemoval}
         title="Remove your avatar?"

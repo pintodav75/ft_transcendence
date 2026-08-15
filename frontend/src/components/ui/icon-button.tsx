@@ -13,26 +13,14 @@ const sizeClasses: Record<IconButtonSize, string> = {
 
 type IconButtonProps = ComponentPropsWithRef<'button'> & {
   /**
-   * 🚨 REQUIRED, and the type is what enforces it: this button has no text, so without it a
-   * screen reader announces "button" and voice control has nothing to say. Name the ROW or the
-   * TARGET, never the icon ("Send a message to @bob", not "chat bubble").
+   * REQUIRED, and the type is what enforces it: this button has no text, so without it a screen
+   * reader announces "button" and voice control has nothing to say.
    */
   'aria-label': string;
   size?: IconButtonSize;
 };
 
-/**
- * Square, icon-only, transparent-until-hover button.
- *
- * The `Button` of the design system is a 48 px tall control with a label; this is the other
- * shape the app kept re-inlining — the rail's close and bell buttons, the "⋮" trigger of
- * `ActionMenu`. Extracted by [FS-3], which needed it three more times (close a conversation,
- * send a message, open a conversation from a friend row).
- *
- * Always rendered, never revealed on hover: a `group-hover` control is unreachable on a touch
- * screen. Disabled styling is part of the component because a send button spends real time
- * disabled — while a send is in flight, and while the socket is down.
- */
+/** Square, icon-only, transparent-until-hover button. */
 export function IconButton({
   className,
   size = 'md',

@@ -28,7 +28,7 @@ import type { TabItem } from '@/components/ui/tabs';
 import type { SoloMatch } from '@/lib/solo';
 
 /**
- * ⚠️ TWO TABS, AND THERE IS NO THIRD. A team page has a captain-only "Manage" tab because a
+ * TWO TABS, AND THERE IS NO THIRD. A team page has a captain-only "Manage" tab because a
  * team has a name, a logo, a roster and a dissolution. A solo ladder has none of those: there
  * is nothing to rename, nothing to upload, nobody to kick and nothing to dissolve. Adding an
  * empty Manage tab "for symmetry" would be a door onto an empty room.
@@ -41,7 +41,7 @@ const TABS: TabItem[] = [
 function BackToSolo() {
   return (
     <Link to="/solo" className={backLinkClasses}>
-      <ArrowLeft className="size-4" />
+      <ArrowLeft aria-hidden="true" className="size-4" />
       Solo ladders
     </Link>
   );
@@ -61,10 +61,6 @@ function SoloErrorPanel({ title, message }: { title: string; message: string }) 
 /**
  * `/solo/$ladderId` — my dossier on one 1v1 ladder: standing, neighbours, next slot, history,
  * and the two actions that make the cycle reachable with a mouse (open a slot, cancel it).
- *
- * The mirror of `/teams/$teamId`, with three substitutions the card asked for: my avatar and
- * pseudo instead of the team's identity, my linked-account state instead of the roster, and
- * no Manage tab.
  */
 export function SoloLadder() {
   const { ladderId } = useParams({ from: '/_authenticated/solo/$ladderId' });
@@ -78,32 +74,28 @@ export function SoloLadder() {
   const [openedSlotAt, setOpenedSlotAt] = useState<string | null>(null);
   // Holding the whole match (not just an id) is what lets the confirmation state its date.
   const [slotToCancel, setSlotToCancel] = useState<SoloMatch | null>(null);
-  // Focus has to come BACK to the opener when the panel closes; the browser only does that
-  // for itself with a native <dialog>.
+  // Focus has to come BACK to the opener when the panel closes; the browser only does that for
+  // itself with a native <dialog>.
   const createButtonRef = useRef<HTMLButtonElement>(null);
-  // FX-FOCUS — landing points after a cancellation destroys the control that had focus. Same
-  // rule as the team page: "the nearest surviving element that NAMES the list". In Matches
-  // that is the history region; in Overview the whole "Next match" block goes away, so we
-  // fall back on the panel, which its tab names.
+  // Landing points after a cancellation destroys the control that had focus. Same
+  // rule as the team page: "the nearest surviving element that NAMES the list".
   const overviewPanelRef = useRef<HTMLDivElement>(null);
-  // `HTMLElement` since [FX-TABLE]: the history lands the focus on its scrolling region from
+  // `HTMLElement`: the history lands the focus on its scrolling region from
   // `sm` up, and on the `<ul>` of its cards below — two tags, one job (`.focus()`).
   const matchHistoryRef = useRef<HTMLElement>(null);
-  // ⚠️ ONE live region for the page, therefore ONE message. Two competing states ("opened"
-  // and "cancelled") let the older one win and the region ends up contradicting the banner.
+  // ONE live region for the page, therefore ONE message.
   const slotAnnouncement = useAnnouncement();
 
   const me = useAuthStore((state) => state.user);
 
   // Mirrors the backend param schema: a malformed id can only ever come back as a 400, so the
   // error state is rendered without spending a request — and without the red "Failed to load
-  // resource" line a 400 would leave in the console. EVERY query below is gated on it,
-  // including the account one, which does not even depend on the id.
+  // resource" line a 400 would leave in the console.
   const validId = isValidLadderId(ladderId);
 
   const ladderQuery = useLadder(ladderId, validId);
-  // Fired in PARALLEL, not chained behind the ladder: the standings and my history are the
-  // bulk of this page, and none of them can answer 4xx on a well-formed id.
+  // Fired in PARALLEL, not chained behind the ladder: the standings and my history are the bulk
+  // of this page, and none of them can answer 4xx on a well-formed id.
   const rankingsQuery = useLadderRankings(validId ? ladderId : undefined);
   const matchesQuery = useMyMatches(ladderId, validId);
   const accountsQuery = useExternalAccounts(validId);
@@ -151,8 +143,7 @@ export function SoloLadder() {
           aria-hidden="true"
           className="h-64 animate-pulse rounded-card border border-border-subtle bg-surface-card"
         />
-        {/* THE live region while loading — the announcement region below is not mounted yet,
-            so there is still only ever one on screen. */}
+
         <p role="status" className="text-sm text-text-muted">
           Loading the ladder…
         </p>
@@ -163,12 +154,8 @@ export function SoloLadder() {
   const { ladder, game } = ladderQuery.data;
 
   /**
-   * 🚨 A WELL-FORMED ID CAN POINT AT A LADDER THAT DOES NOT BELONG HERE — the card did not
-   * cover it. `/solo/<cs2-5v5-id>` is a 200 from the API, so there is no error state to
-   * inherit: without this branch the page would render "my dossier" on a 5v5 ladder, offer a
-   * solo slot that `validateSide()` would refuse (it demands a team and a line-up there), and
-   * highlight a user row on a board that only ranks teams. The FORMAT decides, exactly as it
-   * does everywhere else in this codebase.
+   * A WELL-FORMED ID CAN POINT AT A LADDER THAT DOES NOT BELONG HERE — the card did not cover
+   * it.
    */
   if (ladder.format !== '1v1') {
     return (
@@ -246,13 +233,7 @@ export function SoloLadder() {
     setSlotToCancel(null);
   }
 
-  /**
-   * 🚨 THE BUTTON ONLY EXISTS WHEN THE API WOULD ACCEPT THE REQUEST. `linked !== true` covers
-   * BOTH "no account" and "we do not know yet" — a `POST /matches` without a linked account is
-   * answered 400 by §5.1, and a 4xx writes a red line in the Chrome console, which is a
-   * project-rejection criterion. `LinkedAccountStatus` in the Overview says why it is missing,
-   * so its absence is never mute.
-   */
+  /** THE BUTTON ONLY EXISTS WHEN THE API WOULD ACCEPT THE REQUEST. */
   const canOpenSlot = linked === true;
 
   return (
@@ -297,20 +278,14 @@ export function SoloLadder() {
         />
       )}
 
-      {/* The live region is MOUNTED FOR THE WHOLE LIFE OF THE PAGE and only its text changes:
-          a region inserted into the DOM together with its content is not reliably announced.
-          `sr-only` is `position: absolute`, so an empty region costs no layout — the visible
-          banner below is a separate, purely visual element.
-          ⚠️ It is the ONLY `role="status"` of this screen (invariant #11): that is why
-          `SoloMatches` deliberately does not ask for one on its dispute notice. */}
       <p role="status" className="sr-only">
         {slotAnnouncement.message}
       </p>
 
       {openedSlotAt && !creatingSlot && (
-        // The "Next match" block only ever shows the EARLIEST open slot, so a slot opened
-        // later than an existing one changes nothing on screen — this banner is what tells the
-        // user his click landed. The row itself appears in the Matches tab.
+        // The "Next match" block only ever shows the EARLIEST open slot, so a slot opened later
+        // than an existing one changes nothing on screen — this banner is what tells the user
+        // his click landed.
         <Callout tone="success">
           Slot opened for {formatMatchDate(openedSlotAt, 'long')} — it is now waiting for an
           opponent.
@@ -325,16 +300,14 @@ export function SoloLadder() {
         label="Solo ladder sections"
       />
 
-      {/* Every panel stays in the DOM, the inactive one `hidden`: each tab's aria-controls
-          then points at an element that really exists. */}
       <div
         ref={overviewPanelRef}
         id={panelId(uid, 'overview')}
         role="tabpanel"
         aria-labelledby={tabId(uid, 'overview')}
         hidden={activeTab !== 'overview'}
-        // WAI-ARIA: a panel whose content holds no focusable element would be unreachable
-        // right after the tab strip without this.
+        // WAI-ARIA: a panel whose content holds no focusable element would be unreachable right
+        // after the tab strip without this.
         tabIndex={0}
         className="focus-ring min-w-0"
       >
@@ -373,8 +346,6 @@ export function SoloLadder() {
         />
       </div>
 
-      {/* Mounted for as long as the page is: closing the dialog by unmounting it would leave
-          the browser with nothing to restore focus to. */}
       <ConfirmDialog
         open={slotToCancel !== null}
         title="Cancel this slot?"

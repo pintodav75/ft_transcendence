@@ -41,45 +41,16 @@ function disputeTitle(sides: DisputeSide[], solo: boolean) {
 /**
  * `/disputes/$disputeId` — the dispute file: what each camp claims, the thread of evidence, the
  * verdict, and (for a camp) the form that files a screenshot.
- *
- * 🚨 IT EXISTS BECAUSE A DISPUTE WAS A DEAD END. FT-4B let two camps disagree and then no screen
- * existed at all — the word "dispute" appeared in the front as a BADGE and nothing else. Meanwhile
- * a dispute nobody settles is cancelled after 24 h, so whoever cannot file his evidence loses the
- * match by default.
- *
- * 🔑 ONE REQUEST, AND DELIBERATELY NOT `GET /matches/{id}`. An ADMIN reads this file without being
- * a participant, and that route would answer him 403 on a `disputed` match — a red console line,
- * i.e. a project-rejection criterion. `GET /disputes/{id}` therefore serves the match and its
- * ladder itself, which is also what makes `match.ladder.format` — the ONLY authority for "1v1" —
- * available here. [F-ADMIN] reuses this page as is.
- *
- * 🔑 ARBITRATION LIVES HERE SINCE [F-ADMIN], AND ON NO SECOND SCREEN. The three outcomes of
- * `POST /disputes/{id}/resolve` are rendered by `DisputeArbitration` at the foot of the page, to
- * an admin and to nobody else — because the claims, the evidence thread and the deadline he has
- * to rule on are all already here. `/admin/disputes` only DISCOVERS the files; it never judges
- * them. Keeping the read (`useDispute` + the display components) apart from the right to act
- * (`canSubmitEvidence`, `useIsAdmin`) is what let that ticket bolt its controls on without
- * unpicking a line of this page — `DisputeVerdict` was not touched.
- *
- * ⚠️ NO CHAT WITH THE ADMIN — there is no such route, and the copy never suggests one.
- *
- * @see `useDispute` for why this query runs with `gcTime: 0` (every evidence url is presigned and
- * lives about five minutes).
  */
 export function DisputeDetail() {
   const { disputeId } = useParams({ from: '/_authenticated/disputes/$disputeId' });
   const headingId = useId();
   /**
-   * Landing point for the focus when the evidence form disappears under the user (an admin ruled
-   * while the tab sat open). `<body>` is the wrong answer — a keyboard user is thrown back to the
-   * top of the document with nothing announced, the defect [FX-FOCUS] already cost a ticket.
+   * Landing point for the focus when the evidence form disappears under the user (an admin
+   * ruled while the tab sat open).
    */
   const headingRef = useRef<HTMLHeadingElement>(null);
-  /**
-   * ⚠️ THE ONLY `role="status"` OF THIS SCREEN (invariant #11). Two live regions fight over the
-   * reader, and a `[role=status]` selector taking `.first()` reads whichever it meets — which is
-   * why the repo's `Callout` deliberately does not carry the role.
-   */
+  /** THE ONLY `role="status"` OF THIS SCREEN (invariant #11). */
   const announcement = useAnnouncement();
 
   // Mirrors the backend param schema: a malformed id can only ever come back as a 400, so the
@@ -89,18 +60,8 @@ export function DisputeDetail() {
   const disputeQuery = useDispute(disputeId, validId);
 
   /**
-   * The instant the 24 h deadline is measured against — and, since it decides whether the evidence
-   * form is offered at all, it must ADVANCE.
-   *
-   * `Math.max` of a ticking clock and the last instant the SERVER certified: the tick is what
-   * retires the form when the window closes in a tab left open (`dataUpdatedAt` alone cannot
-   * disagree with the payload it came with — it is the very moment the server applied the same
-   * rule), and `dataUpdatedAt` is the FLOOR that stops a client clock running behind the server
-   * from dragging the page backwards. Same pairing as `/matchmaking` and `/home`.
-   *
-   * ⚠️ The safe direction here is the FUTURE, like the matchmaking board and unlike the match
-   * sheet: a `now` running late makes the deadline look further away, so it would keep offering a
-   * form the API now refuses in 409.
+   * The instant the 24 h deadline is measured against — and, since it decides whether the
+   * evidence form is offered at all, it must ADVANCE.
    */
   const nowMs = Math.max(useSlotClock(), disputeQuery.dataUpdatedAt);
 
@@ -123,8 +84,8 @@ export function DisputeDetail() {
     return (
       <div className="flex flex-col gap-6 py-6">
         {status === 403 ? (
-          // Neither an outage nor a dead end: the file EXISTS, it is simply private. Saying so is
-          // what stops someone reloading for ever.
+          // Neither an outage nor a dead end: the file EXISTS, it is simply private. Saying so
+          // is what stops someone reloading for ever.
           <ErrorPanel
             title="Reserved for the two camps"
             message="Only the players and team-mates engaged in this match — and the admins who arbitrate it — can read its dispute file."
@@ -158,8 +119,7 @@ export function DisputeDetail() {
           aria-hidden="true"
           className="h-64 animate-pulse rounded-card border border-border-subtle bg-surface-card"
         />
-        {/* THE live region of this branch — there must only ever be one, and the loaded branch
-            below has its own. The two never coexist. */}
+
         <p role="status" className="text-sm text-text-muted">
           Loading the dispute file…
         </p>
@@ -175,14 +135,7 @@ export function DisputeDetail() {
   // same thing three times, so the ladder's own name is kept only when it adds something.
   const extraName = ladderSubtitle(ladder.name, ladder.gameName, ladder.format);
 
-  /**
-   * Say it, and land the focus somewhere that still exists.
-   *
-   * ⚠️ RENAMED FROM `settledElsewhere` BY [F-ADMIN], because it now serves two paths that are not
-   * both "elsewhere": the evidence form losing its 409 race, AND the admin's own successful
-   * ruling. Both destroy the control that had focus, both need the page's one live region — the
-   * old name would have lied about half its callers.
-   */
+  /** Say it, and land the focus somewhere that still exists. */
   function announceAndRefocus(text: string) {
     announcement.announce(text);
     // The panel is unmounting with the refetch; the `<h1>` names the file, so a screen reader
@@ -192,9 +145,7 @@ export function DisputeDetail() {
 
   return (
     <div className="flex min-w-0 flex-col gap-6 py-6">
-      {/* THE live region of this screen, MOUNTED FOR THE WHOLE LIFE OF THE PAGE, its text alone
-          changing: a region inserted into the DOM together with its content is not reliably
-          announced. `sr-only` is `position: absolute`, so an empty one costs no layout. */}
+
       <p role="status" className="sr-only">
         {announcement.message}
       </p>
@@ -211,24 +162,11 @@ export function DisputeDetail() {
             <Gavel aria-hidden="true" className="size-4" /> Dispute
           </p>
 
-          {/* `tabIndex={-1}` makes the heading focusable BY SCRIPT ONLY: it never joins the tab
-              order, so nothing changes for someone simply tabbing through the page.
-
-              🚨 `break-words` IS LOAD-BEARING: two team names of up to 30 UNBREAKABLE characters
-              sit here, so this heading can be twice as long as the one that lost 63 px off-screen
-              on `/home`.
-
-              ⚠️ The F-HOME defect is not literally reproduced here — `.panel` (`index.css`) has no
-              `overflow-hidden`, unlike that hero, so an unbroken title would push the document
-              instead of being clipped in silence. An earlier version of this comment claimed
-              otherwise and would have misled the next reader. `D20` measures BOTH anyway (the
-              document AND `h1.scrollWidth - h1.clientWidth`), because which of the two fails is
-              exactly what one must not have to guess. */}
           <h1
             id={headingId}
             ref={headingRef}
             tabIndex={-1}
-            className="focus-ring rounded-control break-words text-3xl label-caps-black"
+            className="focus-ring rounded-control wrap-break-word text-3xl label-caps-black"
           >
             {disputeTitle(sides, solo)}
           </h1>
@@ -243,12 +181,6 @@ export function DisputeDetail() {
             </Pill>
           </div>
 
-          {/* ⚠️ IN THE HEADER, not at the foot of the page like the match sheet's own back link —
-              and that is deliberate. This is not "up one level": the match sheet is where the
-              SPORTING detail lives (maps, line-ups, scores, Elo), so it has to be reachable from
-              the first screenful rather than after scrolling a thread of screenshots. It is also
-              what makes it acceptable for a disputed row of `/home` and `/history` to lead HERE
-              instead of there. */}
           <div className="flex pt-3">
             <Link
               to="/matches/$matchId"
@@ -267,9 +199,6 @@ export function DisputeDetail() {
 
         <EvidenceThread evidence={evidence} sides={sides} solo={solo} />
 
-        {/* Renders NOTHING at all for a bench player, a non-captain, an admin who is not a party,
-            or once the file is settled — a button the API would refuse leaves a red line in the
-            console, which is a project-rejection criterion. */}
         <EvidenceForm
           file={file}
           nowMs={nowMs}
@@ -277,12 +206,6 @@ export function DisputeDetail() {
           onSettledElsewhere={announceAndRefocus}
         />
 
-        {/* [F-ADMIN] — the controls this page was written to receive. Renders NOTHING for anyone
-            who is not an admin, and nothing once the file is settled: `DisputeVerdict` above
-            flips to its read-only state on its own, and this component never touches it.
-            ⚠️ It creates NO live region of its own (invariant #11): it hands its sentence to the
-            page's single `role="status"` through `announceAndRefocus`, which also lands the focus
-            on the `<h1>` when the panel disappears under the user. */}
         <DisputeArbitration
           file={file}
           nowMs={nowMs}

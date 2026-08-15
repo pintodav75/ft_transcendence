@@ -8,14 +8,7 @@ type ErrorPanelProps = {
   children?: ReactNode;
 };
 
-/**
- * Full-page dead end: a malformed id, a 404, an unreachable API. Extracted from
- * `pages/teams/team-detail.tsx` at its second reader (the ladder page), so the two screens
- * cannot drift apart.
- *
- * It carries no `role="alert"`: the panel IS the page, it is not something that pops up
- * next to it, and the heading already says what happened.
- */
+/** Full-page dead end: a malformed id, a 404, an unreachable API. */
 export function ErrorPanel({ title, message, children }: ErrorPanelProps) {
   return (
     <div className="panel flex flex-col items-start gap-4 p-6">

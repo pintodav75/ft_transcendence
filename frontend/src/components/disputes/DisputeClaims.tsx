@@ -9,16 +9,13 @@ import { useBackFrom } from '@/lib/back-navigation';
 import type { DisputeSide } from '@/lib/dispute-detail';
 
 /**
- * The camp's avatar and name — a link to its team page, or to the player's page in 1v1.
+ * The camp's avatar and name, linking to its team page or to the player's page in 1v1.
  *
- * 🚨 RULE OF THE WHOLE SITE (David): every team name and every user name is clickable and leads
- * to its page. The only exceptions are the ones where there is nothing to lead TO, and they are
- * both handled below.
- *
- * ⚠️ `side.team` FIRST, `solo` SECOND, AND NEVER `players[0]` ON A TEAM SIDE. A team dissolved
- * after the match leaves `team: null` on a 5v5 camp (`team_id` is `set null`), and linking that
- * camp's first player would send the reader to one of five people as if he were the camp. That
- * conflation is the bug this repo has already shipped twice (FT-4A, F-SOLO).
+ * site rule: every team name and every player name is clickable. the only exceptions are when
+ * there is nothing to lead to (disbanded team, deleted account), both handled below.
+ * check side.team FIRST, solo SECOND, and never players[0] on a team side — a team disbanded
+ * after the match leaves team: null on a 5v5 camp, and linking its first player would present
+ * one of five people as the camp.
  */
 function CampIdentity({
   side,
@@ -39,14 +36,8 @@ function CampIdentity({
         fallback={sideInitials(side, solo)}
         className="size-10 shrink-0"
       />
-      {/* `break-words`: a team name is a single unbreakable token of up to 30 characters, and
-          this card is only ~290 px wide at 375 px.
 
-          🚨 THE UNDERLINE IS CARRIED BY THE NAME, NOT BY THE LINK. `hover:underline` on the
-          wrapper decorates every descendant — including the INITIALS drawn inside the avatar when
-          a team has no logo, which then looks like a rendering fault. `group`/`group-hover` keeps
-          the whole box clickable while only the name reacts. */}
-      <span className="min-w-0 break-words text-sm font-bold text-text-primary group-hover:underline">
+      <span className="min-w-0 wrap-break-word text-sm font-bold text-text-primary group-hover:underline">
         {name}
       </span>
     </>
@@ -90,22 +81,8 @@ type DisputeClaimsProps = {
 };
 
 /**
- * What each camp declared, side by side — the heart of the disagreement, and therefore the first
- * thing after the status.
- *
- * 🔑 `submittedWinnerSideId` POINTS AT A SIDE, not at a team. Resolving it through the sides list
- * is what turns "b3f2…" into "Team Alpha", and a camp can perfectly well name ITSELF or the other
- * one — which is exactly the contradiction this block exists to make visible.
- *
- * 🚨 THE CAMPS ARE NAMED BY `sideName`, THE SHARED RULE — never by reading `side.team === null` as
- * "1v1". A team dissolved after a completed match leaves a camp with `team: null` on a 5v5, and
- * reading that as solo is the bug already fixed twice (FT-4A, F-SOLO). The fallback is
- * "Disbanded team", exactly as on the match sheet.
- *
- * ⚠️ THIS BLOCK USED TO CARRY NO LINKS AT ALL, on the argument that the match sheet is one click
- * away and already links both camps. David overruled it: on this site EVERY team name and EVERY
- * user name opens its page, and someone reading a dispute must be able to go look at the camp he
- * is judging without a detour. See `CampIdentity` for the two cases that stay unlinked.
+ * What each camp declared, side by side — the heart of the disagreement, and therefore the
+ * first thing after the status.
  */
 export function DisputeClaims({ sides, solo }: DisputeClaimsProps) {
   const contradict = claimsContradict(sides);
@@ -122,9 +99,6 @@ export function DisputeClaims({ sides, solo }: DisputeClaimsProps) {
           : 'The two camps reported results that do not match, which is why the match is on hold.'}
       </p>
 
-      {/* `role="list"` is explicit: Safari drops the list role from a `<ul>` whose display is not
-          `list-item`, and this one is a grid. Named so a screen reader hears WHICH list it is.
-          One column under `sm` — two 300 px cards side by side at 375 px would clip both names. */}
       <ul
         role="list"
         aria-label="Reported results"
@@ -141,15 +115,14 @@ export function DisputeClaims({ sides, solo }: DisputeClaimsProps) {
             >
               <CampIdentity side={side} solo={solo} name={name} backFrom={backFrom} />
 
-              <p className="min-w-0 break-words text-sm text-text-secondary">
+              <p className="min-w-0 wrap-break-word text-sm text-text-secondary">
                 {claim ? (
                   <>
                     Claims <strong className="text-text-primary">{claim}</strong> won.
                   </>
                 ) : (
-                  // Reachable: B6 also opens a dispute from a single side in some sequences, and
-                  // a settled file stays readable for ever. An em dash would hide the difference
-                  // between "said nothing" and "said something we failed to resolve".
+                  // Reachable: the score route also opens a dispute from a single side in some sequences,
+                  // and a settled file stays readable for ever.
                   <>No result reported by this camp.</>
                 )}
               </p>

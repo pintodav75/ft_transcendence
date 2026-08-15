@@ -18,9 +18,8 @@ import chessImage from '@/assets/images/chess.webp';
 
 export const gameOrder = ['lol', 'cs2', 'val', 'rl', 'chess'];
 
-// Destination cliquée de chaque carte-jeu (landing). URLs à préciser plus tard :
-// tant que l'entrée d'un jeu est absente, sa carte ne navigue nulle part.
-// ex. lol: '/games/lol'
+// Destination cliquée de chaque carte-jeu (landing). URLs à préciser plus tard : tant que
+// l'entrée d'un jeu est absente, sa carte ne navigue nulle part. ex.
 export const gameHref: Record<string, string> = {};
 
 export const gameLogos: Record<string, string> = {

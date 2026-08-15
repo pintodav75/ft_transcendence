@@ -14,13 +14,8 @@ type TeamDangerZoneProps = {
 export function TeamDangerZone({ teamId, teamName }: TeamDangerZoneProps) {
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
-  // The hook owns the order "leave the page FIRST, then drop the cache entry": once the
-  // team is deleted, any refetch of /teams/{id} is a 404, i.e. a red console line.
-  // `replace: true` n'est pas cosmétique : sans lui, l'URL de l'équipe reste dans
-  // l'historique et le bouton « Précédent » y ramène aussitôt. Le cache vient d'être vidé
-  // par `removeQueries`, donc `useTeam` refait un GET → 404 → « Failed to load resource »
-  // en console. C'est exactement le rouge que l'ordre navigate → removeQueries évite, et
-  // il était à UN clic du parcours nominal.
+  // The hook owns the order "leave the page FIRST, then drop the cache entry": once the team is
+  // deleted, any refetch of /teams/{id} is a 404, i.e. a red console line.
   const dissolve = useDissolveTeam(teamId, () => navigate({ to: '/teams', replace: true }));
 
   return (
@@ -40,8 +35,6 @@ export function TeamDangerZone({ teamId, teamName }: TeamDangerZoneProps) {
         </Button>
       </div>
 
-      {/* Mounted at all times, only `open` changes: unmounting the dialog on close robs
-          the browser of the element it must return focus to. */}
       <ConfirmDialog
         open={confirming}
         title="Dissolve this team?"

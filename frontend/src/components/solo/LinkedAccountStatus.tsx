@@ -21,20 +21,6 @@ type LinkedAccountStatusProps = {
 /**
  * Where a team page shows its roster, a solo page shows THE state that gates everything:
  * whether my in-game account for this game is linked.
- *
- * 🚨 THIS IS NOT DECORATION, IT IS THE PRE-CONDITION OF THE WHOLE SCREEN. §5.1:
- * `validateSide()` refuses a 1v1 side in **400** when the caller has no
- * `user_external_accounts` row for the game's `requiredProvider` — so without it, opening a
- * slot is impossible and the "Open a slot" button must not exist. A 4xx writes a red line in
- * the Chrome console, and a dirty console is a project-rejection criterion.
- *
- * ⚠️ NO LINK OUT, DELIBERATELY. The UI that links an account is [F4B], which has not started,
- * and `/profile` is currently contested between two teammates' branches — a dead link, or one
- * into a route that may not survive the next merge, is worse than a plain sentence. The
- * requirement is stated; wiring it up is F4B's job.
- *
- * ⚠️ The provider comes from the GAME's `requiredProvider` (the data), never from a hard-coded
- * map of game → provider: adding a game must light this up for free.
  */
 export function LinkedAccountStatus({
   provider,

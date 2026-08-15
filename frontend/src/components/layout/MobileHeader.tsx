@@ -20,14 +20,7 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
-/**
- * Les deux tiroirs de l'en-tête mobile, dans UN SEUL état plutôt que deux booléens.
- *
- * 🚨 DEUX BOOLÉENS AUTORISERAIENT LES DEUX OUVERTS EN MÊME TEMPS — deux `aria-modal="true"`
- * empilés, un piège à focus qui se dispute l'autre, et aucun des deux `Escape` ne sachant lequel
- * il ferme. L'union rend l'état illégal inexprimable, et le piège à focus n'a qu'un seul tiroir
- * à connaître.
- */
+/** Les deux tiroirs de l'en-tête mobile, dans UN SEUL état plutôt que deux booléens. */
 type Panel = 'nav' | 'social';
 
 export function MobileHeader() {
@@ -37,17 +30,7 @@ export function MobileHeader() {
   const dialogRef = useRef<HTMLElement>(null);
   const user = useAuthStore((state) => state.user);
   const fallback = (user?.pseudo ?? '?').slice(0, 2).toUpperCase();
-  /**
-   * 🚨 SOUS 1024 px, CE BOUTON EST LE SEUL ENDROIT OÙ UNE NOTIFICATION PEUT SE VOIR. La pastille
-   * de la cloche vit dans le panneau social, dont le rail est masqué à cette largeur et dont
-   * l'overlay n'est monté qu'à l'ouverture : sans ce point, un téléphone n'annonce rien tant
-   * qu'on n'a pas ouvert le panneau — donc au hasard.
-   *
-   * ⚠️ `useUnreadNotificationCount`, JAMAIS `useNotificationBell` : ce dernier porte l'abonnement
-   * qui incrémente le compteur et doit rester monté une seule fois (`SocialPanel`), sans quoi
-   * chaque notification serait comptée deux fois. Ici on ne fait que LIRE le même cache — le
-   * rail permanent est `hidden lg:block`, donc monté à toute largeur, et la requête existe déjà.
-   */
+  /** SOUS 1024 px, CE BOUTON EST LE SEUL ENDROIT OÙ UNE NOTIFICATION PEUT SE VOIR. */
   const unreadCount = useUnreadNotificationCount();
 
   useEffect(() => {
@@ -59,9 +42,8 @@ export function MobileHeader() {
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        // Un dialogue enfant (les notifications côté social, la confirmation de déconnexion côté
-        // navigation) consomme d'abord Escape. Fermer les deux couches d'un coup ferait perdre le
-        // contexte alors que l'utilisateur voulait simplement revenir au tiroir.
+        // Un dialogue enfant (les notifications côté social, la confirmation de déconnexion
+        // côté navigation) consomme d'abord Escape.
         if (dialog?.querySelector('[role="dialog"]')) return;
 
         event.preventDefault();
@@ -98,9 +80,7 @@ export function MobileHeader() {
     <>
       <header className="sticky top-2 z-20 -mx-2 -mt-2 mb-3 flex h-14 items-center justify-between rounded-card bg-surface-header/95 px-4 backdrop-blur lg:hidden">
         <div className="flex items-center gap-1">
-          {/* 🚨 LE SEUL ACCÈS À LA NAVIGATION SOUS 1024 px. `LeftRail` est `hidden … lg:flex` : sans
-              ce bouton, un téléphone n'a ni les six destinations, ni « Profile », ni « Logout » —
-              et le sujet exige un front « accessible across all devices ». */}
+
           <IconButton
             ref={navTriggerRef}
             onClick={() => setOpenPanel('nav')}
@@ -110,7 +90,7 @@ export function MobileHeader() {
             aria-controls={openPanel === 'nav' ? 'mobile-nav-panel' : undefined}
             className="-ml-2"
           >
-            <Menu className="size-5" />
+            <Menu aria-hidden="true" className="size-5" />
           </IconButton>
 
           <SiteLogo compact className="text-3xl" />
@@ -121,7 +101,7 @@ export function MobileHeader() {
           type="button"
           onClick={() => setOpenPanel('social')}
           className="focus-ring relative rounded-full transition hover:opacity-90"
-          // 🔑 LE NOMBRE EST DANS LE NOM, pas seulement dans la pastille : celle-ci est
+          // LE NOMBRE EST DANS LE NOM, pas seulement dans la pastille : celle-ci est
           // `aria-hidden` (un point coloré ne dit rien), donc c'est cette phrase qui porte
           // l'information pour un lecteur d'écran comme pour le pilotage à la voix.
           aria-label={
@@ -141,8 +121,7 @@ export function MobileHeader() {
           />
           {unreadCount > 0 && (
             // Un point, pas un compteur : la cloche du panneau porte le chiffre exact, ce
-            // déclencheur n'a qu'à dire « il y a quelque chose ». La bordure reprend le fond
-            // de l'en-tête pour détacher la pastille de l'avatar sous elle.
+            // déclencheur n'a qu'à dire « il y a quelque chose ».
             <span
               aria-hidden="true"
               className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-surface-header bg-arena-red"
@@ -171,15 +150,10 @@ export function MobileHeader() {
             <div className="mb-3 flex items-center justify-between">
               <SiteLogo className="text-2xl" />
               <IconButton onClick={() => setOpenPanel(null)} aria-label="Close navigation menu">
-                <X className="size-5" />
+                <X aria-hidden="true" className="size-5" />
               </IconButton>
             </div>
 
-            {/* 🚨 FERMETURE PAR DÉLÉGATION, et pas sur un changement de `pathname` : re-cliquer la
-                destination où l'on est DÉJÀ ne change pas l'URL, le tiroir serait resté ouvert sur
-                un écran qu'il masque entièrement. Le test porte sur `<a>` uniquement, donc
-                « Logout » (un `<button>`) laisse le tiroir en place pendant que sa confirmation
-                s'affiche par-dessus. */}
             <div
               className="contents"
               onClick={(event) => {

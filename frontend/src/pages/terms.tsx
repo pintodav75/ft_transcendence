@@ -8,19 +8,17 @@ import {
 } from '@/components/legal/legal-page';
 
 /**
- * `/terms` — the Terms of Service.
+ * `/terms` — the Terms of Service. A placeholder here is a rejection motive for the project.
  *
- * 🚨 A PLACEHOLDER HERE IS A REJECTION MOTIVE of the whole project. Like the Policy, this
- * text describes the platform AS BUILT, and every rule below maps onto something the code
- * actually enforces:
- *   · no game is played here, and there is no queue — challenge/accept, locked decision
- *   · both sides report a score; a disagreement opens a dispute; an admin arbitrates
- *   · the 24 h clocks on confirmation and on arbitration → `backend/src/jobs/index.ts`
- *   · you cannot leave a team, dissolve it, or delete your account mid-fixture → the 409s
- *     of `DELETE /teams/:id` and `DELETE /users/me`
- *   · upload limits → `IMAGE_MIME` / `EVIDENCE_MIME`
- * ⚠️ Do not add a rule the platform does not enforce, and do not promise a sanction nobody
- * can apply: admin powers stop at arbitrating a dispute and editing the database by hand.
+ * every rule below maps onto something the code enforces:
+ *   - no game is played here and there is no queue — challenge/accept, locked decision
+ *   - both sides report a score, a disagreement opens a dispute, an admin arbitrates
+ *   - the 24 h clocks on confirmation and arbitration -> backend/src/jobs/index.ts
+ *   - you can't leave a team, disband it or delete your account mid-fixture -> the 409s of
+ *     DELETE /teams/:id and DELETE /users/me
+ *   - upload limits -> IMAGE_MIME / EVIDENCE_MIME
+ * don't add a rule the platform doesn't enforce, and don't promise a sanction nobody can
+ * apply: admin powers stop at arbitrating a dispute and editing the database by hand.
  */
 const CONTENTS = [
   { id: 'scope', title: 'What VSMODE is' },

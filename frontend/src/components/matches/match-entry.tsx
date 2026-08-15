@@ -1,8 +1,7 @@
-/*
+/**
  * What ONE entry of a match history shares between its two layouts, `MatchRow` (table, from
  * `sm` up) and `MatchCard` (below it): payload shape, props, derived state, the date and
  * opponent cells, the withdraw button.
- * The two are never mounted together, so anything duplicated drifts unseen.
  */
 
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -20,8 +19,7 @@ import type { MatchOpponentView } from '@/lib/match-history';
 
 /**
  * `py-1.5` lifts every line fragment of the name from 16 px to 28 px without breaking the wrap
- * (an `inline-flex` would). It matters more than it looks: this target is adjacent, at 0 px, to
- * the entry itself — which leads SOMEWHERE ELSE. A near miss used to land on inert background.
+ * (an `inline-flex` would).
  */
 const opponentLinkClasses = 'focus-ring py-1.5 underline-offset-4 hover:underline';
 
@@ -81,11 +79,7 @@ export function useMatchEntry<M extends MatchHistoryMatch>({
     accentClass: matchAccentClass(matchStatusView(match).tone),
     disputed: match.disputeStatus === 'open' || match.status === 'disputed',
     opponentName: opponent?.name,
-    /**
-     * Only the NEUTRAL parts of an entry without a result are toned down. Dimming the whole
-     * entry took the status pill with it and dropped "Disputed" to 3.07:1 — the one entry the
-     * design wants to shout became the least readable of the page.
-     */
+    /** Only the NEUTRAL parts of an entry without a result are toned down. */
     muted: match.status === 'completed' ? undefined : 'opacity-70',
     onEntryClick: canOpenSheet
       ? (event: MouseEvent<HTMLElement>) => {
@@ -102,8 +96,7 @@ export function useMatchEntry<M extends MatchHistoryMatch>({
  */
 /**
  * The date is the entry's KEYBOARD and screen-reader access to the sheet: the click handler on
- * the entry itself is a convenience on top of it, never a replacement. An entry the sheet guard
- * would refuse renders the date as plain text.
+ * the entry itself is a convenience on top of it, never a replacement.
  */
 export function MatchDateLink({
   match,
@@ -130,8 +123,8 @@ export function MatchDateLink({
           : `Match sheet of the slot of ${formatMatchDate(match.scheduledAt, 'long')}`
       }
       // `-my-1.5 py-1.5` lifts the hit area from 14 px to 26 px WITHOUT changing the row's
-      // height: WCAG 2.5.8 wants 24 px, and this link is a standalone target, not a word
-      // inside a sentence — the "Inline" exception does not cover it.
+      // height: WCAG 2.5.8 wants 24 px, and this link is a standalone target, not a word inside
+      // a sentence — the "Inline" exception does not cover it.
       className="focus-ring -my-1.5 inline-flex items-center py-1.5 underline-offset-4 hover:underline"
     >
       {date}
@@ -141,20 +134,14 @@ export function MatchDateLink({
 
 /**
  * The opponent's NAME goes to the opponent's page, the rest of the entry to the match sheet:
- * clicking "Bravo" has to lead to Bravo. NOT gated on `canOpenSheet` — team and player pages
- * are readable by any logged-in account, only the MATCH sheet has a guard.
- *
- * 🚨 `kind: 'gone'` is PLAIN TEXT and that is the whole point of the union. `opponent` being
- * null has four causes and two of them mean an opponent really did play and then vanished
- * (team dissolved, account deleted) — there is no page left to link to, but an em dash there
- * would quietly erase him. See `matchOpponentView`.
+ * clicking "Bravo" has to lead to Bravo.
  */
 export function MatchOpponentLink({ opponent }: { opponent: MatchOpponentView }) {
   const backFrom = useBackFrom();
 
   if (opponent === null) {
-    // Kept to a dash: the "Open slot" pill on the same entry already says nobody has
-    // accepted, and a sentence here wrapped the row over three lines.
+    // Kept to a dash: the "Open slot" pill on the same entry already says nobody has accepted,
+    // and a sentence here wrapped the row over three lines.
     return <span className="font-normal text-text-muted">{EM_DASH}</span>;
   }
 

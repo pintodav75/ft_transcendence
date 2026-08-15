@@ -17,11 +17,7 @@ export type ActionMenuItem = {
 };
 
 type ActionMenuProps = {
-  /**
-   * Accessible name of the trigger. It must NAME THE ROW, never be a bare "Actions": a list
-   * of eight identical "Actions" buttons tells a screen-reader user nothing about which one
-   * they are on (`Actions for @bob`).
-   */
+  /** Accessible name of the trigger. */
   label: string;
   items: ActionMenuItem[];
   /** Menu's own accessible name; defaults to `label`. */
@@ -29,32 +25,7 @@ type ActionMenuProps = {
   className?: string;
 };
 
-/**
- * Compact "⋮" button opening a short list of actions — the row-level menu of a list.
- *
- * PLATFORM-FIRST WHERE IT CAN BE: a real `<button>` trigger, real `<button>` items, so click,
- * Enter and Space all work without a line of code. What the platform does NOT give is the
- * menu-button keyboard contract, which is implemented here as the APG describes it: ArrowDown
- * on the trigger opens on the first item and ArrowUp on the last, arrows roll around the
- * items, Home/End jump to the ends, Escape closes and hands focus back to the trigger, a click
- * elsewhere or a Tab out closes it silently.
- *
- * 🔑 ROVING TABINDEX: the open menu holds exactly ONE tab stop. A menu is navigated with the
- * arrow keys, so Tab must LEAVE it — with an item per tab stop, tabbing off "Remove friend"
- * walked onto "Block player" instead of moving on, and a caller with five items would have
- * added five stops to the page. `activeIndex` is therefore the single source of truth for
- * both the tab stop and where the focus sits, and the effect below is what moves the focus.
- *
- * 🚨 SELECTING AN ITEM DOES NOT RESTORE FOCUS TO THE TRIGGER, on purpose. These actions open a
- * confirmation dialog, and a queued `focus()` racing a modal that has just taken focus is
- * exactly how a dialog opens with focus in the wrong place. The action decides where focus
- * goes — the menu only gets out of the way.
- *
- * ⚠️ It is positioned ABSOLUTELY inside the scrolling column that holds it, not in a portal.
- * That is why focus moves onto the first item when it opens: the browser then scrolls the item
- * into view for free, so a menu opened on the last row of the social rail is not left clipped
- * under the fold.
- */
+/** Compact "⋮" button opening a short list of actions — the row-level menu of a list. */
 export function ActionMenu({ label, items, menuLabel, className }: ActionMenuProps) {
   const [open, setOpen] = useState(false);
   /** The item that owns the tab stop and the focus. Reset every time the menu opens. */
@@ -64,9 +35,9 @@ export function ActionMenu({ label, items, menuLabel, className }: ActionMenuPro
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  // Clamped at render: a caller may hand over a SHORTER `items` array between two renders
-  // (an action that stops applying), and an index left pointing past the end would leave the
-  // menu with no tab stop at all.
+  // Clamped at render: a caller may hand over a SHORTER `items` array between two renders (an
+  // action that stops applying), and an index left pointing past the end would leave the menu
+  // with no tab stop at all.
   const rovingIndex = items.length === 0 ? 0 : Math.min(activeIndex, items.length - 1);
 
   // React never clears the slots of the removed items, so a shrinking list would leave stale
@@ -97,8 +68,8 @@ export function ActionMenu({ label, items, menuLabel, className }: ActionMenuPro
   useEffect(() => {
     if (!open) return;
 
-    // Next frame: the menu is mounted by the very render this effect belongs to, and the
-    // node has to exist before it can take focus.
+    // Next frame: the menu is mounted by the very render this effect belongs to, and the node
+    // has to exist before it can take focus.
     const frame = requestAnimationFrame(() => itemRefs.current[rovingIndex]?.focus());
 
     return () => cancelAnimationFrame(frame);
@@ -120,27 +91,23 @@ export function ActionMenu({ label, items, menuLabel, className }: ActionMenuPro
 
     // Without this the page scrolls under the menu that is opening.
     event.preventDefault();
-    // APG: ArrowDown enters at the top, ArrowUp at the bottom — reaching the last action of
-    // a long menu is then one key press instead of a full lap.
+    // APG: ArrowDown enters at the top, ArrowUp at the bottom — reaching the last action of a
+    // long menu is then one key press instead of a full lap.
     openAt(event.key === 'ArrowDown' ? 0 : items.length - 1);
   }
 
   function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       event.preventDefault();
-      // 🚨 The Escape belongs to THIS menu and must stop here. The social rail is a
-      // hand-rolled `aria-modal` overlay under 1024 px whose Escape handler sits on
-      // `document`: without this, one press would close the menu AND the whole panel behind
-      // it. React dispatches from the root container, so stopping the synthetic event does
-      // stop the native one before it ever reaches `document`.
+      // The Escape belongs to THIS menu and must stop here.
       event.stopPropagation();
       closeAndRefocusTrigger();
       return;
     }
 
-    // Computed from `rovingIndex`, never from `document.activeElement`: the state is always
-    // a valid index, where the DOM lookup returned -1 as soon as focus was anywhere else —
-    // and -1 sent ArrowUp to the SECOND-TO-LAST item instead of the last.
+    // Computed from `rovingIndex`, never from `document.activeElement`: the state is always a
+    // valid index, where the DOM lookup returned -1 as soon as focus was anywhere else — and -1
+    // sent ArrowUp to the SECOND-TO-LAST item instead of the last.
     let nextIndex: number | null = null;
 
     if (event.key === 'ArrowDown') {
@@ -164,9 +131,7 @@ export function ActionMenu({ label, items, menuLabel, className }: ActionMenuPro
       ref={rootRef}
       className={cn('relative shrink-0', className)}
       onBlur={(event) => {
-        // Tabbing out of the menu closes it. `relatedTarget` is null when focus leaves the
-        // document entirely (another window) — the menu then stays open, which is what a user
-        // coming back expects.
+        // Tabbing out of the menu closes it.
         if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
           setOpen(false);
         }

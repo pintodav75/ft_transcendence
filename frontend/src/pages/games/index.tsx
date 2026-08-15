@@ -4,13 +4,10 @@ import { GamesGrid } from '@/components/games/GamesGrid';
 
 /**
  * `/games` — the entrance to everything competitive: pick a game, then a ladder on it.
+ * This grid -> /games/$gameId -> /ladders/$ladderId is the only clickable path to a standings
+ * board for an account with no team, so don't leave it a stub.
  *
- * 🔑 WHY THIS PAGE EXISTS AT ALL. [FT-3] deleted `/ranking` and left `/games` a stub, so an
- * account with no team had NO clickable path to a standings board — the ladders existed and
- * nothing linked to them. This grid, then `/games/$gameId`, then `/ladders/$ladderId` is that
- * path.
- *
- * Same layout as `/teams` and `/solo`: a panel, a header, and a self-contained grid.
+ * same layout as /teams and /solo: panel, header, self-contained grid.
  */
 export function Games() {
   return (

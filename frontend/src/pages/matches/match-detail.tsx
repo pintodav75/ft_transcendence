@@ -24,22 +24,7 @@ function BackToTeams() {
   );
 }
 
-/**
- * `/matches/$matchId` — the match sheet, and the ONLY place where the cycle can end.
- *
- * Destination of every row of a team's match history: who played whom, on which ladder and
- * which maps, the Bo3 score, the winner, the Elo each CAMP gained or lost, and — for a match
- * still running — what the cycle is waiting for.
- *
- * [FT-4B] added the write side, in `MatchResultPanel`: reporting a score, confirming the
- * opponent's report, contesting it. Everything else here stays read-only, and the panel
- * renders NOTHING for anyone who may not act — a button the API would refuse leaves a red
- * line in the console, which is a project-rejection criterion.
- *
- * Access mirrors `GET /matches/{id}`: a participant reads his match in every state, anyone
- * else only once it is `completed` (403 otherwise — the anonymity of open slots and running
- * matches is a product decision, not an accident).
- */
+/** `/matches/$matchId` — the match sheet, and the ONLY place where the cycle can end. */
 export function MatchDetail() {
   const { matchId } = useParams({ from: '/_authenticated/matches/$matchId' });
   const headingId = useId();
@@ -48,13 +33,13 @@ export function MatchDetail() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   // ONE announcement for the whole screen — see the live region below.
   const resultAnnouncement = useAnnouncement();
-  // ⚠️ Read HERE, not inline in the JSX below: this component returns early on a malformed id
-  // and on every error state, so a hook called down there would run conditionally.
+  // Read HERE, not inline in the JSX below: this component returns early on a malformed id and
+  // on every error state, so a hook called down there would run conditionally.
   const backFrom = useBackFrom();
 
-  // Mirrors the backend param schema: a malformed id can only ever come back as a 400, so
-  // the error state is rendered without spending a request — and without the red "Failed to
-  // load resource" line that request would leave in the console.
+  // Mirrors the backend param schema: a malformed id can only ever come back as a 400, so the
+  // error state is rendered without spending a request — and without the red "Failed to load
+  // resource" line that request would leave in the console.
   const validId = isValidMatchId(matchId);
   const matchQuery = useMatch(matchId, validId);
 
@@ -77,8 +62,8 @@ export function MatchDetail() {
     return (
       <div className="flex flex-col gap-6 py-6">
         {status === 403 ? (
-          // Neither an outage nor a dead end: the sheet EXISTS, it is simply private until
-          // the match is over. Saying so is what stops someone reloading forever.
+          // Neither an outage nor a dead end: the sheet EXISTS, it is simply private until the
+          // match is over. Saying so is what stops someone reloading forever.
           <ErrorPanel
             title="Reserved for the two sides"
             message="Only the players and team-mates engaged in this match can read it while it is running. It becomes public as soon as the match is completed."
@@ -112,8 +97,7 @@ export function MatchDetail() {
           aria-hidden="true"
           className="h-64 animate-pulse rounded-card border border-border-subtle bg-surface-card"
         />
-        {/* THE live region of this screen — there must only ever be one, and no other
-            element below carries `role="status"`. */}
+
         <p role="status" className="text-sm text-text-muted">
           Loading the match…
         </p>
@@ -124,38 +108,15 @@ export function MatchDetail() {
   const { match, sides } = matchQuery.data;
 
   /**
-   * The clock every deadline on this page is read against — and, since [FT-4B], the one that
+   * The clock every deadline on this page is read against — and the one that
    * decides whether the result form is offered at all (§5.3: the API refuses a result before
    * kick-off).
-   *
-   * ⚠️ NOT frozen at mount any more, and not a timer either: `dataUpdatedAt` is the instant
-   * this payload came back, so it moves forward on every refetch — including the automatic
-   * one when the tab regains focus. A clock frozen at mount kept the form hidden for as long
-   * as a tab opened before kick-off stayed open, and only a RELOAD could cure it. Every
-   * countdown here stays coarse to the minute, so an interval would still buy nothing but a
-   * repaint.
-   *
-   * ⚠️ Be precise about what this does and does not fix: the clock advances on a refetch, not
-   * on the wall clock. The query client runs with `staleTime: 0` and `refetchOnWindowFocus`,
-   * so LEAVING the tab and coming back is enough — but a tab left in the foreground across
-   * kick-off still shows no form until something refetches. That is deliberate rather than
-   * lucky: the flow that leads here is "report the result of games you have just played
-   * elsewhere", so the tab is left and regained by construction, and polling for the hours or
-   * days a match can be scheduled ahead would cost far more than it buys.
-   *
-   * ⚠️ A cached payload can make this LAG behind the wall clock for a moment. That errs on
-   * the safe side by construction: an older `now` can only ever hide the form, never offer a
-   * button the server would refuse.
    */
   const nowMs = matchQuery.dataUpdatedAt;
 
   return (
     <div className="flex min-w-0 flex-col gap-6 py-6">
-      {/* THE live region of this screen, MOUNTED FOR THE WHOLE LIFE OF THE PAGE, its text
-          alone changing: a region inserted into the DOM together with its content is not
-          reliably announced. It is also the only one in this branch — the loading state
-          above has its own, and the two never coexist. `sr-only` is `position: absolute`, so
-          an empty region costs no layout. */}
+
       <p role="status" className="sr-only">
         {resultAnnouncement.message}
       </p>
@@ -167,9 +128,6 @@ export function MatchDetail() {
 
         <MatchStateNotice match={match} sides={sides} nowMs={nowMs} />
 
-        {/* Between the state notice and the maps: what the cycle is waiting for, then what
-            *I* can do about it, then the detail of the match. Renders nothing at all for a
-            visitor, a bench player, or a match that is not waiting for a result. */}
         <MatchResultPanel
           match={match}
           sides={sides}
@@ -178,8 +136,6 @@ export function MatchDetail() {
           onReported={resultAnnouncement.announce}
         />
 
-        {/* Driven by the DATA: only cs2 and Valorant have a map pool today, so a chess or a
-            LoL match renders no section at all rather than an empty one. */}
         {match.maps.length > 0 && <MatchMaps maps={match.maps} gameName={match.ladder.gameName} />}
 
         <MatchLineups match={match} sides={sides} />
@@ -190,10 +146,6 @@ export function MatchDetail() {
         </p>
       </section>
 
-      {/* ⚠️ `state` is what lets the ladder page label its own way back. Without it, a solo
-          player with no team — who reaches this sheet from their own history — was offered
-          "Back to my teams", i.e. an empty page. The origin travels in the history entry
-          because a browser never tells a page what lies behind it (`lib/back-navigation.ts`). */}
       <Link
         to="/ladders/$ladderId"
         params={{ ladderId: match.ladderId }}

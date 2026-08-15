@@ -1,5 +1,5 @@
-/*
- * Match state → what to SHOW for it: the status pill and its wording, the entry's accent edge,
+/**
+ * Match state what to SHOW for it: the status pill and its wording, the entry's accent edge,
  * the colour of an Elo change.
  */
 
@@ -56,8 +56,8 @@ export function matchAccentClass(tone: PillTone) {
 }
 
 /**
- * Colour of an Elo change: green won, red lost, quiet when there is nothing to read.
- * `null` and `0` share the quiet branch on purpose: neither is a result to celebrate.
+ * Colour of an Elo change: green won, red lost, quiet when there is nothing to read. `null` and
+ * `0` share the quiet branch on purpose: neither is a result to celebrate.
  */
 export function eloDeltaClass(eloDelta: number | null) {
   if (eloDelta === null || eloDelta === 0) return 'text-text-muted';

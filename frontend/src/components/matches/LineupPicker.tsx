@@ -36,24 +36,7 @@ type LineupPickerProps = {
   legend?: string;
 };
 
-/**
- * The line-up selector: one tile per roster member, exactly `size` of them selectable.
- *
- * ⚠️ EXTRACTED AT ITS SECOND USE ([F-MM], rule of the repo) out of
- * `components/teams/detail/CreateMatchPanel.tsx`, where the captain composes the line-up he
- * OPENS a slot with. Accepting a slot needs the very same control, with the very same §5.1
- * rule and the same cap — a second copy would have drifted the first time one of them
- * changed. **The rendered DOM is unchanged**: same `<fieldset>`, same `<legend>`, same tiles,
- * same counter sentence. Only the state moved out.
- *
- * ⚠️ `CreateMatchPanel` ITSELF WAS NOT GENERALISED, and that is a standing decision (taken on
- * [F-SOLO]): the rules are what is shared, not the markup around them. Merging two panels
- * that differ in their day/time grid, their pre-emptions and their prose would trade a real
- * merge risk for no common code.
- *
- * A `<fieldset>` (role `group`) rather than a `<div>`: it takes a description, so the counter
- * and the failure are announced WITH the group instead of floating loose next to it.
- */
+/** The line-up selector: one tile per roster member, exactly `size` of them selectable. */
 export function LineupPicker({
   members,
   value,
@@ -72,9 +55,7 @@ export function LineupPicker({
       aria-describedby={errorId ? `${hintId} ${errorId}` : hintId}
       className="flex min-w-0 flex-col gap-2 border-0 p-0"
     >
-      {/* A <legend>, not a <Label>: it names a GROUP of checkboxes, not one control. The look
-          is shared through labelClasses() rather than by copying Label's utility string —
-          same idiom as buttonClasses(). */}
+
       <legend className={labelClasses('mb-2')}>{legend}</legend>
 
       <ul role="list" className="grid gap-2 sm:grid-cols-2">

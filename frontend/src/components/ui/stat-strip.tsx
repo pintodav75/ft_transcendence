@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
  *
  * It knows NOTHING of teams, players or ladders — it is handed strings — so by the repo's
  * rule it belongs in `components/ui` straight away rather than waiting for a second use.
- * [F-SOLO] pulled it out of `TeamHero`, whose identity row (logo + team name) is genuinely
+ * It was pulled out of `TeamHero`, whose identity row (logo + team name) is genuinely
  * different from the solo one (avatar + pseudo) and was deliberately left alone.
  */
 
@@ -21,9 +21,8 @@ export type StatItem = {
 type StatStripProps = {
   stats: StatItem[];
   /**
-   * Trailing sentence, on the same row when it fits. For everything a number cannot say:
-   * "not ranked yet", "standings unavailable". The CALLER decides which one applies — a
-   * missing figure and a failed request must never look alike.
+   * Trailing sentence, on the same row when it fits. For everything a number cannot say: "not
+   * ranked yet", "standings unavailable".
    */
   note?: ReactNode;
 };

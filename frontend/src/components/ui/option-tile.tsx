@@ -12,16 +12,8 @@ type OptionTileProps = {
 };
 
 /**
- * The bordered row that wraps a checkbox or a radio together with what it labels — a
- * click target far bigger than the 16 px control itself.
- *
- * A `<label>`, deliberately: the platform gives the whole box the control's click and focus
- * behaviour for free, where a `<div onClick>` would have to earn back the keyboard, the
- * screen-reader name and the tap target.
- *
- * Extracted at its SECOND use ([FT-4B], the match result form), from `CreateMatchPanel`'s
- * line-up picker where the same class string had been written. It knows nothing about teams,
- * matches or scores — hence `components/ui/` rather than a domain folder.
+ * The bordered row that wraps a checkbox or a radio together with what it labels — a click
+ * target far bigger than the 16 px control itself.
  */
 export function OptionTile({ selected, disabled = false, children, className }: OptionTileProps) {
   return (

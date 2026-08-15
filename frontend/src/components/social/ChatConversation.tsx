@@ -48,72 +48,28 @@ type ChatConversationProps = {
   partner: ChatPartner;
   /** Closes the conversation. The owner (`SocialPanel`) is the one holding "which one is open". */
   onClose: () => void;
-  /**
-   * Posts a sentence in the ONE live region of the rail, which `SocialPanel` owns and mounts.
-   * This component deliberately declares no `role="status"` / `role="log"` of its own: the rail
-   * is on screen on every authenticated page, so a second region would compete with the one the
-   * visited page already declares as "the only one of this screen".
-   */
+  /** Posts a sentence in the ONE live region of the rail, which `SocialPanel` owns and mounts. */
   announce: (text: string) => void;
   /**
-   * Under 1024 px the social panel is a full-screen `aria-modal` overlay ([FS-0]), so the link
+   * Under 1024 px the social panel is a full-screen `aria-modal` overlay, so the link
    * to the partner's profile must close it — otherwise the visitor lands behind the overlay.
-   * `undefined` on desktop, where the rail is permanent.
    */
   onNavigate?: () => void;
   /** Handle on the composer, so the panel can focus it when the conversation is (re)opened. */
   inputRef?: Ref<HTMLInputElement>;
-  /**
-   * 🚨 THE DRAFT IS NOT HELD HERE, and that is deliberate. This component is UNMOUNTED whenever
-   * its window leaves the strip — narrowing the viewport, zooming in, dropping under 1024 px —
-   * and a draft held in local state would die with it, in the middle of a sentence. So the
-   * panel, which outlives every window, keeps one draft per partner and hands it back on the
-   * way in. Same fix [FS-3] applied for tab switches, at the one door it did not close.
-   */
+  /** THE DRAFT IS NOT HELD HERE, and that is deliberate. */
   draft: string;
-  /**
-   * Writes this conversation's draft in the panel. It takes the partner id BACK from us on
-   * purpose: the panel can then expose one callback with a stable identity for all three
-   * windows, and `resolvePendingSend` / `failPendingSend` — which the socket subscription below
-   * depends on — keep theirs. A per-partner closure rebuilt each render would re-subscribe to
-   * the socket on every keystroke.
-   */
+  /** Writes this conversation's draft in the panel. */
   onDraftChange: (partnerId: string, value: SetStateAction<string>) => void;
-  /**
-   * Tells the panel whether a send of ours is waiting for the server. The panel watches for
-   * refusals aimed at a conversation that was CLOSED mid-send, and the server's `error` frame
-   * carries no reference to what it refused — so the only way for the panel to know a refusal
-   * is not ours to speak is to know that a mounted conversation is still expecting one.
-   */
+  /** Tells the panel whether a send of ours is waiting for the server. */
   onSendInFlightChange?: (partnerId: string, inFlight: boolean) => void;
-  /**
-   * `false` while the rail is showing another tab. The conversation is KEPT MOUNTED behind it
-   * (that is what saves the realtime buffer; the draft is the panel's), so it has to know it is
-   * off screen:
-   * it then announces nothing, and re-scrolls to the bottom when it comes back.
-   */
+  /** `false` while the rail is showing another tab. */
   isVisible?: boolean;
-  /**
-   * Called at unmount if a send is still waiting for its acknowledgement. Whoever mounted this
-   * component outlives it, so it can catch the refusal that will arrive seconds later.
-   */
+  /** Called at unmount if a send is still waiting for its acknowledgement. */
   onSendAbandoned?: () => void;
 };
 
-/**
- * ONE direct-message conversation: header, log, composer. Self-contained and height-fluid
- * (`h-full`), so [FS-4] can mount it in a floating window without touching a line of it.
- *
- * 🔑 TWO SOURCES, ONE LIST. The history comes from `GET /messages/{friendId}` (TanStack Query)
- * and everything that happens while the screen is open comes from the single WebSocket of
- * [FS-0]. They OVERLAP — the same message is in both after a refetch — so they are merged and
- * deduplicated by `id` at render (`mergeMessages`). Nothing is ever appended to the query cache.
- *
- * 🚨 THE TRANSPORT REPLAYS NOTHING. Whatever arrives while the socket is down is on the server
- * and nowhere else, so a reconnection REFETCHES rather than waiting for events that will never
- * come. Same reason the query has no `staleTime`: re-opening a conversation must re-ask the
- * server rather than trust a buffer that stopped being fed while it was closed.
- */
+/** ONE direct-message conversation: header, log, composer. */
 export function ChatConversation({
   partner,
   onClose,
@@ -138,23 +94,8 @@ export function ChatConversation({
   const [sendError, setSendError] = useState<string | null>(null);
 
   /**
-   * 🚨 HOW A SEND IS TIED TO ITS ACKNOWLEDGEMENT — the server offers no correlation id, so this
-   * is a decision, and here it is in full.
-   *
-   * `message_sent` carries the message as stored, nothing else. So the composer allows exactly
-   * ONE send in flight (which is also the "no double send" rule), remembers the content it just
-   * sent, and treats the next `message_sent` carrying that same content as its acknowledgement.
-   * Two identical drafts sent in a row cannot be confused: the second one cannot start before
-   * the first is acknowledged.
-   *
-   * 🔑 AND THE ACKNOWLEDGEMENT IS NOT WHAT DISPLAYS THE MESSAGE. It only unlocks the composer.
-   * The message itself is displayed by the ordinary live path, exactly like an incoming one, so
-   * there is no optimistic bubble to reconcile — which is precisely the class of bug that shows
-   * a message twice. The cost is the round trip before my own message appears; on the local
-   * socket it is a few milliseconds.
-   *
-   * A ref and not state: this is read inside the socket listener, where a state value captured
-   * at subscribe time would be stale.
+   * HOW A SEND IS TIED TO ITS ACKNOWLEDGEMENT — the server offers no correlation id, so this is
+   * a decision, and here it is in full.
    */
   const pendingSendRef = useRef<string | null>(null);
   /**
@@ -175,23 +116,14 @@ export function ChatConversation({
 
   /**
    * Local face of the panel's draft store — same signature as a `useState` setter, so every
-   * call site below reads exactly as it did when the state lived here. Stable as long as the
-   * panel's callback is, which is what keeps the socket subscription from being rebuilt.
+   * call site below reads exactly as it did when the state lived here.
    */
   const setDraft = useCallback(
     (value: SetStateAction<string>) => onDraftChange(partner.id, value),
     [onDraftChange, partner.id],
   );
 
-  /**
-   * 🚨 A CONVERSATION BEHIND ANOTHER TAB SAYS NOTHING. It stays mounted there, so it keeps
-   * receiving messages on a screen nobody is looking at, and announcing them would read a
-   * stranger's sentence out of a panel a screen reader user cannot navigate to. Nothing is
-   * lost: everything announced here is also WRITTEN on screen, and is read on the way back.
-   *
-   * A ref (mirrored by an effect) and not the prop itself: the subscription below must not be
-   * torn down and rebuilt every time the rail changes tab.
-   */
+  /** A CONVERSATION BEHIND ANOTHER TAB SAYS NOTHING. */
   const isVisibleRef = useRef(isVisible);
   useEffect(() => {
     isVisibleRef.current = isVisible;
@@ -221,13 +153,8 @@ export function ChatConversation({
       }
 
       /**
-       * 🚨 AN ACKNOWLEDGEMENT CAN ARRIVE AFTER THE 10 s NET — a backend that restarts mid-send
-       * is enough. The bubble is then displayed by the ordinary live path anyway, so leaving
-       * the refusal up would show a DELIVERED message under a red "not sent", with its text
-       * back in the composer. The user re-sends, and creates a real duplicate in the database.
-       *
-       * So a send declared lost is un-declared here: the refusal goes, and the field is emptied
-       * — but only if it still holds that very text, since the user may have typed since.
+       * AN ACKNOWLEDGEMENT CAN ARRIVE AFTER THE 10 s NET — a backend that restarts mid-send is
+       * enough.
        */
       if (lostSendRef.current !== acknowledgedContent) return;
 
@@ -238,11 +165,7 @@ export function ChatConversation({
     [clearSendTimer, setDraft],
   );
 
-  /**
-   * The send did not make it. The draft goes BACK IN THE FIELD — but only if the field is
-   * empty: the user may have started typing something else during the round trip, and
-   * overwriting that would be worse than losing the refused text.
-   */
+  /** The send did not make it. */
   const failPendingSend = useCallback(
     (message: string) => {
       const refusedContent = pendingSendRef.current;
@@ -270,8 +193,7 @@ export function ChatConversation({
 
         setLiveMessages((current) =>
           // Guard against the same event being handled twice (a duplicate frame, a remount
-          // racing a refetch). `mergeMessages` would dedup it anyway; keeping the buffer clean
-          // costs one lookup and keeps it readable in the devtools.
+          // racing a refetch).
           current.some((known) => known.id === message.id) ? current : [...current, message],
         );
 
@@ -319,19 +241,10 @@ export function ChatConversation({
   }, [connectionState, failPendingSend, refetch]);
 
   // Unmount: a timer left running would call `setState` on a component that is gone (a React
-  // warning, and the console has to stay empty). `clearSendTimer` IS the cleanup function here.
+  // warning, and the console has to stay empty).
   useEffect(() => clearSendTimer, [clearSendTimer]);
 
-  /**
-   * 🚨 CLOSED WITH A SEND STILL IN FLIGHT. The server's refusal ("you are not friends any
-   * more", "you are blocked") lands on the socket seconds later, with this component gone and
-   * nobody listening: the text would vanish and nothing would ever say why. The panel outlives
-   * the conversation, so the watch is handed over to it.
-   *
-   * The callback is read through a ref so this effect can have EMPTY deps: it must fire its
-   * cleanup at unmount and at no other moment — a parent re-creating the prop would otherwise
-   * make it report an abandoned send in the middle of a perfectly live conversation.
-   */
+  /** CLOSED WITH A SEND STILL IN FLIGHT. */
   const sendAbandonedRef = useRef(onSendAbandoned);
   useEffect(() => {
     sendAbandonedRef.current = onSendAbandoned;
@@ -343,18 +256,7 @@ export function ChatConversation({
     [],
   );
 
-  /**
-   * 🚨 AND WHILE WE ARE STILL HERE, THE REFUSAL IS OURS. The panel keeps watching for the
-   * answer to a send whose window was closed, but a refusal can only ever be about ONE send —
-   * so as long as this conversation is mounted with one in flight, it is the one that will
-   * display it, and the panel must stay quiet or the user gets it twice: once in red under the
-   * composer, once more read out in the rail's live region.
-   *
-   * `isSending` mirrors `pendingSendRef` exactly (they are set and cleared together), and it is
-   * state rather than a ref, so it is what can drive an effect. The cleanup covers BOTH the
-   * flip back to idle and the unmount — after which the panel is on its own again, which is
-   * precisely what `onSendAbandoned` above just told it.
-   */
+  /** AND WHILE WE ARE STILL HERE, THE REFUSAL IS OURS. */
   useEffect(() => {
     if (!onSendInFlightChange) return;
 
@@ -370,7 +272,7 @@ export function ChatConversation({
   /**
    * The two refusals of this screen are DISPLAYED by `FormMessage`, which carries no live role
    * inside the rail (one region for the whole panel, and `SocialPanel` owns it — a region
-   * mounted together with its text is not reliably read anyway). So they are spoken from here.
+   * mounted together with its text is not reliably read anyway).
    */
   useEffect(() => {
     if (!isError) return;
@@ -388,7 +290,7 @@ export function ChatConversation({
   // that depends on it would scroll on every keystroke in the composer.
   useEffect(() => {
     const log = logRef.current;
-    // ⚠️ `isVisible` IS A REAL DEPENDENCY: a hidden tab has no layout, so `scrollHeight` is 0
+    // `isVisible` IS A REAL DEPENDENCY: a hidden tab has no layout, so `scrollHeight` is 0
     // there and scrolling would park the log at the TOP for the moment it comes back.
     if (!log || !isVisible || !stickToBottomRef.current) return;
 
@@ -461,9 +363,7 @@ export function ChatConversation({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-border-subtle p-3">
-        {/* The pseudo leads to the player page, like every other pseudo in the app. It is a
-            SIBLING of the close button, never its parent: an interactive element inside an
-            `<a>` is invalid HTML that browsers repair by splitting the DOM. */}
+
         <Link
           to="/players/$pseudo"
           params={{ pseudo: partner.pseudo }}
@@ -477,16 +377,13 @@ export function ChatConversation({
             presence={presence}
             className="size-11"
           />
-          {/* `min-w-0` on the column AND on the link: without either, a long pseudo refuses to
-              shrink and pushes the close button out of the 312 px rail. */}
+
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold text-text-primary">
               {partnerName}
             </span>
             <span className="block truncate text-xs text-text-secondary">
-              {/* `unknown` shows the pseudo rather than a guess: the store keeps the ids it
-                  knew BEFORE the socket dropped, and "Offline" would be a statement the server
-                  never made. */}
+
               {presence === 'online' ? 'Online' : presence === 'offline' ? 'Offline' : `@${partner.pseudo}`}
             </span>
           </span>
@@ -500,16 +397,6 @@ export function ChatConversation({
         </IconButton>
       </div>
 
-      {/**
-       * 🚨 A FAILED REFETCH DOES NOT EMPTY THE SCREEN. TanStack Query KEEPS `data` when a
-       * refetch fails, so `isError` goes true on a conversation that is perfectly readable —
-       * and it goes true often, since coming back from a cut and returning to the tab both
-       * refetch. Wiping forty bubbles (plus everything the socket delivered since) for a
-       * background failure would destroy the only catch-up path this screen has.
-       *
-       * So: a discreet line above the log while there is something to read, and the full
-       * error screen only when there is nothing at all (`ConversationLog`).
-       */}
       {isError && messages.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border-subtle bg-surface-card-strong/60 px-3 py-2">
           <FormMessage role="presentation">{loadErrorMessage}</FormMessage>
@@ -520,10 +407,6 @@ export function ChatConversation({
         </div>
       )}
 
-      {/* Focusable and NAMED: reading the history is the whole point of this screen, and a
-          scroll container with no focusable descendant is skipped by the Tab key — the keyboard
-          could only ever see the few bubbles that happened to be visible. `role="group"` and
-          NOT `role="log"`: `log` is an implicit live region, and the rail allows exactly one. */}
       <div
         ref={logRef}
         onScroll={handleLogScroll}
@@ -549,22 +432,17 @@ export function ChatConversation({
       >
         {isOffline && (
           // No `role`: this is a STATE of the screen, not the result of an action, and the rail
-          // owns exactly one live region. The field points at it with `aria-describedby`, so
-          // the reason the send button is disabled is heard on arrival in the field.
+          // owns exactly one live region.
           <p id={offlineNoticeId} className="text-xs text-text-secondary">
             You are offline — messages cannot be sent right now.
           </p>
         )}
 
-        {/* The draft leaves the field the instant it is sent, so without this the round trip
-            looks like a message that simply evaporated. No `role="status"`: announced through
-            the rail's own region like everything else here. */}
         {isSending && <p className="text-xs text-text-secondary">Sending…</p>}
 
         {sendError && (
           // `role="presentation"`: `FormMessage` defaults to `role="alert"`, and the rail
-          // declares ONE live region, which `SocialPanel` mounts empty and keeps mounted. The
-          // red tone stays, the speaking is done by the effect above.
+          // declares ONE live region, which `SocialPanel` mounts empty and keeps mounted.
           <FormMessage id={sendErrorId} role="presentation">
             {sendError}
           </FormMessage>
@@ -592,8 +470,8 @@ export function ChatConversation({
             maxLength={MAX_MESSAGE_LENGTH}
             autoComplete="off"
             placeholder="Send a message…"
-            // The refusal is heard ONCE as it lands; `aria-invalid` + this link are what make it
-            // findable again on the next visit to the field, which is when it is acted on.
+            // The refusal is heard ONCE as it lands; `aria-invalid` + this link are what make
+            // it findable again on the next visit to the field, which is when it is acted on.
             aria-invalid={sendError !== null}
             aria-describedby={describedBy === '' ? undefined : describedBy}
             className="h-11 min-w-0 flex-1"
@@ -627,9 +505,6 @@ type ConversationLogProps = {
 /**
  * Loading / error / empty / loaded, extracted so the four states are visible side by side
  * instead of buried in early returns inside the layout above.
- *
- * 🚨 THE ORDER OF THE TESTS IS THE FIX: what there is to READ comes first, and `isError` only
- * decides between the error screen and the empty state. See the banner in the parent.
  */
 function ConversationLog({
   messages,
@@ -643,8 +518,7 @@ function ConversationLog({
   if (isPending) {
     return (
       <div className="flex flex-col gap-2">
-        {/* Alternating sides at the height of a real bubble, so the log does not jump when the
-            history lands. `aria-hidden`: the sentence below is what a screen reader needs. */}
+
         {[0, 1, 2].map((row) => (
           <div
             key={row}
@@ -683,12 +557,7 @@ function ConversationLog({
     );
   }
 
-  /**
-   * Where the day changes, a separator is inserted. It replaces the `title` the bubbles used
-   * to carry: a tooltip only opens under a mouse pointer, so on a touch screen and at the
-   * keyboard the full date simply did not exist — and a hundred messages spread over a week
-   * all read as bare clock times, with nothing telling yesterday from today.
-   */
+  /** Where the day changes, a separator is inserted. */
   const rows = messages.map((message, index) => {
     const previous = index === 0 ? undefined : messages[index - 1];
 
@@ -703,8 +572,7 @@ function ConversationLog({
 
   return (
     // `role="list"` is explicit: Tailwind's preflight drops the marker and Safari then drops
-    // the list semantics with it. The accessible NAME is on the scroll container above, which
-    // is the element the keyboard actually lands on — repeating it here would read it twice.
+    // the list semantics with it.
     <ul role="list" className="flex flex-col gap-1.5">
       {rows.map(({ message, dayLabel }) => {
         const mine = message.senderId === meId;
@@ -727,14 +595,10 @@ function ConversationLog({
                     : 'border border-border-subtle bg-surface-card-strong text-text-primary',
                 )}
               >
-                {/* Who said it. Visually obvious (side + colour), invisible to a screen reader
-                    without this line — and reading twenty messages with no attribution is
-                    unusable. */}
+
                 <span className="sr-only">{mine ? 'You:' : `${partnerName}:`}</span>
-                {/* `break-words` is what keeps a 300-character unbroken string inside a 312 px
-                    rail; `whitespace-pre-wrap` preserves the line breaks another client may
-                    send. */}
-                <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+
+                <p className="whitespace-pre-wrap wrap-break-word text-sm">{message.content}</p>
                 <time
                   dateTime={message.createdAt}
                   className={cn(

@@ -5,19 +5,14 @@ import { SiteLogo } from '@/components/layout/SiteLogo';
 import type { ReactNode } from 'react';
 
 /**
- * Shell of the two legal pages (`/terms`, `/privacy`).
+ * Shell of the two legal pages, /terms and /privacy.
  *
- * 🔑 EXTRACTED AT THE SECOND USE, as the rule wants: the Terms and the Policy are written
- * the same day, share the same shell, and nothing else in the app looks like a document.
- *
- * ⚠️ PUBLIC PAGES. They are reachable WITHOUT a session — from the landing footer and from
- * the sign-in / sign-up screens — so they mount neither the rail nor `AuthenticatedLayout`,
- * and they must never call the API. The only way out is the wordmark, which `SiteLogo`
- * already points at the right home (`/home` when signed in, `/` otherwise).
- *
- * The table of contents is plain `<a href="#…">` anchors and NOT router `<Link>`s: a hash
- * inside the current page is a scroll, not a navigation — a `<Link>` would push a history
- * entry and make the browser Back button walk back up the document.
+ * these are PUBLIC — reachable without a session from the landing footer and the sign-in /
+ * sign-up screens. so they mount neither the rail nor AuthenticatedLayout, and they must never
+ * call the API. the only way out is the wordmark (SiteLogo already points at the right home).
+ * the table of contents is plain <a href="#..."> and not router <Link>s: a hash in the current
+ * page is a scroll, not a navigation, and a <Link> would push a history entry that makes Back
+ * walk up the document.
  */
 type LegalPageProps = {
   title: string;
@@ -78,8 +73,8 @@ type LegalSectionProps = {
   children: ReactNode;
 };
 
-// One numbered clause. `scroll-mt-6` keeps the heading off the very top edge when the
-// table of contents jumps to it.
+// One numbered clause. `scroll-mt-6` keeps the heading off the very top edge when the table of
+// contents jumps to it.
 export function LegalSection({ id, title, children }: LegalSectionProps) {
   return (
     <section id={id} className="scroll-mt-6 space-y-3">
@@ -89,14 +84,14 @@ export function LegalSection({ id, title, children }: LegalSectionProps) {
   );
 }
 
-// Bullet list of a clause. Kept here rather than in `ui/`: it is the list style of a
-// legal document, not a component of the product.
+// Bullet list of a clause. Kept here rather than in `ui/`: it is the list style of a legal
+// document, not a component of the product.
 export function LegalList({ children }: { children: ReactNode }) {
   return <ul className="ml-5 list-disc space-y-2 marker:text-text-muted">{children}</ul>;
 }
 
-// The four maintainers, in one place: both documents name them, and a stale address on a
-// legal page is worse than no address at all.
+// The four maintainers, in one place: both documents name them, and a stale address on a legal
+// page is worse than no address at all.
 const MAINTAINERS = [
   'dpinto@student.42.fr',
   'wacista@student.42.fr',
