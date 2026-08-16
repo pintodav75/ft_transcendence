@@ -629,9 +629,8 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               : undefined,
         );
 
-      // Bien formé mais inconnu → 404 (contrat d'origine, gardé par `test_matches_create.py`).
-      // Les autres filtres ne désignent rien → au pire une liste vide, jamais un 404. Même
-      // arbitrage que `GET /ladders?gameId=`.
+      // Bien forme mais inconnu : 404. Les autres filtres ne designent aucune ressource, donc
+      // au pire une liste vide, jamais un 404. Meme arbitrage que GET /ladders?gameId=.
       if (query.ladderId && !ladderRows.length)
         return reply.code(404).send({ error: 'ladder not found' });
 

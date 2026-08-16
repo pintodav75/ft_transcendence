@@ -84,12 +84,10 @@ export async function applyMatchElo(
   };
 }
 
-/**
- * Clôt un match sur un vainqueur et applique l'ELO — dans la transaction fournie.
- * Partagé par la route (accord des deux camps), le job d'auto-confirmation 24 h (B6)
- * et, plus tard, l'arbitrage admin (B7). L'appelant a déjà pris le verrou et vérifié
- * que le match est bien à clore ; ce helper ne fait pas de garde métier.
- */
+// Clot un match sur un vainqueur et applique l'ELO, dans la transaction qu'on lui passe.
+// Trois appelants : la route quand les deux camps sont d'accord, le job d'auto-confirmation
+// au bout de 24h, et l'arbitrage admin. L'appelant a deja pris le verrou et verifie que le
+// match est a clore, cette fonction ne fait aucune garde metier.
 export async function completeMatchWithElo(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   matchId: string,

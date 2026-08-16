@@ -22,8 +22,8 @@ import { and, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import { completeMatchWithElo } from '../utils/rankings.js';
 import { WINS_REQUIRED } from '../utils/elo.js';
 
-// Mot de passe des comptes CONNECTABLES — le MÊME couple que `backend/tests/helpers.py`,
-// pour n'avoir qu'un seul secret de fixture à connaître dans le repo. Sans lui, les matchs
+// Mot de passe des comptes connectables, le meme pour tous : un seul secret de fixture a
+// retenir. Sans lui, les matchs
 // de démo seraient visibles en SQL mais INATTEIGNABLES dans l'app (la page équipe masque
 // les slots aux non-membres, et le bouton « Confirmer » n'existe que pour un participant).
 // Régénérer avec :
@@ -365,10 +365,9 @@ async function main() {
       // Rien ne plafonne l'avance côté API (`createMatchSchema` n'impose qu'un MINIMUM de
       // 15 min), l'état reste donc parfaitement légal.
       pending: at(24 * 3),
-      // ⚠️ 2 JOURS, pas 1 heure — même raisonnement que `pending` ci-dessus, appliqué au bon
-      // état cette fois. « Accepté AVANT l'heure » cessait d'exister 1 h après le seed, et le
-      // scénario d'audit qui le cherche partait alors en `exit 2` (harnais en échec, jamais un
-      // vert — invariant #10). Un état de démo doit survivre à la journée qui l'utilise.
+      // 2 jours et pas 1 heure : "accepte avant l'heure" cessait d'exister une heure apres le
+      // seed, donc l'etat qu'on voulait montrer avait disparu avant qu'on regarde. Un etat de
+      // demo doit survivre a la journee qui l'utilise.
       upcoming: at(24 * 2),
       live: at(-2),
       awaiting: at(-5),
