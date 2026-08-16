@@ -1,18 +1,7 @@
-/**
- * `/matchmaking` page — every open slot of every ladder, and the only place in the app where one
- * can be ACCEPTED.
- *
-// note that you can access it with ?ladderId=<uuid> and it will only display that ladder (it will be converted to two controls)
-
-only display an accept button if:
-  - linked game account
-  - team on the ladder
-  - youre the captain
-  - roster has enough players
-  - no schedule conflict
-
-also, when you accept a team game, you select the lineup etc..
-*/
+// Every open slot of every ladder, and the only place in the app where one can be accepted.
+// `?ladderId=<uuid>` narrows the board down to a single ladder.
+// The server decides who may accept what and returns the reason when it refuses, so the accept
+// button only reads that verdict instead of re-checking the rules here.
 
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Swords } from 'lucide-react';
