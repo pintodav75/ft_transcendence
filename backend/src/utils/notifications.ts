@@ -8,22 +8,13 @@ import {
   type NotificationPayload,
 } from './notification-schemas.js';
 
-/**
- * B9 — le système de notifications, en DEUX couches :
- *   1. la table `notifications` = la source de vérité (survit à l'offline, alimente la
- *      cloche et le badge non-lu) ;
- *   2. le push WebSocket = du best-effort par-dessus (un destinataire hors ligne
- *      récupérera tout au prochain GET /notifications).
- *
- * ⚠️ LE PILIER ANTI-BUG : `notify()` INSÈRE dans la transaction métier (atomique avec
- * l'action qui déclenche la notif), mais NE POUSSE RIEN. Le push se fait APRÈS le commit,
- * via `pushNotifications()` sur les lignes retournées. Pousser depuis la transaction
- * notifierait un événement qui peut encore être ANNULÉ par un rollback.
- *
- * Les schémas de payload (par type, display-safe garanti à l'écriture) vivent dans
- * `notification-schemas.ts` — un fichier À PART, sans import de `db/index.js`, pour
- * rester testable en Vitest pur (sans DATABASE_URL). Voir tests/unit/notifications.test.ts.
- */
+// Les notifications marchent sur deux couches : la table notifications est la source de verite
+// (elle survit a la deconnexion et alimente la cloche), le push WebSocket n'est qu'un bonus
+// par dessus. Quelqu'un hors ligne recuperera tout a son prochain GET /notifications.
+//
+// La regle a ne pas casser : notify() ecrit DANS la transaction metier, mais ne pousse rien.
+// Le push se fait apres le commit avec pushNotifications(). Sinon on annoncerait un evenement
+// qu'un rollback peut encore effacer.
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Executor = typeof db | Tx;
@@ -31,15 +22,10 @@ type Executor = typeof db | Tx;
 export type { NotificationType };
 export type CreatedNotification = typeof notificationsTable.$inferSelect;
 
-/**
- * Crée une notification par destinataire, DANS la transaction fournie.
- * Rend les lignes créées : l'appelant les passera à pushNotifications() après le commit.
- *
- * `data` est validé par le schéma du `type` AVANT l'insert (`.parse`, pas `.safeParse` —
- * un payload malformé doit faire échouer la transaction, pas s'écrire silencieusement
- * tronqué). Le générique `T` fait aussi que TypeScript refuse déjà à la compilation un
- * payload qui ne correspond pas au `type` donné — deux filets, compile-time et runtime.
- */
+// Une notification par destinataire, dans la transaction qu'on nous passe. On rend les lignes
+// creees pour que l'appelant les donne a pushNotifications() une fois le commit passe.
+// On valide avec .parse et pas .safeParse : un payload malforme doit faire echouer la
+// transaction, pas s'ecrire tronque dans son coin.
 export async function notify<T extends NotificationType>(
   tx: Tx,
   userIds: string[],
@@ -47,8 +33,8 @@ export async function notify<T extends NotificationType>(
   data: NotificationPayload<T>,
 ): Promise<CreatedNotification[]> {
   const validated: Record<string, unknown> = notificationPayloadSchemas[type].parse(data);
-  // Dédoublonnage : un même user ne doit jamais recevoir deux fois la même notif
-  // (ex. un capitaine présent dans deux listes de destinataires concaténées).
+  // Un capitaine peut se retrouver dans deux listes de destinataires collees bout a bout,
+  // on dedoublonne pour ne pas lui envoyer deux fois la meme chose.
   const unique = [...new Set(userIds)];
   if (unique.length === 0) return [];
   return tx
@@ -57,11 +43,8 @@ export async function notify<T extends NotificationType>(
     .returning();
 }
 
-/**
- * Push WebSocket best-effort — À APPELER APRÈS LE COMMIT, jamais dedans.
- * Un destinataire hors ligne est simplement ignoré (sendToUser ne fait rien sans socket) ;
- * une erreur d'envoi ne doit JAMAIS faire échouer la requête qui a déclenché la notif.
- */
+// A appeler apres le commit, jamais dedans. Un destinataire hors ligne est ignore, et une
+// erreur d'envoi ne doit surtout pas faire echouer la requete qui a declenche la notif.
 export function pushNotifications(notifications: CreatedNotification[]): void {
   for (const n of notifications) {
     try {
@@ -79,16 +62,13 @@ export function pushNotifications(notifications: CreatedNotification[]): void {
         }),
       );
     } catch {
-      // best-effort : tant pis pour ce socket, la notif est en base
+      // tant pis pour ce socket, la notif est en base de toute facon
     }
   }
 }
 
-/**
- * Les joueurs ALIGNÉS d'un match (les deux sides confondus). C'est la liste de
- * destinataires des events d'équipe : `match_participants` = la lineup engagée,
- * le banc n'y figure pas (décision de la carte : banc exclu).
- */
+// Les joueurs alignes d'un match, les deux camps confondus. C'est a eux qu'on envoie les
+// notifs d'equipe : match_participants ne contient que la compo, le banc n'est pas dedans.
 export async function getMatchParticipantIds(
   executor: Executor,
   matchId: string,
@@ -101,7 +81,7 @@ export async function getMatchParticipantIds(
   return rows.map((r) => r.userId);
 }
 
-/** Tous les admins — destinataires de `dispute_needs_admin` (l'arbitrage devient push, pas pull). */
+// Tous les admins, pour dispute_needs_admin : l'arbitre est prevenu, il n'a pas a surveiller.
 export async function getAdminIds(executor: Executor): Promise<string[]> {
   const rows = await executor
     .select({ id: usersTable.id })

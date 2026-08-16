@@ -175,17 +175,13 @@ export function buildPublicUrl(filename: string): string {
 // que recopié en dur — le jour où le bucket ou le préfixe `/media` change, ce code suit tout seul.
 const HOSTED_PREFIX = buildPublicUrl('');
 
-/**
- * Clé d'objet MinIO derrière une URL de média, ou `undefined` si ce média n'est PAS hébergé
- * chez nous.
- *
- * `teams.logo_url` peut contenir une URL EXTERNE `https://…` (modèle historique, toujours
- * accepté par `POST /teams` et `PATCH /teams/:id`) : il n'y a alors rien à supprimer dans le
- * bucket. On matche donc le préfixe EXACT — jamais un `split('/').pop()` qui, sur
- * `https://cdn.example.com/logo.png`, rendrait `logo.png` et ferait tenter la suppression
- * d'un objet homonyme dans NOTRE bucket. On refuse aussi toute clé contenant un `/` : pas
- * question qu'une valeur bricolée en base fasse supprimer un objet d'un autre préfixe.
- */
+// Retrouve le nom de l'objet derriere une URL de media, ou undefined si ce media n'est pas
+// heberge chez nous. Un logo d'equipe peut tres bien pointer vers un site externe, il n'y a
+// alors rien a supprimer.
+// On compare le prefixe en entier plutot que de prendre ce qui suit le dernier slash : sur
+// une URL externe, ca rendrait le nom du fichier et on tenterait de supprimer un objet
+// homonyme chez nous. On refuse aussi les cles avec un slash, pour qu'une valeur bricolee en
+// base ne puisse pas viser un autre dossier.
 export function hostedObjectKey(url: string | null | undefined): string | undefined {
   if (!url || !url.startsWith(HOSTED_PREFIX)) return undefined;
   const key = url.slice(HOSTED_PREFIX.length);

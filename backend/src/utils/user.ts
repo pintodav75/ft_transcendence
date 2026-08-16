@@ -1,30 +1,19 @@
 import type { usersTable } from '../db/schema.js';
 
-/** Une ligne brute de `users`, secrets compris. Ne quitte JAMAIS le backend telle quelle. */
+// Une ligne brute de users, secrets compris. Ne sort jamais du backend telle quelle.
 export type UserRow = typeof usersTable.$inferSelect;
 
-/**
- * Le user tel que le contrat OpenAPI le décrit (schéma `User`) : la ligne `users` privée de ses
- * deux secrets, augmentée du booléen dérivé `hasPassword`.
- */
+// Le user tel que le contrat OpenAPI le decrit : sans les deux secrets, avec hasPassword en plus.
 export type AuthUser = Omit<UserRow, 'passwordHash' | 'totpSecret'> & { hasPassword: boolean };
 
-/**
- * Seule fabrique autorisée du user authentifié renvoyé par l'API.
- *
- * ⚠️ Le retrait de `passwordHash`/`totpSecret` était recopié à la main sur 8 sites (7 routes —
- * `DELETE /users/me/avatar` en compte deux) : une seule
- * omission = fuite du hash de mot de passe. Tout ajout de colonne sensible à `users` se traite
- * désormais ICI, une fois.
- *
- * `hasPassword` répond à une question que `oauthProvider` NE répond PAS : le callback Google
- * (`routes/auth/google.ts`) rattache un provider à un compte existant retrouvé par email **sans
- * toucher à son `passwordHash`**. Un tel compte a donc `oauthProvider = 'google'` ET un mot de
- * passe local — c'est `hasPassword` qui dit si `PATCH /users/me/password` est utilisable.
- *
- * ⚠️ Ne pas l'employer pour le profil public (`GET /users/{pseudo}`) : `hasPassword` est une
- * information sur les moyens d'authentification d'autrui, il n'a rien à y faire.
- */
+// Seul endroit ou on fabrique le user renvoye par l'API. Avant, le retrait du hash et du secret
+// TOTP etait recopie a la main dans 8 endroits, et un seul oubli suffisait a fuiter le mot de
+// passe. Toute nouvelle colonne sensible se traite ici.
+//
+// hasPassword repond a une question a laquelle oauthProvider ne repond pas : quand on se
+// connecte avec Google sur un compte qui existait deja, on rattache le provider sans toucher au
+// mot de passe. Le compte a donc les deux, et c'est hasPassword qui dit si on peut proposer le
+// changement de mot de passe. A ne pas utiliser pour le profil public, ca ne regarde personne.
 export function toAuthUser(user: UserRow): AuthUser {
   const { passwordHash, totpSecret: _totpSecret, ...safe } = user;
   return { ...safe, hasPassword: passwordHash !== null };

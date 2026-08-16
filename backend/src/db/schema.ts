@@ -314,15 +314,13 @@ export const matchParticipantsTable = pgTable(
     matchSideId: uuid('match_side_id')
       .notNull()
       .references(() => matchSidesTable.id, { onDelete: 'cascade' }),
-    // ⚠️ CASCADE, pas RESTRICT (BX-DEL). En `restrict`, tout joueur ayant été aligné UNE
-    // fois — même dans un match terminé il y a des mois — ne pouvait plus JAMAIS supprimer
-    // son compte : la contrainte remontait en erreur Postgres 23503 et l'utilisateur
-    // recevait un 500 opaque. Ce qui compte (score, vainqueur, delta d'Elo) vit sur
-    // `matches` / `match_sides` : supprimer un compte ne fait perdre que « qui était aligné »
-    // dans les vieilles compositions, jamais un résultat ni un classement.
-    // 🔑 La règle produit — on ne peut pas partir en laissant un match EN COURS — n'est PAS
-    // portée par cette contrainte mais par une garde explicite dans `DELETE /users/me`, qui
-    // rend un 409 `engaged_in_match`. Une contrainte de FK ne sait pas lire un statut.
+    // Cascade et pas restrict : avec restrict, quelqu'un qui avait ete aligne une seule fois,
+    // meme dans un match termine depuis des mois, ne pouvait plus jamais supprimer son compte
+    // et recevait un 500 incomprehensible. Ce qui compte vraiment, le score, le vainqueur et
+    // l'Elo, est stocke sur le match : on ne perd que la liste de qui etait aligne.
+    // La regle "on ne part pas en laissant un match en cours" n'est pas portee par cette
+    // contrainte mais par une garde dans la route de suppression. Une cle etrangere ne sait
+    // pas lire un statut.
     userId: uuid('user_id')
       .notNull()
       .references(() => usersTable.id, { onDelete: 'cascade' }),

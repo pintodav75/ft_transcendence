@@ -52,81 +52,25 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Clé de verrou d'une ÉQUIPE — même convention que `competitorKey()` dans `matches.ts`. */
 const teamKey = (teamId: string) => `team:${teamId}`;
-/**
- * Clé de verrou d'un JOUEUR SUR UN LADDER. Même convention que le côté solo de
- * `competitorKey()` : c'est la portée réelle de « une seule équipe par ladder ».
- */
+// Cle de verrou d'un joueur sur un ladder : c'est la portee reelle de la regle "une seule
+// equipe par ladder". Meme convention que competitorKey() cote solo.
 const playerLadderKey = (userId: string, ladderId: string) => `user:${userId}:${ladderId}`;
 
-/**
- * Sérialise ce qui touche au roster, sur des clés données, dans un ORDRE DÉTERMINISTE.
- * Copie assumée de `lockCompetitors()` (`routes/matches.ts:223`) — même problème, même remède.
- *
- * DEUX raisons de verrouiller, et elles n'ont pas la même portée :
- *
- * 1. **`team:<id>`** — le plafond des 10 est un AGRÉGAT (compter des lignes), pas une garde
- *    de ligne : aucun `UPDATE … WHERE` ne le rend atomique, deux transactions qui lisent
- *    « 9 » passent ensemble (piège #14).
- * 2. **`user:<id>:<ladder>`** — l'acceptation écrit DEUX ressources dont la portée est
- *    (joueur, ladder) et **pas** l'équipe : l'index unique `team_members_user_ladder_unique`,
- *    et l'UPDATE d'annulation en cascade, filtré sur `user_id + ladder_id`, qui touche des
- *    lignes appartenant à d'AUTRES équipes.
- *
- * ⚠️ **Le verrou d'équipe seul ne suffit PAS, et le croire coûte un 500.** Deux acceptations
- * du MÊME joueur sur DEUX équipes du même ladder prennent des clés `team:` disjointes : elles
- * ne se voient pas, puis se croisent sur les verrous de ligne ci-dessus. T1 tient l'invitation
- * de T2 et veut l'index, T2 tient l'index et veut l'invitation → **interblocage**, Postgres
- * tue une transaction, et le conflit métier (`409 already_in_team`) sort en **500**. Reproduit
- * 8 fois sur 8 (`test_teams_invitations.py`, section « course INTER-ÉQUIPES »), et c'est un
- * scénario NORMAL : deux boutons « Accepter » côte à côte dans la cloche de notifications.
- *
- * ⚠️ Le tri n'est pas cosmétique : c'est LUI qui interdit le cycle (piège #15). Toute route
- * qui écrit ces ressources doit passer par ici, avec le jeu de clés complet.
- *
- * 📋 **INVENTAIRE DES ÉCRIVAINS — à tenir à jour** (tous dans CE fichier ; `matches.ts` et
- * `disputes.ts` ne font que LIRE `team_members`). ⚠️ Une route peut écrire **sans que ça se
- * voie dans son code** : la dissolution n'écrit `team_invitations` que par `ON DELETE
- * CASCADE`, et c'est précisément celle qui avait été oubliée (500 pour le capitaine).
- *
- * | Route                                   | Écrit                          | Verrous          |
- * |-----------------------------------------|--------------------------------|------------------|
- * | `POST /teams/:id/invitations`           | `team_invitations`             | team + user✱     |
- * | `POST /teams/invitations/:id/accept`    | les deux (+ cascade métier)    | team + user      |
- * | `DELETE /teams/:id`                     | **4 tables par cascade DB**    | team            |
- * | `POST /teams` (création)                | `team_members` + cascade métier | user            |
- * | `DELETE /teams/:id/members/:userId`     | `team_members` + `match_participants` + `matches` | team |
- * | `DELETE /teams/:id/invitations/:invId`  | 1 ligne `team_invitations`     | aucun — voir ci-dessous |
- * | `POST /teams/invitations/:id/decline`   | 1 ligne `team_invitations`     | aucun — voir ci-dessous |
- *
- * ⚠️ **`DELETE /teams/:id/members/:userId` a CHANGÉ DE RÉGIME (BX-LEAVE)** et c'est
- * exactement le cas prévu par l'avertissement du bas de ce docblock : elle n'écrivait
- * qu'une ligne adressée par son id, elle nettoie désormais aussi la composition des
- * créneaux `pending` du partant et les annule. Elle est donc remontée dans ce tableau.
- * Le raisonnement complet — pourquoi UNE clé et laquelle — est en tête de la route.
- *
- * ✱ la clé `user:` de l'invitation porte sur le JOUEUR INVITÉ (pas sur le capitaine).
- *
- * ⚠️ **Les 4 cascades de `DELETE /teams/:id`, en toutes lettres** — un inventaire qui n'énumère
- * pas ne sert à rien (relevé en base, `pg_constraint` sur `confrelid = 'teams'`) :
- *   `team_members` CASCADE · `team_invitations` CASCADE · `rankings` CASCADE ·
- *   `match_sides` **SET NULL**.
- * Seules les deux premières entrent dans le périmètre de `lockRoster`. Les deux autres ont été
- * sondées (dissolution × acceptation de match) : **aucun cycle supplémentaire** — les échecs
- * qu'on y observe sont des `23503` (FK), pas des `40P01` (interblocage), et relèvent d'un autre
- * ticket (`matches.ts` n'a pas d'équivalent de `foreignKeyViolation()` et rend 500 au lieu de
- * 404/409). ⚠️ Ne pas retirer cette énumération : c'est l'omission d'une cascade qui a coûté
- * la livraison précédente.
- *
- * **Pourquoi les quatre dernières n'ont pas besoin de verrou** — et ce n'est pas un oubli :
- * elles n'écrivent **qu'une seule ligne, adressée par son id** (ou une ligne neuve dont
- * personne d'autre ne connaît la clé), et ne prennent **aucun second verrou ensuite**. Une
- * transaction qui ne détient qu'une ressource ne peut pas fermer un cycle : elle fait
- * attendre, elle n'attend pas en retour. Leurs invariants sont portés par la base — `UPDATE …
- * WHERE status='pending'` (sérialise sur LA ligne), `team_members_user_ladder_unique`,
- * `team_invitations_team_user_pending_unique` — et pas par un comptage, donc pas d'agrégat à
- * protéger. ⚠️ Le jour où l'une d'elles gagne une 2e écriture (ou une cascade), elle rejoint
- * le tableau du haut : c'est exactement l'erreur commise sur la dissolution.
- */
+// Prend les verrous qui protegent le roster, toujours dans le meme ordre.
+//
+// On verrouille pour deux raisons differentes. La cle team: protege le plafond de 10 joueurs,
+// qui se verifie en comptant des lignes : deux transactions qui lisent "9" en meme temps
+// passent toutes les deux. La cle user:<id>:<ladder> protege l'inscription du joueur, parce
+// que l'acceptation d'une invitation touche des lignes qui appartiennent a d'AUTRES equipes.
+//
+// Le verrou d'equipe seul ne suffit pas. Si le meme joueur accepte deux invitations de deux
+// equipes du meme ladder, les cles team: sont differentes, les deux transactions ne se voient
+// pas et finissent par s'attendre l'une l'autre : Postgres en tue une et on rend une 500 la ou
+// on voulait un 409. Ca arrive pour de vrai, il suffit de deux boutons Accepter dans la cloche.
+//
+// Le tri n'est pas cosmetique, c'est lui qui empeche l'interblocage. Toute route qui ecrit sur
+// le roster doit passer par ici avec toutes ses cles, y compris celles qu'elle touche par
+// cascade sans que ca se voie dans son code.
 async function lockRoster(tx: Tx, keys: string[]): Promise<void> {
   // Set = dédoublonne, sort = l'ordre commun à toutes les transactions.
   for (const key of [...new Set(keys)].sort()) {
@@ -150,12 +94,8 @@ async function countRosterSlots(tx: Tx, teamId: string): Promise<number> {
   return members.total + pending.total;
 }
 
-/**
- * Vue « côté équipe » d'une invitation : QUI a été sollicité. Servie par
- * `POST /teams/:id/invitations` et par le bloc `invitations` de `GET /teams/:id` — les deux
- * doivent avoir exactement la même forme, sinon le front doit gérer deux objets pour la
- * même chose.
- */
+// Une invitation vue du cote de l'equipe : qui a ete sollicite. Deux routes la renvoient, et
+// elles doivent rendre exactement la meme forme sinon le front gere deux objets differents.
 function shapeInvitation(
   invitation: typeof teamInvitationsTable.$inferSelect,
   user: { id: string; pseudo: string; displayName: string | null; avatarUrl: string | null },
@@ -171,11 +111,8 @@ function shapeInvitation(
   };
 }
 
-/**
- * Violation de clé étrangère Postgres (SQLSTATE 23503) — Drizzle emballe l'erreur du driver
- * dans `error.cause`. Cas typique : l'équipe a été dissoute entre la lecture et l'insertion.
- * Rien n'a planté, la cible a disparu → 404, jamais 500.
- */
+// Violation de cle etrangere : Drizzle range l'erreur du driver dans error.cause. En pratique
+// ca veut dire que l'equipe a ete dissoute entre la lecture et l'ecriture, donc 404 et pas 500.
 function foreignKeyViolation(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -188,19 +125,11 @@ function foreignKeyViolation(error: unknown): boolean {
   );
 }
 
-// Édition d'une team : les deux champs sont optionnels (`.partial()`), mais la route
-// refuse un corps vide. `name` suit la même règle qu'à la création.
-// `logoUrl` accepte `null` pour RETIRER le logo. C'est une URL, pas un upload :
-// l'envoi d'un fichier de logo vers MinIO (comme l'avatar) serait un ticket à part.
-//
-// ⚠️ `z.url()` seul valide une URI SYNTAXIQUE, pas une URL Web : il accepte
-// `javascript:alert(1)` et `ftp://…`. On restreint donc explicitement le protocole à
-// HTTPS uniquement (I4) : le logo est affiché dans la page applicative HTTPS, une URL en
-// `http://` produirait un avertissement de CONTENU MIXTE et serait bloquée par le navigateur.
-// Il n'y a pas d'exécution côté backend, mais la valeur est PERSISTÉE : on refuse à l'entrée
-// plutôt que de compter sur chaque futur consommateur (`<a href>`, CSS…).
-// `logoUrl` accepte `null` pour RETIRER le logo. (Le protocole est normalisé en minuscules
-// par WHATWG URL → `HTTPS://` passe.)
+// Edition d'une equipe : les deux champs sont optionnels mais la route refuse un corps vide.
+// logoUrl a null retire le logo.
+// On force https a la main parce que z.url() tout seul accepte n'importe quel protocole, y
+// compris javascript:. La valeur est stockee et reaffichee ailleurs, donc on refuse a l'entree
+// plutot que de faire confiance a tous ceux qui la reliront plus tard.
 const updateTeamSchema = z
   .object({
     name: z.string().trim().min(1).max(50),
@@ -211,11 +140,8 @@ const updateTeamSchema = z
   })
   .partial();
 
-/**
- * Si l'erreur est une violation d'unicité Postgres (SQLSTATE 23505), rend le nom de la
- * contrainte violée ; sinon `undefined`. Évite de redupliquer le déballage de
- * `error.cause` (Drizzle emballe l'erreur du driver) à chaque route.
- */
+// Rend le nom de la contrainte d'unicite violee, ou undefined. Evite de redeballer
+// error.cause dans chaque route.
 function uniqueViolationConstraint(error: unknown): string | undefined {
   if (
     typeof error === 'object' &&
@@ -453,15 +379,12 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
-  // GET /teams/:id/matches — historique de match d'une équipe (B15). 100 % lecture, aucune
-  // transaction, aucun verrou. Nombre de requêtes CONSTANT quel que soit le nombre de matchs
-  // (une par table + des Map d'index, jamais d'await dans une boucle de map).
-  //
-  // ⚠️ Confidentialité : un non-membre ne voit QUE les matchs à 2 sides (un adversaire a
-  // accepté). Filtrer sur le nombre de sides plutôt que sur `status !== 'pending'` est plus
-  // robuste : un slot ouvert périmé passe `cancelled` via le job 24 h et fuiterait sinon le
-  // créneau d'une équipe à un visiteur — ce que `GET /matches?ladderId=` anonymise déjà. Un
-  // membre voit tout, y compris ses slots en attente, et seul un membre reçoit les lineups.
+  // Historique des matchs d'une equipe. Que de la lecture, et un nombre de requetes constant
+  // quel que soit le nombre de matchs : une par table puis des Map, jamais d'await en boucle.
+  // Un non-membre ne voit que les matchs qui ont deux camps, donc ceux qu'un adversaire a
+  // acceptes. On filtre sur le nombre de camps plutot que sur le statut parce qu'un creneau
+  // perime finit en cancelled et fuiterait quand meme aux visiteurs. Un membre voit tout,
+  // et lui seul recoit les compositions.
   server.get<{ Params: { id: string } }>(
     '/:id/matches',
     { onRequest: [server.authenticate] },
@@ -697,18 +620,13 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
-  // POST /teams/:id/logo — UPLOADER le logo de l'équipe (capitaine only). Calqué sur
-  // `POST /users/me/avatar`. Complète `PATCH /teams/:id`, qui n'accepte qu'une URL https DÉJÀ
-  // hébergée ailleurs : inutilisable en pratique pour un capitaine qui a juste un fichier.
-  //
-  // Le logo va dans le bucket PUBLIC `avatars` existant : un logo d'équipe est exactement aussi
-  // public qu'un avatar (il s'affiche dans les listes de teams, les ladders, les matchs). Un
-  // bucket dédié coûterait une variable d'env + du compose + de l'init MinIO pour zéro gain.
-  //
-  // ⚠️ `buildPublicUrl()` rend un chemin RELATIF `/media/avatars/<uuid>.<ext>`, qui ne satisfait
-  // PAS la règle Zod `^https://` de `PATCH /teams/:id` — et c'est VOULU : cette valeur est
-  // FABRIQUÉE par la route, jamais reçue d'un client. La règle https ne protège que les URL
-  // SAISIES (contenu mixte, `javascript:`…) ; il n'y a rien à valider dans notre propre chemin.
+  // Upload du logo d'equipe, reserve au capitaine, calque sur l'avatar. PATCH /teams/:id
+  // n'accepte qu'une URL deja hebergee ailleurs, ce qui ne sert a rien quand on a un fichier.
+  // On range le logo dans le bucket public des avatars : il est tout aussi public, et un
+  // bucket dedie coutait de la config pour rien.
+  // L'URL qu'on fabrique est un chemin relatif, elle ne passe donc pas la regle https de
+  // PATCH. C'est normal : cette regle protege les URL saisies par un utilisateur, pas les
+  // notres.
   server.post<{ Params: { id: string } }>(
     '/:id/logo',
     {
@@ -746,15 +664,10 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         if (!(file.mimetype in IMAGE_MIME))
           return reply.code(400).send({ error: 'unsupported file type' });
 
-        // ⚠️ On lit le fichier EN MÉMOIRE (`toBuffer`) au lieu de streamer `file.file` vers
-        // MinIO, comme le fait déjà POST /disputes/:id/evidence. Ce n'est pas un détail de
-        // style : brancher `file.file` directement sur `putObject` fait TRONQUER SANS BRUIT le
-        // fichier à la limite (busboy coupe le flux, `@fastify/multipart` range l'erreur dans
-        // un `lastError` que seul l'itérateur de parts consulte) → un fichier de 3 Mo était
-        // stocké tel quel, amputé à exactement 2 097 152 octets, et la route répondait 200
-        // avec une image corrompue. `toBuffer()` LÈVE `FST_REQ_FILE_TOO_LARGE` (→ 413 dans le
-        // catch), et rien n'est écrit dans le bucket. Coût mémoire borné : 2 Mo (limite
-        // globale) × 20 requêtes/min/IP (rate limit de la route).
+        // On charge le fichier en memoire au lieu de le streamer vers MinIO. Ce n'est pas du
+        // style : brancher le flux directement sur putObject tronque le fichier sans rien
+        // dire une fois la limite atteinte, et on stockait une image coupee en repondant 200.
+        // toBuffer leve une erreur qu'on transforme en 413, et rien ne part dans le bucket.
         const buffer = await file.toBuffer();
         const ext = IMAGE_MIME[file.mimetype as keyof typeof IMAGE_MIME];
         const key = `${randomUUID()}.${ext}`;
@@ -808,18 +721,13 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
-  // ═════════════════════════════════════════════════════════════════════════════════
-  // B-INV — INVITATIONS
-  //
-  // `POST /teams/:id/members` (ajout FORCÉ) a été SUPPRIMÉE. Motif : la contrainte
-  // `team_members_user_ladder_unique` n'autorise qu'UNE équipe par ladder — un ajout sans
-  // accord ne « rendait pas service » au joueur, il le VERROUILLAIT sur tout le ladder.
-  // Le capitaine sollicite désormais, le joueur accepte ou refuse.
-  //
-  // ⚠️ L'invitation vit dans sa PROPRE table, jamais en colonne de statut sur
-  // `team_members` : cette table est lue à ~40 endroits (matches, disputes, teams) et chacun
-  // signifie « X est membre de Y ». Un statut y rendrait ces 40 lectures fausses par défaut.
-  // ═════════════════════════════════════════════════════════════════════════════════
+  // Les invitations.
+  // L'ajout force d'un membre a ete supprime : comme on ne peut etre que dans une equipe par
+  // ladder, ajouter quelqu'un sans son accord ne lui rendait pas service, ca le bloquait sur
+  // tout le ladder. Maintenant le capitaine propose et le joueur accepte ou refuse.
+  // L'invitation a sa propre table plutot qu'une colonne de statut sur team_members : cette
+  // table est lue partout et chaque lecture veut dire "X est membre de Y". Y ajouter un statut
+  // rendrait toutes ces lectures fausses par defaut.
 
   // POST /teams/:id/invitations — inviter un joueur (capitaine only).
   server.post<{ Params: { id: string } }>(
@@ -1154,15 +1062,11 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
               code: 'not_your_invitation',
             };
 
-          // 🔒 DEUX verrous, TRIÉS (piège #15) — le verrou d'équipe seul ne suffit pas :
-          //   * `team:<id>`  → le plafond des 10, qui est un agrégat (piège #14) ;
-          //   * `user:<id>:<ladder>` → l'insertion dans `team_members` (index unique
-          //     `user_ladder`) ET l'annulation en cascade ci-dessous, qui écrit des lignes
-          //     d'AUTRES équipes. Sans cette 2e clé, deux acceptations du même joueur sur
-          //     deux équipes du même ladder s'interbloquent → 500 au lieu de 409 (reproduit
-          //     8/8, cf. le commentaire de `lockRoster`).
-          // Les deux valeurs viennent de l'invitation, lue juste au-dessus, et sont
-          // immuables : verrouiller AVANT la relecture autoritative est donc sûr.
+          // Les deux verrous, tries : celui de l'equipe pour le plafond de 10, celui du
+          // joueur sur le ladder pour l'insertion et pour l'annulation en cascade juste en
+          // dessous, qui touche des lignes d'autres equipes. Voir lockRoster.
+          // Les deux valeurs viennent de l'invitation lue au dessus et ne changent pas, donc
+          // verrouiller avant la relecture ne pose pas de probleme.
           await lockRoster(tx, [
             teamKey(invitation.teamId),
             playerLadderKey(me, invitation.ladderId),
@@ -1402,51 +1306,22 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         if (!target) return reply.code(200).send({ ok: true });
 
         const outcome = await db.transaction(async (tx) => {
-          // ── 🔒 BX-LEAVE — LE VERROU, ET POURQUOI IL EN FAUT UN MAINTENANT ────────────
-          // Cette route n'écrivait qu'UNE ligne adressée par son id : elle vivait donc
-          // dans le régime « sans verrou » documenté par `lockRoster`. Elle écrit
-          // désormais aussi `match_participants` et `matches`, et elle DÉCIDE d'après une
-          // lecture (« ce joueur est-il aligné ? ») — un contrôle en code n'est jamais
-          // atomique (piège #14). Sans verrou, la course qui compte est celle-ci :
-          //   * `POST /matches` lit le roster (`validateSide`) et voit le partant ENCORE
-          //     membre, parce que notre DELETE n'est pas commité ;
-          //   * on scanne les créneaux `pending` et on ne voit pas le sien, parce que son
-          //     INSERT n'est pas commité non plus ;
-          //   → les deux commitent, et un créneau TOUT NEUF aligne un non-membre : très
-          //     exactement le défaut que ce ticket corrige, réintroduit par la fenêtre.
+          // Verrou obligatoire depuis que cette route ne se contente plus de retirer une
+          // ligne : elle annule aussi les creneaux ou le partant etait aligne, et elle decide
+          // d'apres une lecture. Sans verrou, une creation de creneau qui tourne en meme temps
+          // voit le joueur encore membre pendant qu'on ne voit pas encore son creneau : les
+          // deux passent, et on se retrouve avec un creneau tout neuf qui aligne un non-membre.
           //
-          // 🚨 CE VERROU EST NÉCESSAIRE MAIS NE SUFFIT PAS, et ce n'est pas une nuance :
-          // sérialiser les deux transactions ne rafraîchit pas une lecture faite AVANT
-          // elles, or `validateSide()` lit le roster hors transaction. Il lui faut son
-          // pendant côté `matches.ts` — `lineupOffRoster()`, la re-vérification de la
-          // composition sous CE MÊME verrou, appelée par la création ET l'acceptation.
-          // Mesuré, pas supposé (§8 de `test_teams_leave.py`) : verrou seul = créneau
-          // fantôme 3 fois sur 3 ; re-vérification seule = fantôme par intermittence ;
-          // les deux = 3/3 propres. Retirer l'un des deux rouvre le trou.
+          // Le verrou seul ne suffit pas : serialiser deux transactions ne rafraichit pas une
+          // lecture faite avant elles, et la creation de creneau lit le roster hors
+          // transaction. Il faut aussi la re-verification cote matches.ts, sous ce meme verrou.
+          // Retirer l'un des deux rouvre le trou.
           //
-          // POURQUOI UNE SEULE CLÉ, ET POURQUOI CELLE-LÀ (`team:<id>`) :
-          //   * `hashtext('team:<id>')` est la MÊME valeur que `competitorKey()` de
-          //     `matches.ts` — la convention est commune aux deux fichiers, donc ce verrou
-          //     nous sérialise avec `POST /matches` ET avec `POST /matches/:id/accept`
-          //     (qui verrouille les DEUX camps, celui du créateur compris) ;
-          //   * l'invariant qu'on protège — « aucun non-membre aligné dans un créneau de
-          //     CETTE équipe » — a pour portée l'ÉQUIPE, pas le couple (joueur, ladder).
-          //     La clé `user:<id>:<ladder>` de l'acceptation d'invitation garde l'unicité
-          //     « une équipe par ladder » : on ne fait que LIBÉRER une place dans cet
-          //     index, jamais la disputer, il n'y a donc rien à sérialiser de ce côté.
-          //
-          // Cette clé unique est aussi ce qui garde la route SÛRE : une transaction qui
-          // ne détient qu'un verrou consultatif ne peut pas fermer un cycle. Et elle le
-          // prend en PREMIER, avant toute écriture — même discipline que la dissolution,
-          // dont le docblock raconte l'interblocage réel qu'un verrou pris trop tard
-          // laissait passer.
-          //
-          // 🔑 Deux départs simultanés n'annulent ni ne notifient deux fois : ils prennent
-          // la même clé, donc ils s'exécutent l'un après l'autre. Le second relit la
-          // composition sous verrou et ne trouve plus rien à faire. Ceinture et bretelles,
-          // l'UPDATE d'annulation est conditionné à `status = 'pending'` et ne notifie que
-          // s'il a réellement touché une ligne — ce qui couvre aussi les acteurs qui NE
-          // prennent PAS ce verrou (`DELETE /matches/:id`, les jobs des 24 h).
+          // Une seule cle, celle de l'equipe, parce que c'est la portee de ce qu'on protege :
+          // aucun non-membre aligne dans un creneau de cette equipe. Elle est identique a
+          // celle de matches.ts, donc on est serialise avec la creation et l'acceptation.
+          // On la prend avant toute ecriture, et n'en prendre qu'une garantit qu'on ne peut
+          // pas participer a un interblocage.
           await lockRoster(tx, [teamKey(teamId)]);
 
           // Adhésion relue SOUS le verrou : c'est CETTE lecture qui fait autorité.
@@ -1454,28 +1329,17 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
             .select({ id: teamMembersTable.id })
             .from(teamMembersTable)
             .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, targetId)));
-          // ⚠️ L'IDEMPOTENCE PASSE AVANT LA GARDE, et l'ordre est un choix : retirer un
-          // non-membre rend 200, y compris s'il traîne encore dans un match actif de
-          // l'équipe (l'état hérité que ce ticket corrige justement). Un 409 dirait au
-          // capitaine d'annuler un match pour retirer quelqu'un qui n'est déjà plus là.
+          // On rend 200 avant de verifier quoi que ce soit : retirer quelqu'un qui n'est
+          // deja plus la doit reussir. Un 409 demanderait au capitaine d'annuler un match
+          // pour virer une personne qui n'est plus dans l'equipe.
           if (!membership) return { ok: true as const, notifs: [] };
 
-          // ── ① MATCH ACTIF → refus, rien n'est écrit ─────────────────────────────────
-          // Même `code` que `DELETE /users/me` (BX-DEL) — donc le même parcours de sortie
-          // déjà documenté — mais la liste de statuts est VOLONTAIREMENT PLUS ÉTROITE :
-          // `users.ts` refuse sur `ENGAGING_STATUSES` (créneau `pending` inclus), ici on
-          // refuse sur `LOCKING_STATUSES` seuls. La différence est la décision de la carte :
-          // un créneau `pending` n'empêche pas de partir, il tombe (② plus bas). Ne pas
-          // « réaligner » les deux listes en croyant corriger une incohérence.
-          // ⚠️ Portée volontairement limitée aux camps de CETTE équipe : un match en cours
-          // avec une AUTRE équipe (autre ladder) n'a rien à voir avec ce roster, le
-          // bloquer serait un refus incompréhensible et sans remède ici.
-          // ⚠️ Les DEUX filtres sélectifs sont indexés — vérifié à l'`EXPLAIN`, pas supposé :
-          // `match_sides_team_match_idx` (team_id) et `match_participants_user_idx` (user_id,
-          // en Index Only Scan). Le coût suit donc l'activité de CETTE équipe et de CE
-          // joueur, jamais le volume de matchs de la plateforme. (Sur la base de dev, 18
-          // lignes de composition, le planificateur préfère un Seq Scan : c'est normal, les
-          // index n'apparaissent qu'avec `enable_seqscan=off` ou à l'échelle.)
+          // Un match actif bloque le depart, et on n'ecrit rien.
+          // Attention, la liste de statuts est plus etroite qu'a la suppression de compte :
+          // la, un creneau en attente empeche de partir, ici il ne bloque pas, on l'annule
+          // juste apres. C'est voulu, ne pas uniformiser les deux listes.
+          // On ne regarde que les matchs de cette equipe : un match en cours avec une autre
+          // equipe ne concerne pas ce roster et le refus serait incomprehensible.
           const [locking] = await tx
             .select({ matchId: matchesTable.id })
             .from(matchParticipantsTable)
@@ -1619,28 +1483,16 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
         // réellement, mais les deux notifiaient. Chaque membre recevait DEUX
         // `team_disbanded` (reproduit 5 fois sur 5 avec deux DELETE concurrents).
         const outcome = await db.transaction(async (tx) => {
-          // 🔒 B-INV — LE MÊME VERROU QUE LES ROUTES D'INVITATION, ET AVANT LE `FOR UPDATE`.
-          // Depuis B-INV, la dissolution écrit `team_invitations` : pas explicitement, mais
-          // **par CASCADE**. Elle est donc, elle aussi, une route qui écrit les ressources
-          // protégées par `lockRoster` — et la règle posée là-bas vaut pour elle.
-          // Sans ce verrou, le cycle est complet :
-          //   * `accept` tient la ligne `team_invitations` (UPDATE → `accepted`) puis
-          //     demande le `FOR KEY SHARE` sur `teams` que réclame la FK de son INSERT
-          //     dans `team_members` ;
-          //   * la dissolution tient le `FOR UPDATE` sur `teams` puis demande cette même
-          //     ligne d'invitation (cascade du DELETE).
-          // → interblocage, et c'est le CAPITAINE qui prenait un 500 sur une dissolution
-          // parfaitement légitime. Reproduit par l'API publique (cf. la section « course
-          // DISSOLUTION × ACCEPTATION » de test_teams_invitations.py).
-          // ⚠️ Une clé suffit ici : la portée de la cascade est l'ÉQUIPE. Les clés
-          // (joueur, ladder) de l'acceptation seraient non bornées (un roster entier), et
-          // sont inutiles — une acceptation concurrente tient déjà `team:<id>` du début à
-          // la fin de sa transaction, donc elle sérialise cette dissolution.
+          // Le meme verrou que les routes d'invitation, et avant le FOR UPDATE.
+          // La dissolution ecrit team_invitations sans que ca se voie : c'est la cascade du
+          // DELETE. Elle rentre donc dans le regime de lockRoster comme les autres.
+          // Sans ce verrou on boucle : l'acceptation tient la ligne d'invitation et attend la
+          // ligne de l'equipe, la dissolution tient la ligne de l'equipe et attend celle de
+          // l'invitation. Resultat, le capitaine se prenait un 500 en dissolvant son equipe.
+          // Une seule cle suffit, la cascade ne depasse pas l'equipe.
           await lockRoster(tx, [teamKey(teamId)]);
-          // `FOR UPDATE` sérialise les dissolutions concurrentes : la seconde attend,
-          // puis ne retrouve plus la ligne et sort en 404 sans rien notifier. Il fait
-          // aussi patienter un ajout de membre concurrent, dont la vérification de clé
-          // étrangère prend un verrou sur cette même ligne.
+          // FOR UPDATE met les dissolutions simultanees a la queue leu leu : la seconde
+          // attend, ne retrouve plus la ligne et sort en 404 sans notifier personne.
           const [team] = await tx
             .select()
             .from(teamsTable)
@@ -1654,15 +1506,12 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
               error: 'only the captain can dissolve the team',
             };
 
-          // ── BX-DEL — on ne dissout pas une équipe qui a un match sur le feu ────────────
-          // `match_sides.team_id` est en `set null` : dissoudre une équipe engagée laissait
-          // un camp SANS ÉQUIPE. Un slot `pending` orphelin disparaît des listes (le filtre
-          // est NULL-safe) mais reste **acceptable par son id** — un tiers pouvait donc le
-          // prendre, jouer contre un fantôme, et faire bouger l'Elo d'une vraie équipe.
-          // 🔑 DANS la transaction et APRÈS le verrou : hors verrou, une création de match
-          // concurrente s'intercalerait entre le contrôle et le DELETE (piège #14).
-          // ⚠️ Même liste de statuts que la garde de `DELETE /users/me` et que les conflits
-          // de créneau — c'est pour ça que `ENGAGING_STATUSES` a été extraite.
+          // On ne dissout pas une equipe qui a un match en cours. La colonne team_id du camp
+          // passe a null quand l'equipe disparait : le creneau orphelin sort des listes mais
+          // reste acceptable par son id, donc quelqu'un pouvait jouer contre une equipe
+          // fantome et faire bouger l'Elo d'une vraie equipe en face.
+          // Le controle est dans la transaction et apres le verrou, sinon une creation de
+          // match se glisse entre la verification et la suppression.
           const [engaged] = await tx
             .select({ matchId: matchesTable.id })
             .from(matchSidesTable)

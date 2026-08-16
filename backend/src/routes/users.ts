@@ -155,23 +155,11 @@ async function profileRankings(profileId: string) {
   );
 }
 
-/**
- * Les équipes du profil consulté, pour la navigation joueur → équipe (elle n'existait que
- * dans l'autre sens : le roster d'une équipe pointe vers ses joueurs).
- *
- * ⚠️ `isCaptain` DÉCRIT LE PROFIL CONSULTÉ, PAS L'APPELANT — l'inverse exact de la même clé
- * dans `TeamListItem` (`GET /teams`, « mes » équipes). Les deux payloads ont la même forme et
- * le même nom de champ pour deux référents différents ; c'est pour ça que le contrat déclare
- * un schéma `PlayerTeam` distinct au lieu de réutiliser `TeamListItem`, et que les deux
- * descriptions nomment leur référent. Un jour où l'un serait servi à la place de l'autre, la
- * couronne se poserait sur la mauvaise tête sans qu'aucun type ne bronche.
- *
- * Dérivé en JS depuis `captainId`, comme le fait `GET /teams` : une comparaison en SQL
- * rendrait la même chose, mais deux façons d'écrire une même règle finissent par diverger.
- *
- * Appartenance publique : le roster complet d'une équipe est déjà lisible par tout compte
- * connecté (`GET /teams/{id}`) et les équipes figurent dans les classements.
- */
+// Les equipes du profil qu'on consulte, pour pouvoir aller du joueur vers l'equipe.
+// Attention : ici isCaptain parle du profil consulte, alors que le meme nom de champ dans la
+// liste de mes equipes parle de moi. Meme forme, meme nom, deux referents differents, d'ou
+// deux schemas separes dans le contrat. Sinon la couronne se poserait sur la mauvaise tete
+// sans qu'aucun type ne s'en apercoive.
 async function profileTeams(profileId: string) {
   const rows = await db
     .select({
@@ -266,18 +254,13 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
     async (request, reply) => {
       try {
         const pseudo = request.params.pseudo;
-        // ⚠️ PROJECTION EXPLICITE, exactement les 9 champs du schéma `PublicUser` — invariant
-        // du projet, et il ne protégeait pas que d'une théorie ici : la version précédente
-        // sélectionnait la ligne entière puis retirait 5 colonnes par déstructuration, ce qui
-        // laissait passer `isAdmin` alors que le contrat ne le déclarait pas. Une liste de ce
-        // qu'on RETIRE oublie par construction toute colonne ajoutée après elle.
-        //
-        // 🔑 `isAdmin` est désormais DÉCLARÉ et servi volontairement (pastille sur le profil).
-        // Ce qui a changé n'est pas le risque, c'est le contrat : ce booléen n'a jamais été un
-        // secret — l'autorisation le relit en base à chaque appel (`disputes.ts:41`, `:288`,
-        // `:426`), donc le connaître ne permet rien. Les 5 autres colonnes restent dehors, et
-        // deux d'entre elles (`passwordHash`, `totpSecret`) sont des SECRETS, pas des drapeaux :
-        // ne jamais élargir cette liste par analogie avec ce champ-ci.
+        // On liste les colonnes qu'on veut, jamais celles qu'on retire. La version d'avant
+        // prenait la ligne entiere et enlevait cinq colonnes a la main, ce qui laissait passer
+        // isAdmin sans que le contrat le declare. Une liste de ce qu'on enleve oublie
+        // forcement toute colonne ajoutee apres elle.
+        // isAdmin est maintenant servi volontairement, il n'a jamais ete un secret et
+        // l'autorisation le relit en base a chaque appel. Les deux autres, le mot de passe et
+        // le secret TOTP, sont de vrais secrets : ne jamais elargir cette liste par analogie.
         const [user] = await db
           .select({
             id: usersTable.id,
@@ -342,14 +325,11 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
           .from(usersTable)
           .where(eq(usersTable.id, request.user.sub));
 
-        // ⚠️ On lit le fichier EN MÉMOIRE (`toBuffer`) au lieu de streamer `file.file` vers
-        // MinIO. Ce n'est PAS un détail de style : branché directement sur `putObject`, busboy
-        // coupe le flux à la limite et range l'erreur dans un `lastError` que seul l'itérateur
-        // de parts consulte → un fichier de 2 Mo + 100 octets était stocké AMPUTÉ à exactement
-        // 2 097 152 octets, la route répondait **200**, et l'image corrompue devenait l'avatar
-        // de l'utilisateur (mesuré). `toBuffer()` LÈVE `FST_REQ_FILE_TOO_LARGE` (→ 413 dans le
-        // catch) et rien n'est écrit dans le bucket. Coût mémoire borné : 2 Mo (limite globale)
-        // × 20 requêtes/min/compte (rate limit de la route).
+        // On charge le fichier en memoire au lieu de le streamer vers MinIO. Branche
+        // directement, le flux est coupe a la limite sans que personne ne le signale : un
+        // fichier trop gros etait stocke ampute, la route repondait 200, et l'image corrompue
+        // devenait l'avatar. toBuffer leve une erreur qu'on transforme en 413, et rien ne part
+        // dans le bucket.
         const buffer = await file.toBuffer();
         const id = randomUUID();
         const ext = IMAGE_MIME[file.mimetype as keyof typeof IMAGE_MIME];
@@ -438,17 +418,14 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
         if (!verified) return reply.code(401).send({ error: 'invalid code' });
       }
 
-      // ── BX-DEL — on ne part pas en laissant des affaires en cours ────────────────────
-      // Règle produit (David, 28/07) : « si tu veux delete, il faut annuler tes matchs en
-      // cours ». Deux refus, deux remèdes DIFFÉRENTS, donc deux `code` distincts — le front
-      // mappe dessus et ne parse jamais la prose (même contrat que B-INV).
-      //
-      // ① ALIGNÉ dans un match non terminé. Un match `completed` ou `cancelled` ne bloque
-      //    rien : c'est tout l'objet du ticket, la FK `restrict` refusait AUSSI les matchs
-      //    vieux de six mois.
-      // ⚠️ On part de `match_participants` filtré sur l'user (index
-      //    `match_participants_user_idx`) et non des matchs engagés de toute la plateforme :
-      //    le coût suit alors l'activité du COMPTE, pas le nombre de slots ouverts du ladder.
+      // On ne peut pas supprimer son compte en laissant des affaires en cours. Il y a deux
+      // refus possibles avec deux remedes differents, d'ou deux codes : le front s'appuie
+      // dessus et ne lit jamais le texte.
+      // Le premier : etre aligne dans un match non termine. Un match deja joue ou annule ne
+      // bloque rien, c'etait justement le probleme d'avant ou un match vieux de six mois
+      // empechait encore de partir.
+      // On part des participations de ce joueur et pas des matchs de toute la plateforme, le
+      // cout suit donc l'activite du compte.
       const [aligned] = await db
         .select({ matchId: matchesTable.id })
         .from(matchParticipantsTable)
@@ -467,17 +444,13 @@ export const userRoutes: FastifyPluginAsync = async (server) => {
           code: 'engaged_in_match',
         });
 
-      // ② CAPITAINE d'une équipe, engagée ou non. 🔑 `teams.captain_id` est en CASCADE :
-      //    sans ce refus, le départ du capitaine EFFACE l'équipe, son roster, sa ligne
-      //    `rankings` (Elo, W/L, place au classement du ladder) et l'identité de l'adversaire
-      //    dans son propre historique (`opponent: null`) — le tout **sans notifier personne**,
-      //    les coéquipiers découvrant la disparition par un 404. Sur `master`, la FK
-      //    `restrict` freinait ce chemin par accident ; le passer en `cascade` sans cette
-      //    garde l'aurait ouvert à tous les capitaines.
-      // ⚠️ Ce refus SUBSUME le cas « capitaine engagé hors composition » : il n'y a plus
-      //    besoin de croiser les matchs avec `teams.captain_id`. Le pendant obligatoire vit
-      //    dans `DELETE /teams/:id`, qui refuse de dissoudre une équipe engagée — sinon on
-      //    déplacerait simplement le trou d'un cran (dissoudre, puis partir).
+      // Le second : etre capitaine d'une equipe, engagee ou non. La colonne du capitaine est
+      // en cascade, donc sans ce refus le depart du capitaine effacerait l'equipe, son roster,
+      // son Elo et son classement, sans prevenir personne : les coequipiers decouvriraient la
+      // disparition par un 404.
+      // Ce refus couvre aussi le capitaine engage hors composition. Son pendant est dans la
+      // dissolution d'equipe, qui refuse si un match est en cours, sinon il suffirait de
+      // dissoudre puis de partir.
       const [owned] = await db
         .select({ id: teamsTable.id })
         .from(teamsTable)

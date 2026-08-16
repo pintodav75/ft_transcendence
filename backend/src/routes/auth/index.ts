@@ -93,15 +93,13 @@ export const authBasicRoutes: FastifyPluginAsync = async (server) => {
   server.post('/refresh', async (request, reply) => {
     try {
       const refreshToken = request.cookies.refresh;
-      // ── B13 — PAS de cookie ≠ échec d'authentification ────────────────────────────────
-      // Le front appelle cette route à l'ouverture de CHAQUE page anonyme (`/`, `/login`,
-      // `/register`) pour tenter de restaurer une session. Un 401 y faisait écrire une ligne
-      // rouge par CHROME LUI-MÊME — pas par notre code, donc aucun `try/catch` ne peut
-      // l'effacer — avant le moindre clic du correcteur. Or « zéro erreur en console » est un
-      // motif de REJET du projet. Il n'y a rien à restaurer, et un cookie absent n'apprend
-      // rien à un attaquant : 204.
-      // ⚠️ Ne PAS étendre ce 204 aux autres branches : cookie présent mais invalide, expiré,
-      // de mauvais type, ou user supprimé sont de VRAIS échecs et restent en 401.
+      // Pas de cookie, ce n'est pas un echec d'authentification. Le front appelle cette
+      // route a l'ouverture de chaque page anonyme pour essayer de restaurer une session, et
+      // un 401 faisait ecrire une ligne rouge par le navigateur lui-meme, qu'aucun catch ne
+      // peut effacer. Il n'y a rien a restaurer et un cookie absent n'apprend rien a
+      // personne, donc 204.
+      // Ne pas etendre ce 204 aux autres cas : un cookie present mais invalide, expire ou
+      // dont le compte a disparu sont de vrais echecs et restent en 401.
       if (!refreshToken) return reply.code(204).send();
 
       // ── Un cookie DÉFINITIVEMENT refusé est PURGÉ ────────────────────────────────────

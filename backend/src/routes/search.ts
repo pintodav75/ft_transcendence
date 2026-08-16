@@ -120,20 +120,14 @@ export const searchRoutes: FastifyPluginAsync = async (server) => {
         .from(teamsTable)
         .where(sql`lower(${teamsTable.name}) like lower(${pattern})`);
 
-      // Tri sur les noms de colonnes de SORTIE (seule forme acceptée par un ORDER BY
-      // qui porte sur un UNION). `kind` puis `id` départagent les ex æquo : sans cet
-      // ordre TOTAL, deux lignes de même nom pourraient permuter entre deux appels et
-      // la pagination par offset sauterait ou dupliquerait des résultats.
-      //
-      // 🚨 DEUX BRANCHES LITTÉRALES, PAS UNE INTERPOLATION. Un `sql\`sort_key ${dir}\``
-      // marcherait, mais une direction de tri ne peut PAS être un paramètre lié : elle
-      // finit forcément concaténée dans le texte SQL. Écrire les deux ORDER BY en toutes
-      // lettres rend l'injection structurellement impossible, sans rien devoir à la
-      // validation Zod en amont.
-      //
-      // ⚠️ Seul `sort_key` s'inverse : les départageurs restent `asc` dans les deux sens.
-      // Ils ne servent qu'à rendre l'ordre TOTAL (donc la pagination stable) ; les inverser
-      // aussi serait tout aussi valable et n'apporterait rien de visible.
+      // On trie sur les noms de colonnes de sortie, seule forme acceptee par un ORDER BY
+      // pose sur un UNION. Le type puis l'id departagent les ex aequo : sans ordre total,
+      // deux lignes de meme nom peuvent permuter d'un appel a l'autre et la pagination
+      // saute ou repete des resultats.
+      // Les deux ORDER BY sont ecrits en toutes lettres au lieu d'interpoler la direction.
+      // Une direction de tri ne peut pas etre un parametre lie, elle finirait forcement
+      // concatenee dans le texte SQL : les ecrire en dur rend l'injection impossible sans
+      // rien devoir a la validation en amont.
       const orderBy =
         order === 'desc'
           ? sql`sort_key desc, kind asc, id asc`

@@ -4,17 +4,10 @@ import { and, eq, lt, sql, isNotNull } from 'drizzle-orm';
 import { completeMatchWithElo } from '../utils/rankings.js';
 import { notify, pushNotifications, getMatchParticipantIds } from '../utils/notifications.js';
 
-/**
- * Le planificateur du backend : du code qui tourne TOUT SEUL, sans requête HTTP.
- *
- * Un seul `setInterval` pour toutes les tâches périodiques — pas un worker séparé.
- * On n'a qu'UN conteneur backend, donc aucun risque qu'un job s'exécute en double.
- * (Le jour où on lancerait plusieurs instances, il faudrait un verrou consultatif
- * Postgres autour de chaque tâche, sinon elles se marcheraient dessus.)
- *
- * Tâches actuelles : slots périmés (B5d), matchs fantômes + auto-confirmation 24 h (B6),
- * timeout des disputes 24 h (B7).
- */
+// Les taches qui tournent toutes seules, sans requete HTTP : creneaux perimes, matchs
+// fantomes, auto-confirmation au bout de 24h et timeout des disputes.
+// Un seul setInterval pour tout, pas de worker separe : on n'a qu'un conteneur backend, donc
+// aucun risque qu'un job parte en double. Avec plusieurs instances il faudrait un verrou.
 
 // Doit rester cohérent avec MIN_LEAD_MINUTES de routes/matches.ts.
 const MIN_LEAD_MINUTES = 15;
@@ -24,16 +17,9 @@ const TICK_MS = 60 * 1000; // une passe par minute
 // 24 h : délai d'abandon des matchs fantômes (job A) et d'auto-confirmation (job B).
 const CONFIRM_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
-/**
- * §5.2 — un slot `pending` à moins de MIN_LEAD_MINUTES de son heure est PÉRIMÉ :
- * plus personne ne peut l'accepter (la garde de l'accept le refuse déjà). On le passe
- * donc à `cancelled`.
- *
- * Sans ce job, un slot mort resterait `pending` pour l'éternité : il polluerait la
- * table, et surtout il consommerait un des emplacements ouverts de son créateur.
- *
- * @returns le nombre de slots annulés (pour le log)
- */
+// Un creneau a moins de 15 minutes de son heure ne peut plus etre accepte, la route le refuse
+// deja. On l'annule pour de bon, sinon il resterait en attente pour l'eternite et continuerait
+// a occuper un des emplacements ouverts de celui qui l'a cree.
 export async function cancelExpiredSlots(): Promise<number> {
   const cutoff = new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000);
 
@@ -46,22 +32,11 @@ export async function cancelExpiredSlots(): Promise<number> {
   return cancelled.length;
 }
 
-/**
- * B6 Job A — les matchs FANTÔMES. Un match `in_progress` dont personne n'a soumis de
- * score plus de 24 h après l'heure prévue (`scheduled_at`) est abandonné : passage à
- * `cancelled`, aucun ELO.
- *
- * ⚠️ Traitement candidat par candidat SOUS LE MÊME VERROU que la route et le job B (et
- * NON un UPDATE en masse) : sinon une course est possible avec une soumission simultanée.
- * Un joueur peut soumettre sur un fantôme (in_progress, +24 h → §5.3 passe) au moment
- * exact du tick ; sans verrou partagé, le job annulerait la ligne pendant que la route
- * écrit sa soumission, et la route répondrait `200 awaiting_confirmation` sur un match
- * devenu `cancelled`. Avec le verrou : soit la route passe d'abord (le job voit
- * `awaiting_confirmation` et s'abstient), soit le job passe d'abord (la route relit
- * `cancelled` sous verrou et renvoie 409). (Course signalée en re-review.)
- *
- * @returns le nombre de matchs annulés
- */
+// Les matchs fantomes : personne n'a soumis de score 24h apres l'heure prevue, on annule sans
+// toucher a l'ELO.
+// On traite match par match et sous le meme verrou que la route de soumission, pas en un seul
+// UPDATE. Sinon quelqu'un peut soumettre pile pendant le tick : le job annulerait la ligne
+// pendant que la route ecrit son score, et le joueur recevrait un OK sur un match annule.
 export async function cancelStaleMatches(): Promise<number> {
   const cutoff = new Date(Date.now() - CONFIRM_TIMEOUT_MS);
 
@@ -72,12 +47,12 @@ export async function cancelStaleMatches(): Promise<number> {
 
   let cancelled = 0;
   for (const c of candidates) {
-    // B9 : la tx rend les notifs créées (null = candidat écarté sous verrou). Le push WS
-    // se fait APRÈS le commit — même règle que les routes, un rollback ne notifie pas.
+    // La transaction rend les notifs creees, ou null si on a ecarte le candidat sous verrou.
+    // Le push part apres le commit, comme partout ailleurs.
     const notifs = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${c.matchId}))`);
-      // Re-lecture sous verrou : une soumission a pu faire passer le match en
-      // `awaiting_confirmation` (ou il a pu être re-planifié) entre la sélection et le verrou.
+      // On relit sous verrou : entre la selection et ici, quelqu'un a pu soumettre un score
+      // ou replanifier le match.
       const [m] = await tx
         .select({ status: matchesTable.status, scheduledAt: matchesTable.scheduledAt })
         .from(matchesTable)
@@ -88,8 +63,7 @@ export async function cancelStaleMatches(): Promise<number> {
         .update(matchesTable)
         .set({ status: 'cancelled' })
         .where(eq(matchesTable.id, c.matchId));
-      // B9 — « match abandonné » : les joueurs alignés des DEUX camps. Pas d'acteur à
-      // exclure, c'est le robot qui agit.
+      // On previent les joueurs alignes des deux camps : ici personne n'a agi, c'est le job.
       return notify(tx, await getMatchParticipantIds(tx, c.matchId), 'match_ghost_cancelled', {
         matchId: c.matchId,
         ladderId: c.ladderId,
@@ -103,24 +77,17 @@ export async function cancelStaleMatches(): Promise<number> {
   return cancelled;
 }
 
-/**
- * B6 Job B — AUTO-CONFIRMATION. Un match `awaiting_confirmation` (un seul camp a soumis)
- * dont la soumission date de plus de 24 h est validé sur ce score unique : `completed` +
- * ELO. ⚠️ L'horloge part de `submitted_at` de la soumission, PAS de `scheduled_at` —
- * sinon un joueur qui soumet tard rétrécirait la fenêtre de réponse de l'adversaire.
- *
- * Traitement candidat par candidat (comme le job A) : chacun est complété dans sa PROPRE
- * transaction, sous le MÊME verrou consultatif que la route (clé = matchId). Sans ce
- * verrou partagé, une confirmation concurrente du 2e camp appliquerait l'ELO en double.
- *
- * @returns le nombre de matchs auto-confirmés
- */
+// Un seul camp a soumis et l'autre n'a pas repondu depuis 24h : on valide sur ce score la et
+// on applique l'ELO.
+// Le compte a rebours part de l'heure de la soumission, pas de l'heure du match, sinon
+// quelqu'un qui soumet tres tard raccourcirait le temps de reponse de l'adversaire.
+// Chaque match dans sa propre transaction et sous le meme verrou que la route, sans quoi une
+// confirmation qui arrive en meme temps appliquerait l'ELO deux fois.
 export async function autoConfirmMatches(): Promise<number> {
   const cutoff = new Date(Date.now() - CONFIRM_TIMEOUT_MS);
 
-  // Seul le side qui a soumis porte submitted_at (l'autre est NULL, donc exclu par le
-  // `lt`). On ne récupère ici QUE les ids : le vainqueur et le submitted_at seront relus
-  // SOUS VERROU (le camp a pu re-soumettre entre-temps, cf. plus bas).
+  // Seul le camp qui a soumis porte une date de soumission, l'autre est a NULL et sort tout
+  // seul du filtre. On ne prend que les ids ici, le reste sera relu sous verrou.
   const candidates = await db
     .select({ matchId: matchesTable.id, ladderId: matchesTable.ladderId })
     .from(matchesTable)
@@ -162,10 +129,8 @@ export async function autoConfirmMatches(): Promise<number> {
       // fenêtre de 24 h courir, on ne confirme pas ce tick-ci.
       if (sub.submittedAt >= cutoff) return null;
 
-      // Remappage « moi / lui » -> « vainqueur / perdant » : le camp silencieux ne soumet
-      // rien, seul `sub` (le camp qui a parlé) porte des scores, relatifs à LUI-MÊME. S'il
-      // s'est désigné vainqueur, son propre score est le score gagnant ; sinon c'est le
-      // score qu'il attribue à l'adversaire qui l'est.
+      // Les scores sont stockes du point de vue du camp qui a soumis (mon score / son score),
+      // il faut les remettre en vainqueur / perdant avant de calculer l'ELO.
       const submitterWon = sub.submittedWinnerSideId === sub.id;
       const winnerScore = submitterWon ? sub.submittedScoreSelf : sub.submittedScoreOpponent;
       const loserScore = submitterWon ? sub.submittedScoreOpponent : sub.submittedScoreSelf;
@@ -178,8 +143,8 @@ export async function autoConfirmMatches(): Promise<number> {
         winnerScore,
         loserScore,
       );
-      // B9 — « score entériné » : les DEUX camps. Le soumetteur d'origine aussi — 24 h ont
-      // passé, pour lui c'est la confirmation que son score est acté (pas d'acteur : robot).
+      // Les deux camps sont prevenus, y compris celui qui avait soumis : pour lui c'est la
+      // confirmation que son score est acte.
       return notify(tx, await getMatchParticipantIds(tx, c.matchId), 'result_confirmed', {
         matchId: c.matchId,
         ladderId: c.ladderId,
@@ -194,24 +159,13 @@ export async function autoConfirmMatches(): Promise<number> {
   return confirmed;
 }
 
-/**
- * B7 Job C — TIMEOUT DES DISPUTES. Une dispute `open` depuis plus de 24 h (compté depuis
- * `created_at`) sans arbitrage admin est résolue automatiquement en ANNULANT le match :
- * `cancelled`, ELO inchangé, dispute `resolved` (resolution `cancelled`, sans arbitre).
- *
- * Pourquoi annuler et pas confirmer un score (contrairement au job B) ? Une dispute est un
- * DÉSACCORD : les deux camps ont soumis des vainqueurs opposés, il n'existe aucun score
- * commun à valider. La seule issue neutre sans humain est l'annulation. Surtout, sans ce
- * job un `disputed` resterait verrouillé À VIE (§5.2) si aucun admin ne passe : les deux
- * camps seraient bloqués pour toujours. Ce job garantit une sortie.
- *
- * Candidat par candidat, sous le MÊME verrou consultatif (clé = matchId) que la route
- * d'arbitrage `/disputes/:id/resolve` : un admin qui tranche pile au moment du tick ne
- * peut pas entrer en course. Re-lecture sous verrou (dispute encore `open` ? match encore
- * `disputed` ?) → si l'admin est passé d'abord, le job s'abstient.
- *
- * @returns le nombre de disputes auto-annulées
- */
+// Une dispute ouverte depuis 24h sans qu'aucun admin ne soit passe : on annule le match,
+// l'ELO ne bouge pas.
+// On annule au lieu de valider un score, contrairement au job precedent, parce qu'ici les deux
+// camps ont annonce des vainqueurs differents : il n'y a aucun score commun a enteriner. Et
+// sans ce job un match en litige resterait verrouille a vie si personne ne l'arbitre.
+// Meme verrou que la route d'arbitrage, pour qu'un admin qui tranche pile au moment du tick
+// ne se retrouve pas en course avec nous.
 export async function autoCancelDisputes(): Promise<number> {
   const cutoff = new Date(Date.now() - CONFIRM_TIMEOUT_MS);
 
@@ -248,7 +202,7 @@ export async function autoCancelDisputes(): Promise<number> {
           resolvedAt: new Date(),
         })
         .where(eq(disputesTable.id, c.disputeId));
-      // B9 — « litige auto-annulé » : les DEUX camps apprennent l'issue neutre.
+      // Les deux camps apprennent que le litige s'est termine sans vainqueur.
       return notify(tx, await getMatchParticipantIds(tx, c.matchId), 'dispute_auto_cancelled', {
         matchId: c.matchId,
         ladderId: m.ladderId,
@@ -275,9 +229,8 @@ export function startJobs(log: (msg: string) => void): NodeJS.Timeout {
       const autoCancelled = await autoCancelDisputes();
       if (autoCancelled > 0) log(`jobs: ${autoCancelled} dispute(s) auto-annulée(s) (timeout 24 h)`);
     } catch (error) {
-      // Un job qui plante ne doit JAMAIS tuer le serveur : on log et on retente au tick
-      // suivant. (Sans ce catch, une exception dans un callback async d'un setInterval
-      // remonte en unhandledRejection et peut faire tomber le process.)
+      // Un job qui plante ne doit pas tuer le serveur : on log et on retente au tick suivant.
+      // Sans ce catch, l'erreur remonte en unhandledRejection et peut couper le process.
       log(`jobs: erreur — ${error instanceof Error ? error.message : String(error)}`);
     }
   };

@@ -1,22 +1,10 @@
-/**
- * Seed SOCIAL (fixtures du rail droit) — complément de `seed-dev.ts`, jamais un remplacement.
- *
- * `seed-dev` peuple le domaine JEU (joueurs, équipes, matchs). Il ne crée aucune amitié,
- * aucun message, aucune notification : recetter le rail social imposait donc de fabriquer
- * ces états à la main à chaque fois. Ce script les pose en une commande, et il est bien plus
- * rapide que `seed-dev` puisqu'il n'écrit que 4 tables.
- *
- * Il est IDEMPOTENT et NE PURGE QUE SA PROPRE PRODUCTION : amitiés, blocages et messages
- * entre comptes de fixture, et les seules notifications qu'il a lui-même posées (marquées
- * par `seedSocial: true` dans leur payload). Il ne touche jamais aux matchs, aux équipes,
- * aux classements, ni aux comptes créés par l'audit ou par un membre de l'équipe.
- *
- * ⚠️ Il exige que `seed:dev` ait déjà tourné : il ne crée aucun compte, il relie ceux qui
- * existent. Les deux SEULS comptes connectables restent `alice` et `bob` (plus `carol`),
- * avec le mot de passe de fixture de `seed-dev` — ce script n'ouvre aucun nouveau secret.
- *
- * Usage : docker compose exec backend npm run seed:social
- */
+// Fixtures du rail social : amities, blocages, messages et notifications. C'est un
+// complement de seed:dev, qui ne peuple que le jeu et ne cree aucun de ces etats.
+// Il ne nettoie que ce qu'il a lui-meme produit et ne touche jamais aux matchs, aux equipes
+// ni aux classements. Il ne cree aucun compte non plus, il relie ceux qui existent, donc il
+// exige que seed:dev ait deja tourne.
+//
+// Usage : docker compose exec backend npm run seed:social
 import { db } from '../db/index.js';
 import {
   usersTable,

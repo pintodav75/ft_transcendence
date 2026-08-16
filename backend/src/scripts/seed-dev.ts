@@ -1,15 +1,9 @@
-/**
- * Seed de DÉVELOPPEMENT (fixtures) — À NE PAS confondre avec les données de
- * référence (games/ladders) qui, elles, vivent dans les migrations.
- *
- * Ce script insère de faux profils + faux classements pour visualiser le
- * leaderboard en local, et — depuis B16 — **six matchs de démo** entre deux des
- * équipes semées, un par état du cycle challenge/accept. Il est idempotent
- * (onConflictDoNothing + purge de sa propre production côté matchs) → relançable
- * sans créer de doublons, et ne doit JAMAIS être lancé en prod.
- *
- * Usage : docker compose exec backend npm run seed:dev
- */
+// Fixtures de developpement : faux joueurs, faux classements et quelques matchs de demo,
+// un par etat du cycle. A ne pas confondre avec les jeux et les ladders, qui sont des
+// donnees de reference et vivent dans les migrations.
+// Relancable autant de fois qu'on veut sans creer de doublons.
+//
+// Usage : docker compose exec backend npm run seed:dev
 import { db } from '../db/index.js';
 import {
   usersTable,
@@ -317,36 +311,24 @@ async function main() {
       )
       .onConflictDoNothing();
 
-    // ----------------------------------------------------------------------------------
-    // --- B16 : six matchs de démo, un par état du cycle ---
-    //
-    // Pourquoi : atteindre « en attente de confirmation » à la main coûte 2 comptes, 2
-    // équipes, une invitation, un créneau, une acceptation et une soumission. Personne ne
-    // le refait deux fois, donc l'écran n'est jamais vérifié.
-    //
-    // Les états sont écrits DIRECTEMENT (le seed ne passe pas par HTTP) mais respectent les
-    // invariants des handlers : grille de 15 min, `scheduled_at` comme seule référence
-    // temporelle (invariant #4), créneaux espacés de plus d'un `lockout_minutes` pour que
-    // §5.2 soit satisfait (invariant #3 — inégalités strictes), lineups ⊆ roster, et
-    // `completeMatchWithElo()` RÉUTILISÉ pour le match terminé plutôt que recopié.
-    // ----------------------------------------------------------------------------------
+    // Six matchs de demo, un par etat du cycle. Arriver a "en attente de confirmation" a la
+    // main demande deux comptes, deux equipes, une invitation, un creneau, une acceptation et
+    // une soumission : personne ne le refait deux fois, donc l'ecran n'est jamais verifie.
+    // On ecrit les etats directement, sans passer par l'API, mais en respectant les memes
+    // regles que les routes : creneaux sur la grille de 15 minutes, assez espaces pour ne pas
+    // se chevaucher, compos incluses dans le roster, et le calcul d'Elo reutilise tel quel.
     const home = teamIdByName.get(DEMO_HOME)!;
     const away = teamIdByName.get(DEMO_AWAY)!;
     const homeLineup = { teamId: home, players: teamRosters[DEMO_HOME]!.map((p) => idByPseudo.get(p)!) };
     const awayLineup = { teamId: away, players: teamRosters[DEMO_AWAY]!.map((p) => idByPseudo.get(p)!) };
 
-    // 1) Purge de la production PRÉCÉDENTE du seed — c'est ce qui rend le bloc rejouable.
-    //    Un match n'a aucune clé naturelle : `onConflictDoNothing` ne peut rien pour lui, et
-    //    sans purge chaque relance empilerait 6 matchs de plus. On efface par les SIDES (le
-    //    seul lien vers une équipe) ; sides, participants et disputes partent en cascade.
-    //    ⚠️ Efface donc AUSSI les matchs que tu aurais joués à la main avec ces 2 équipes.
-    //    ⚠️ LIMITE CONNUE, assumée : la purge porte sur « Alpha OU Bravo » alors que l'étape 2
-    //    ne remet à zéro QUE ces deux équipes. Un match Alpha–Charlie monté à la main est donc
-    //    effacé sans que le classement de Charlie soit corrigé — il garde un Elo gagné sur un
-    //    match qui n'existe plus. Rétrécir la purge aux matchs Alpha–Bravo ne ferait que
-    //    déplacer l'incohérence sur Alpha. La vraie réponse est un clear COMPLET (tous les
-    //    matchs, tous les classements remis à `default(1000)`), prévu dans le ticket « seed
-    //    propre » — ne pas rafistoler ici en attendant.
+    // On efface ce que le seed avait produit la fois d'avant, c'est ce qui le rend
+    // rejouable : un match n'a pas de cle naturelle, donc sans purge chaque relance en
+    // empilerait six de plus. On passe par les camps, le reste part en cascade.
+    // Attention, ca efface aussi les matchs joues a la main avec ces deux equipes.
+    // Limite connue : on purge les matchs des deux equipes mais on ne remet a zero que leur
+    // classement. Un match monte a la main contre une troisieme equipe disparait donc en lui
+    // laissant l'Elo qu'elle y a gagne. La vraie reponse serait une remise a zero complete.
     const previous = await db
       .selectDistinct({ id: matchSidesTable.matchId })
       .from(matchSidesTable)
@@ -582,22 +564,13 @@ async function main() {
     console.log(`   (les 8 autres joueurs n'ont pas de mot de passe : remplissage de lineup)`);
   }
 
-  // ------------------------------------------------------------------------------------
-  // --- FT-4A : UN match 1v1 TERMINÉ sur chess ---
-  //
-  // Pourquoi : le back gère complètement le 1v1 — sur un ladder `1v1` le JOUEUR *est* le
-  // camp (`match_sides.team_id` NULL, identité dans `match_participants`, branche SOLO de
-  // `resolveSide`) — mais AUCUN match 1v1 n'existait en base, et aucun ne peut être créé
-  // depuis l'interface tant que `/solo` est une page vierge. La variante « camp sans
-  // équipe » de la page match aurait donc été développée à l'aveugle.
-  //
-  // Deux démonstrations pour le prix d'une : chess n'a AUCUN pool de maps, donc ce match
-  // prouve aussi que la section « maps » est pilotée par la DONNÉE (elle disparaît) et
-  // jamais par une liste de jeux écrite en dur.
-  //
-  // ⚠️ C'est le side 1 qui GAGNE ici, à l'inverse du match cs2 terminé : un vainqueur
-  // toujours en side 0 laisserait passer un affichage qui confond « premier camp » et
-  // « vainqueur ».
+  // Un match 1v1 termine sur les echecs. Le back gere le 1v1 depuis toujours, mais aucun
+  // match de ce type n'existait en base : la variante "camp sans equipe" de la page match
+  // aurait ete developpee a l'aveugle.
+  // Les echecs n'ont aucune map, donc ce match montre aussi que la section maps est pilotee
+  // par la donnee et disparait toute seule.
+  // Ici c'est le second camp qui gagne, contrairement a l'autre match termine : un vainqueur
+  // toujours en premier laisserait passer un affichage qui confond les deux.
   const SOLO_HOME = 'alice'; // side 0 — le créateur du créneau
   const SOLO_AWAY = 'bob'; // side 1 — celui qui a accepté, et le vainqueur
   const soloPseudos = [SOLO_HOME, SOLO_AWAY];
@@ -641,12 +614,11 @@ async function main() {
       ),
     );
 
-  // Remise du classement chess des deux joueurs à leur valeur de fixture — jumeau exact de
-  // la passe faite pour les 2 équipes cs2, et pour la même raison : `completeMatchWithElo`
-  // applique un VRAI calcul d'Elo sur `rankings`, donc sans cette remise chaque relance
-  // ajouterait une victoire et déplacerait l'Elo d'un cran.
-  // ⚠️ L'insert de `rankings` plus haut est en `onConflictDoNothing` : il SAUTE la ligne
-  // entière sur une base déjà semée, il ne répare donc rien. C'est cette passe qui le fait.
+  // On remet le classement des deux joueurs a sa valeur de fixture, comme pour les equipes
+  // plus haut : le calcul d'Elo est le vrai, donc sans cette remise chaque relance ajouterait
+  // une victoire et decalerait l'Elo d'un cran.
+  // L'insertion des classements plus haut ne repare rien : elle saute la ligne entiere quand
+  // elle existe deja.
   for (const pseudo of soloPseudos) {
     const fixture = fakeUsers.find((u) => u.pseudo === pseudo)!;
     await db

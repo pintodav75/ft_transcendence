@@ -91,29 +91,18 @@ export const twoFactorRoutes: FastifyPluginAsync = async (server) => {
       else return reply.code(500).send({ error: 'internal error' });
     }
   });
-  // ── B12 — le budget d'essais de `/verify` est PAR COMPTE, pas par adresse ────────────────
-  //
-  // Deux compteurs à deux étages, et il en FAUT deux :
-  //
-  //  ① le plancher par IP, ci-dessous en `config.rateLimit` — hook `onRequest`, donc AVANT le
-  //    décodage du corps. C'est le seul qui voit les requêtes qui n'atteignent jamais le
-  //    handler (JSON invalide, `Content-Type` non supporté, corps vide). ⚠️ Il ne peut PAS
-  //    compter par compte : à `onRequest`, `request.body` n'existe pas encore, donc le
-  //    tempToken est illisible. ⚠️ Il ne peut pas non plus être supprimé : une route qui
-  //    déclare `config.rateLimit` sort du quota global, elle n'aurait alors PLUS AUCUN filet.
-  //  ② le compteur par compte, `verifyAccountLimit`, appelé À LA MAIN dans le handler, là où
-  //    le corps est parsé et le tempToken lisible. C'est LUI qui borne les essais de code.
-  //
-  // POURQUOI le plancher passe de 5 à 30/min : après ①+②, il ne borne plus des essais de code
-  // (c'est ② qui le fait, à 5/min/compte quel que soit le nombre d'adresses) mais du bruit qui
-  // n'atteint pas le handler. Le garder à 5 punissait un NAT partagé sans rien protéger de
-  // plus. 30/min reste 3× sous le quota global.
-  //
-  // ⚠️ PIÈGE VÉRIFIÉ — ne PAS remplacer ② par un second `server.rateLimit()` monté en hook :
-  // `rateLimitRequestHandler` ouvre sur `if (req[rateLimitRan]) return` et ce symbole est
-  // PARTAGÉ par tous les compteurs. Le premier hook qui tourne neutralise silencieusement
-  // tous les suivants — on croirait compter par compte sans jamais le faire. Seul
-  // `server.createRateLimit()` renvoie l'application directe, sans cette garde.
+  // Les essais de code 2FA se comptent par compte, pas par adresse. Il faut deux compteurs.
+  // Le premier, par IP, tourne avant que le corps de la requete soit lu : c'est le seul qui
+  // voit les requetes qui n'arrivent jamais jusqu'au handler, et il ne peut pas compter par
+  // compte puisque le tempToken n'est pas encore lisible. On ne peut pas le retirer non plus,
+  // une route qui declare son quota sort du quota global et se retrouverait sans filet.
+  // Le second, par compte, est appele a la main dans le handler une fois le corps parse.
+  // C'est lui qui borne vraiment les essais.
+  // Le plancher par IP est monte de 5 a 30 par minute : il ne compte plus des essais de code
+  // mais du bruit, et le laisser a 5 punissait tout un reseau partage pour rien.
+  // Piege verifie : ne pas remplacer le second par un hook classique. Le plugin marque la
+  // requete des qu'un compteur a tourne, et tous les suivants sont ignores en silence. Seul
+  // createRateLimit applique le comptage directement.
   const verifyAccountLimit = server.createRateLimit({
     max: rlMax(5),
     timeWindow: '1 minute',
@@ -123,17 +112,11 @@ export const twoFactorRoutes: FastifyPluginAsync = async (server) => {
     '/verify',
     { config: { rateLimit: { max: rlMax(30), timeWindow: '1 minute' } } },
     async (request, reply) => {
-    // Hors du `try` : son `catch` transforme tout en 401, il avalerait le 429.
-    //
-    // ⚠️ On ne compte QUE les requêtes qui désignent un compte. Une requête sans tempToken
-    // exploitable (absent, illisible, expiré, mauvais type) est laissée au plancher par IP :
-    // la faire tomber dans le repli `ip:` de CE compteur la bornerait à 5/min sur un bucket
-    // commun à toute la plateforme (pas de `trustProxy` → `req.ip` est l'IP du conteneur
-    // front pour tous les navigateurs). Cinq tempTokens périmés dans la minute — cas
-    // légitime, le tempToken vit 5 min — et le 6ᵉ utilisateur lirait « trop de tentatives »
-    // au lieu de « session expirée, reconnecte-toi ». Détail dans le docblock de la clé.
-    // ⚠️ La clé est recalculée par le `keyGenerator` du compteur : une vérification HMAC de
-    // plus, négligeable, contre une garde lisible.
+    // En dehors du try, dont le catch transforme tout en 401 et avalerait le 429.
+    // On ne compte que les requetes qui designent vraiment un compte. Sans tempToken lisible,
+    // on laisse faire le plancher par IP : sinon toutes ces requetes tomberaient dans le meme
+    // seau, et cinq tempTokens expires dans la minute suffiraient a repondre "trop de
+    // tentatives" au sixieme utilisateur au lieu de "session expiree".
     if (twoFactorVerifyAccountKey(request) !== null) {
       const quota = await verifyAccountLimit(request);
       if (!quota.isAllowed && quota.isExceeded) {

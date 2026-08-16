@@ -110,45 +110,18 @@ function formatSize(format: Ladder['format']): number {
 // d'une transaction (sinon ils lisent un instantané pris avant le verrou).
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/**
- * §5.2 — ce camp a-t-il déjà un match dont la FENÊTRE chevauche celle-ci ?
- *
- * Chaque match occupe [scheduled_at, scheduled_at + lockout_minutes]. Plutôt que de
- * comparer des intervalles, on retourne la question : un match me gêne si SON heure
- * tombe strictement dans ]mon_heure − lockout, mon_heure + lockout[.
- * Les deux bornes sont calculées EN JS → deux simples comparaisons colonne/valeur,
- * aucun SQL brut, et l'index (status, scheduled_at) est utilisé.
- *
- * ⚠️ INÉGALITÉS STRICTES (gt/lt, jamais gte/lte) : deux matchs qui se TOUCHENT
- * (21h–22h puis 22h–23h) ne se chevauchent PAS → l'enchaînement dos à dos est autorisé.
- * C'est le cas d'usage n°1 du ticket (« je planifie ma soirée »). Écrire gte/lte
- * casserait la feature.
- *
- * Remplace hasOpenSlot() + isLockedOut() : une seule question, posée à la création
- * ET à l'accept.
- *
- * ⚠️ PORTÉE : le « camp » est PAR LADDER, pas par personne (décision du 14/07).
- *   • 2v2+ → la TEAM (elle n'appartient qu'à un seul ladder)
- *   • 1v1  → le couple (JOUEUR, LADDER) — d'où le filtre eq(ladderId) dans la branche solo
- * Conséquence ASSUMÉE : un joueur peut avoir un match d'échecs ET un match Rocket League
- * à 21h. Un joueur aligné dans deux teams sur deux ladders peut être engagé deux fois.
- * CE N'EST PAS UN BUG — ne « corrigez » pas en retirant le filtre ladder.
- * Raison : la plateforme n'observe pas les parties ; l'absence se règle par dispute →
- * forfait ; et c'est une responsabilité humaine (le capitaine engage sa team en connaissance
- * de cause — si son joueur ne vient pas, c'est SA team qui perd). Cf. docs/schema.md §5.2.
- *
- * ⚠️ `statuses` DIFFÈRE selon l'appelant, et c'est essentiel :
- *   • CRÉATION → ENGAGING_STATUSES (pending + actifs). Je ne peux pas PROPOSER deux
- *     créneaux qui se chevauchent : si les deux slots étaient acceptés, je jouerais
- *     deux matchs à la fois.
- *   • ACCEPT   → LOCKING_STATUSES (actifs SEULEMENT). Mes slots `pending` qui
- *     chevauchent ne doivent PAS me bloquer : ce ne sont que des propositions, et
- *     l'option A (plus bas dans la transaction) va justement les RETIRER quand je
- *     m'engage pour de bon. Les compter ici reviendrait à me refuser un match à cause
- *     d'une offre que je m'apprête à annuler.
- *     La course « on accepte mon slot pendant que j'accepte le sien » reste couverte :
- *     le verrou sérialise, et la relecture sous verrou voit le match devenu ACTIF.
- */
+// Est-ce que ce camp a deja un match qui chevauche ce creneau ?
+//
+// Chaque match occupe une fenetre autour de son heure. Au lieu de comparer des intervalles on
+// retourne la question : un match me gene si son heure tombe dans ma fenetre. Les inegalites
+// sont strictes, donc deux matchs qui se touchent, 21h-22h puis 22h-23h, passent : enchainer
+// deux matchs dans la soiree est le cas d'usage principal.
+//
+// Le camp se compte par ladder, pas par personne. Quelqu'un peut donc avoir un match d'echecs
+// et un match de Rocket League a la meme heure : c'est assume, on n'observe pas les parties.
+//
+// La liste de statuts change selon l'appelant : a la creation on compte aussi les creneaux en
+// attente, a l'acceptation non, puisqu'ils vont justement etre annules.
 async function hasConflictingMatch(
   executor: Executor,
   ladder: Ladder,
@@ -248,30 +221,19 @@ function competitorKey(ladder: Ladder, teamId: string | null, userId: string): s
   return teamId ? `team:${teamId}` : `user:${userId}:${ladder.id}`;
 }
 
-/**
- * Sérialise les engagements des camps concernés, dans un ORDRE DÉTERMINISTE.
- *
- * Deux problèmes, une seule solution.
- *
- * 1) Sans verrou du tout : deux accepts simultanés du même camp sur DEUX matchs
- *    différents passent tous les deux (chacun lit le lockout avant que l'autre
- *    n'ait commité, et l'update conditionnel ne les sérialise pas — lignes
- *    distinctes) → deux matchs actifs → §5.2 contourné.
- *
- * 2) Sans ORDRE : alice accepte le slot de bob pendant que bob accepte celui
- *    d'alice. Chaque transaction ne verrouillait que SON accepteur → clés
- *    différentes, aucune sérialisation. Puis chacune verrouille la ligne du match
- *    qu'elle démarre et réclame celle de l'autre (l'annulation croisée des slots
- *    ouverts) → T1 tient B et veut A, T2 tient A et veut B → **INTERBLOCAGE**.
- *    Postgres en tue une : 500 sur un conflit métier parfaitement normal.
- *
- * Le tri règle (2) : les deux transactions demandent les MÊMES verrous dans le
- * MÊME ordre, donc l'une attend l'autre au lieu de se mordre la queue. C'est le
- * remède canonique au deadlock — l'acquisition ordonnée des ressources.
- *
- * Les verrous sont *transactionnels* : Postgres les relâche seul au COMMIT/ROLLBACK.
- * Une collision de hachage ne ferait que sérialiser deux camps sans lien — inoffensif.
- */
+// Verrouille les camps concernes, toujours dans le meme ordre.
+//
+// Sans verrou, deux acceptations simultanees du meme camp sur deux matchs differents passent
+// toutes les deux : chacune lit avant que l'autre ne commite, et comme ce sont des lignes
+// differentes rien ne les serialise. On se retrouve avec deux matchs actifs.
+//
+// Sans ordre, c'est pire : alice accepte le creneau de bob pendant que bob accepte celui
+// d'alice, chacune tient le match qu'elle demarre et reclame celui de l'autre. Postgres tue
+// une des deux transactions et on rend un 500 sur un conflit parfaitement banal. Le tri regle
+// ca : les deux demandent les memes verrous dans le meme ordre, donc l'une attend l'autre.
+//
+// Les verrous sont transactionnels, Postgres les relache tout seul a la fin.
+
 async function lockCompetitors(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   keys: string[],
@@ -282,29 +244,18 @@ async function lockCompetitors(
   }
 }
 
-/**
- * BX-LEAVE — LA COMPOSITION EST-ELLE ENCORE SUR LE ROSTER ? À rappeler SOUS LE VERROU.
- *
- * `validateSide()` valide le roster HORS transaction et hors verrou : son verdict a donc
- * une date de péremption. Entre lui et l'INSERT des `match_participants`, un joueur peut
- * avoir quitté l'équipe — `DELETE /teams/:id/members/:userId` s'y emploie précisément, et
- * son propre nettoyage des créneaux `pending` ne voit pas un INSERT non commité :
- *
- *   1. `POST /matches` lit le roster : le joueur est encore membre (le DELETE n'est pas
- *      commité) → il l'aligne ;
- *   2. le départ prend le verrou `team:<id>`, ne trouve aucun créneau `pending` à annuler
- *      (l'INSERT n'est pas commité non plus), retire l'adhésion, commite ;
- *   3. la création prend le verrou à son tour et insère un créneau qui aligne un
- *      NON-MEMBRE — le défaut même que BX-LEAVE corrige, réintroduit par la fenêtre.
- *
- * 🔑 Le verrou du départ est nécessaire mais NE SUFFIT PAS : il sérialise les deux
- * transactions, il ne rafraîchit pas une lecture faite avant elles. Il fallait son
- * pendant ici — la re-vérification sous verrou, la moitié qu'on oublie systématiquement
- * (piège #14). Reproduit 3 fois sur 3 par la §8 de `test_teams_leave.py`, verrou en place.
- *
- * Rend les joueurs de la composition qui ne sont PLUS sur le roster (vide = tout va bien).
- * Sans objet en 1v1 : il n'y a pas de roster, le joueur EST le camp.
- */
+// Est-ce que la composition tient encore dans le roster ? A rappeler sous le verrou.
+//
+// validateSide verifie le roster hors transaction, donc son verdict peut avoir vieilli. Entre
+// sa lecture et l'insertion des participants, quelqu'un peut avoir quitte l'equipe : le depart
+// ne voit pas notre insertion pas encore commitee, on ne voit pas son depart, et on finit par
+// aligner un non-membre dans un creneau tout neuf.
+// Le verrou du depart ne suffit pas a lui seul, il serialise les deux transactions mais ne
+// rafraichit pas une lecture faite avant. Il faut cette re-verification en face.
+//
+// Rend les joueurs qui ne sont plus sur le roster, vide si tout va bien. Sans objet en 1v1,
+// ou le joueur est le camp a lui tout seul.
+
 async function lineupOffRoster(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   teamId: string,
@@ -329,16 +280,12 @@ type SideValidation =
   // Le front sait alors QUI surligner, au lieu de deviner parmi les 5 sélectionnés.
   | { ok: false; code: number; error: string; unlinkedPlayers?: string[] };
 
-/**
- * Valide qu'un joueur peut engager un côté sur ce ladder, et décrit ce côté.
- *
- * Appelé DEUX fois : à la création du slot (side 0) et à l'acceptation (side 1).
- * C'est tout l'intérêt : les deux camps d'un match sont validés à l'identique.
- *
- * ⚠️ Il ne dit RIEN du créneau. « Suis-je libre à cette heure ? » est une autre
- * question — c'est hasConflictingMatch(), appelé par les routes. validateSide valide
- * le CÔTÉ (qui joue), pas l'HORAIRE (quand).
- */
+// Verifie qu'un joueur peut engager un camp sur ce ladder, et decrit ce camp.
+// Appelee a la creation du creneau puis a l'acceptation, ce qui garantit que les deux camps
+// d'un match passent exactement les memes controles.
+// Elle ne dit rien de l'horaire : "est-ce que je suis libre a cette heure" est une autre
+// question, c'est hasConflictingMatch qui y repond.
+
 async function validateSide(
   ladder: Ladder,
   game: Game,
@@ -445,28 +392,14 @@ const createMatchSchema = z.object({
 
 const acceptMatchSchema = createMatchSchema.pick({ lineup: true });
 
-/**
- * [B-MM] Pourquoi je ne peux PAS accepter ce créneau. **Enum FERMÉ** : le front en fait des
- * libellés, une 6ᵉ valeur inattendue afficherait un vide silencieux.
- *
- * 🔑 L'ordre d'évaluation reproduit celui de `POST /matches/:id/accept` — d'abord le CÔTÉ
- * (`validateSide` : qui joue), puis le CRÉNEAU (`hasConflictingMatch` : quand) :
- *   • 1v1  → `account_not_linked` puis `schedule_conflict`
- *   • 2v2+ → `no_team`, `not_captain`, `roster_too_small`, `roster_not_linked` puis
- *     `schedule_conflict`
- * Un seul code est rendu : le PREMIER qui tombe, celui que l'API opposerait réellement.
- *
- * ⚠️ Pas de code pour « c'est mon propre créneau » : ces slots restent **exclus** de la
- * liste (comportement d'origine), ils n'ont donc jamais de verdict à rendre.
- *
- * 🔑 **`roster_too_small` et `roster_not_linked` sont DEUX codes et pas un** (ajout après
- * review). Les fusionner rendait `canAccept` juste mais la CAUSE fausse : une équipe d'un
- * seul membre au Steam lié s'entendait dire « vos joueurs doivent lier leur compte » alors
- * qu'il lui manquait 4 joueurs, et l'accept répondait, lui, `lineup must contain exactly 5
- * players`. La page front fait porter à la raison le lien qui la résout : « inviter des
- * joueurs » et « faire lier les comptes » sont deux remèdes différents, donc deux liens
- * différents. Le libellé neutre aurait supprimé le symptôme, pas la cause.
- */
+// Pourquoi je ne peux pas accepter ce creneau. La liste est fermee : le front en fait des
+// phrases, une valeur inconnue afficherait un blanc.
+// On evalue dans le meme ordre que la route d'acceptation, d'abord qui joue puis quand, et on
+// ne rend que le premier code qui tombe, celui que l'API opposerait vraiment.
+// roster_too_small et roster_not_linked sont bien deux codes distincts : a une equipe
+// incomplete on doit dire d'inviter des joueurs, pas de faire lier des comptes. Ce sont deux
+// remedes differents, donc deux liens differents dans la page.
+
 const SLOT_REFUSAL_REASONS = [
   // 1v1 · §5.1 — je n'ai pas de compte lié pour le provider du jeu.
   'account_not_linked',
@@ -489,27 +422,16 @@ type SlotRefusalReason = (typeof SLOT_REFUSAL_REASONS)[number];
 const DEFAULT_SLOT_LIMIT = 50;
 const MAX_SLOT_LIMIT = 100;
 
-/**
- * Un paramètre présent mais VIDE vaut « absent ».
- *
- * 🔑 Sans ça, un front qui construit son URL depuis l'état d'un filtre non renseigné
- * (`?gameId=${filtre}`) envoie `?gameId=` et reçoit un **400** — donc une ligne rouge dans
- * la console Chrome, qui est un **motif de rejet du projet**. C'est le cas d'usage NORMAL
- * d'une page de filtres, pas un abus d'appelant : il ne doit pas coûter une erreur.
- *
- * ⚠️ Ne relâche RIEN d'autre : une valeur réellement invalide (`?acceptable=1`,
- * `?limit=abc`, `?ladderId=nope`) continue de sortir en 400. Seule la chaîne vide,
- * indistinguable d'un paramètre omis côté navigateur, est neutralisée.
- */
+// Un parametre present mais vide vaut absent. Une page de filtres construit son URL a partir
+// de son etat, donc un filtre non rempli envoie ?gameId= et se prenait un 400, c'est a dire
+// une erreur rouge dans la console pour un usage parfaitement normal.
+// Ca ne relache rien d'autre : une vraie valeur invalide sort toujours en 400.
+
 const blankAsAbsent = (v: unknown): unknown => (v === '' ? undefined : v);
 
-/**
- * [B-MM] `GET /matches` — **tous** les filtres sont optionnels.
- *
- * ⚠️ `ladderId` n'est plus requis : sans lui la route balaie TOUS les ladders. C'est le
- * mode d'emploi de la page « Matchmaking » — on choisit un créneau avant de choisir un
- * ladder. Avec lui, le comportement d'origine est strictement inchangé, 404 compris.
- */
+// Tous les filtres sont optionnels. Sans ladderId on balaie tous les ladders, parce que sur
+// la page matchmaking on choisit d'abord un creneau et seulement ensuite un ladder.
+
 const openSlotsQuerySchema = z.object({
   ladderId: z.preprocess(blankAsAbsent, z.uuid().optional()),
   // Slug TEXTE (`cs2`, `val`…), pas un uuid : `games.id` est un `text` choisi à la main.
@@ -664,34 +586,22 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
     }
   });
 
-  // GET /matches — les créneaux ouverts, sur UN ladder (`?ladderId=`) ou sur TOUS (B-MM).
-  //
-  // Anonymat CONSERVÉ (décision B5b) : ni la team créatrice, ni les maps. On accepte un
-  // créneau sans savoir qui l'a ouvert — c'est ce qui empêche de choisir ses adversaires
-  // et protège l'intégrité de l'Elo.
-  //
-  // 🔑 NOMBRE DE REQUÊTES CONSTANT (7 au pire, 1 dans le cas vide), quel que soit le
-  // nombre de créneaux ET de ladders. Le verdict `canAccept` est par-ladder et par-camp :
-  // il est calculé EN LOT, en amont, jamais dans la boucle de mise en forme.
+  // Les creneaux ouverts, sur un ladder ou sur tous.
+  // On ne dit jamais qui a ouvert le creneau : c'est ce qui empeche de choisir ses adversaires
+  // et donc de bricoler son Elo.
+  // Le nombre de requetes est constant quel que soit le nombre de creneaux : le verdict
+  // canAccept se calcule en lot avant la mise en forme, jamais dans la boucle.
   server.get('/', { onRequest: [server.authenticate] }, async (request, reply) => {
     try {
       // Zod APRÈS `authenticate` (invariant repo #5) : anonyme → 401, malformé → 400.
       const query = openSlotsQuerySchema.parse(request.query);
       const me = request.user.sub;
 
-      // ── 1. Les ladders du périmètre, avec l'identité de leur jeu ────────────────────
-      // UNE requête jointe : `ladderName` et `gameName` sortent d'ici. Jamais un
-      // aller-retour par créneau, jamais un par ladder.
-      // ⚠️ `ladderId` PREND LA MAIN sur les autres filtres, et ce n'est pas un détail :
-      // il DÉSIGNE une ressource, donc lui seul peut motiver un 404. Si on le mélangeait
-      // aux filtres secondaires dans le même `where`, alors
-      // `?ladderId=<chess>&format=5v5` ne rendrait aucune ligne et sortirait en
-      // « ladder not found » — un MENSONGE : ce ladder existe, il ne satisfait
-      // simplement pas les autres critères. La bonne réponse est 200 + liste vide.
-      // ⚠️ Volontairement REDONDANT quand `ladderId` est absent : le `where` ci-dessous a
-      // déjà appliqué ces deux filtres en SQL, ce prédicat est alors un no-op. On le garde
-      // parce qu'il est le SEUL à s'appliquer dans l'autre branche — le factoriser
-      // demanderait de faire dépendre le `where` du prédicat, pour zéro gain.
+      // Les ladders concernes et leur jeu, en une seule requete jointe.
+      // ladderId passe avant les autres filtres : c'est lui qui designe une ressource, donc
+      // lui seul peut justifier un 404. Melange aux autres, une recherche du genre
+      // ?ladderId=echecs&format=5v5 repondrait "ladder introuvable", ce qui serait faux : il
+      // existe, il ne colle juste pas aux autres criteres. La bonne reponse est une liste vide.
       const secondary = (l: { gameId: string; format: Ladder['format'] }): boolean =>
         (!query.gameId || l.gameId === query.gameId) && (!query.format || l.format === query.format);
 
@@ -746,20 +656,14 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       const myTeamByLadder = new Map(myTeams.map((t) => [t.ladderId, t]));
       const myTeamIds = myTeams.map((t) => t.teamId);
 
-      // ── 3. Mes engagements, DEUX sources, lues une fois pour toutes ─────────────────
-      // Elles servent DEUX fois : à exclure mes propres créneaux, et à détecter le
-      // chevauchement de fenêtres (§5.2). D'où la lecture en lot : une requête par
-      // créneau serait le vrai piège de ce ticket.
-      //
-      // 🔑 Le découpage reproduit à la lettre celui de `hasConflictingMatch` ET la garde
-      // d'auto-acceptation de `POST /matches/:id/accept` : en 2v2+ l'identité du camp est
-      // l'ÉQUIPE (`match_sides.team_id`), en 1v1 c'est le couple (JOUEUR, LADDER)
-      // (`match_participants` + filtre ladder).
-      // ⚠️ D'où le `format = '1v1'` sur la source « participant », qui n'est PAS un
-      // raccourci : un joueur qui a quitté l'équipe X garde sa ligne dans la compo d'un
-      // slot encore ouvert de X, alors que l'accept l'autoriserait à le prendre au nom de
-      // son équipe Y (la garde compare la team du slot à MA team ACTUELLE). Sans ce
-      // filtre, ce créneau disparaîtrait de sa liste sans qu'aucune règle ne le demande.
+      // Mes engagements, lus en une fois. Ils servent deux fois : a masquer mes propres
+      // creneaux et a reperer les chevauchements d'horaire. Une requete par creneau serait
+      // le vrai piege ici.
+      // Le decoupage est le meme que dans hasConflictingMatch : en equipe le camp c'est
+      // l'equipe, en 1v1 c'est le joueur sur ce ladder. D'ou le filtre sur le format, qui
+      // n'est pas un raccourci : quelqu'un qui a quitte une equipe garde sa ligne dans la
+      // compo d'un creneau encore ouvert, et sans ce filtre ce creneau disparaitrait de sa
+      // liste alors qu'il a parfaitement le droit de le prendre pour sa nouvelle equipe.
       const asPlayer = await db
         .select({
           matchId: matchesTable.id,
@@ -847,20 +751,14 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         : [];
       const myProviders = new Set(soloProviders.map((r) => r.provider));
 
-      // §5.1 côté ÉQUIPE : pour chacune de mes équipes, la TAILLE du roster et combien de
-      // ses membres ont le compte lié qu'exige le jeu de SON ladder. UNE requête agrégée
-      // pour toutes mes équipes — pas une par équipe, encore moins une par créneau.
-      //
-      // 🔑 **LEFT JOIN, et deux compteurs distincts** (correction de review) : un INNER
-      // JOIN ne remontait que les membres LIÉS, il était donc incapable de distinguer
-      // « 1 membre, lié » de « 5 membres, 1 lié » — les deux rendaient `linked = 1` et la
-      // même raison. `count(*)` compte les lignes du roster ; `count(<colonne jointe>)`
-      // ignore les NULL, donc compte les seuls membres liés. Deux causes, deux remèdes,
-      // aucune requête de plus.
-      // 🔑 Pas de `distinct` : `user_external_accounts_user_provider_unique` interdit qu'un
-      // joueur porte deux lignes pour le même provider, la jointure ne peut pas dupliquer.
-      // On ne compte que les équipes que je CAPITAINE : ailleurs le verdict s'arrête avant
-      // (`no_team` / `not_captain`) et le roster n'a aucune influence.
+      // Pour chacune de mes equipes : la taille du roster et combien de ses membres ont lie
+      // le compte qu'exige le jeu. Une seule requete agregee pour toutes mes equipes, pas une
+      // par equipe et encore moins une par creneau.
+      // LEFT JOIN et deux compteurs separes : avec un INNER JOIN on ne voyait que les membres
+      // ayant lie leur compte, donc impossible de distinguer une equipe d'un seul joueur lie
+      // d'une equipe de cinq dont un seul a lie. count(*) compte le roster, compter la colonne
+      // jointe ignore les NULL et donne les seuls membres lies. Deux causes, deux messages.
+      // On ne regarde que les equipes dont je suis capitaine, ailleurs le verdict tombe avant.
       const captainTeamIds = presentLadders
         .filter((l) => l.format !== '1v1')
         .map((l) => myTeamByLadder.get(l.id))
@@ -1025,25 +923,16 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             );
           allowed = !!teamMember;
         }
-        // Un tiers peut lire un match TERMINÉ (page match publique, FT-2) : la composition
-        // nominative des deux camps devient publique une fois le match `completed`. Tout
-        // autre statut (pending/in_progress/awaiting_confirmation/disputed/cancelled) reste
-        // réservé aux participants.
-        // …à une exception près : l'ADMIN, et UNIQUEMENT sur les deux statuts qu'un dossier de
-        // litige peut prendre. L'en-tête de `/disputes/$disputeId` renvoie vers cette feuille de
-        // match, et un arbitre a besoin des maps, des compos et des scores soumis pour trancher —
-        // or sur un match `disputed` il n'est justement pas participant. Le dossier reste
-        // consultable APRÈS arbitrage : `resolve` produit soit `completed` (déjà public juste
-        // au-dessus), soit `cancelled` — d'où les deux statuts, et pas un.
-        //
-        // 🚨 SURTOUT PAS « tous les statuts ». Un admin est AUSSI un joueur (décision produit) :
-        // l'ouvrir sur `pending` lui donnerait la composition nominative de chaque créneau ouvert,
-        // que `GET /matches?status=pending` cache justement à tout le monde — il scouterait les
-        // rosters avant d'accepter un défi. Le commentaire ci-dessus sur l'anonymat des slots
-        // ouverts doit rester vrai.
-        //
-        // La requête est faite ICI seulement, dans la branche qui refuserait déjà, et seulement
-        // sur ces deux statuts : le cas nominal ne la paie jamais.
+        // N'importe qui peut lire un match termine : une fois joue, la compo des deux camps
+        // est publique. Tous les autres statuts restent reserves aux participants.
+        // Une exception : l'admin, et seulement sur les deux statuts qu'un litige peut
+        // prendre. L'arbitre a besoin des maps, des compos et des scores pour trancher, et
+        // sur un match en litige il n'est justement pas participant.
+        // Surtout pas tous les statuts : un admin est aussi un joueur, et lui ouvrir les
+        // creneaux en attente lui donnerait la compo de chaque creneau ouvert, donc de quoi
+        // reperer les rosters avant d'accepter un defi.
+        // La requete ne part que dans la branche qui allait refuser, le cas normal ne la paie
+        // jamais.
         if (!allowed && match.status !== 'completed') {
           const arbitrable = match.status === 'disputed' || match.status === 'cancelled';
           const [viewer] = arbitrable
@@ -1349,17 +1238,12 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           )
             return { raced: 'conflict' } as const;
 
-          // 1-bis. BX-LEAVE — le roster de l'ACCEPTEUR, revérifié sous le même verrou.
-          //    Exactement la même course que côté création, avec la même conséquence : on
-          //    engagerait un camp dont la composition contient un joueur qui vient de
-          //    quitter l'équipe, et cette fois dans un match qui DÉMARRE.
-          //    🔑 SEUL LE CAMP ACCEPTEUR EST REVÉRIFIÉ ICI, et ce n'est pas un oubli : la
-          //    composition du camp CRÉATEUR est tenue par la route de départ, qui annule ses
-          //    créneaux `pending` sous LA MÊME clé de verrou `team:<id>`. Les seuls autres
-          //    chemins qui retirent une ligne `team_members` (dissolution, suppression de
-          //    compte) refusent déjà sur `ENGAGING_STATUSES`. ⚠️ Assouplir l'un de ces trois
-          //    chemins rouvre le trou EN SILENCE — c'est ici qu'il faudrait alors revérifier
-          //    les deux camps.
+          // Le roster de celui qui accepte, reverifie sous le meme verrou. Meme course qu'a
+          // la creation, sauf qu'ici le match demarre pour de bon.
+          // On ne reverifie que le camp qui accepte, et ce n'est pas un oubli : la compo du
+          // camp createur est deja tenue par la route de depart, qui annule ses creneaux sous
+          // la meme cle. Si un jour on assouplit un de ces chemins, il faudra reverifier les
+          // deux camps ici.
           if (side.sideTeamId) {
             const gone = await lineupOffRoster(tx, side.sideTeamId, side.participantIds);
             if (gone.length) return { raced: 'roster', gone } as const;
@@ -1854,16 +1738,11 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                 .update(matchesTable)
                 .set({ status: 'awaiting_confirmation' })
                 .where(and(eq(matchesTable.id, id), eq(matchesTable.status, 'in_progress')));
-              // Notifier UNIQUEMENT sur la VRAIE première soumission (transition
-              // in_progress -> awaiting_confirmation), pas sur une re-soumission du même
-              // camp pendant qu'il attend toujours l'autre : `otherSide.submittedAt===null`
-              // reste vrai à CHAQUE re-soumission tant que l'adversaire n'a pas répondu,
-              // ce qui spammait l'adversaire d'une notif par clic. `currentMatch.status` a
-              // été lu SOUS VERROU avant toute écriture de cette transaction : il ne vaut
-              // 'in_progress' que la toute première fois — une re-soumission le trouve déjà
-              // à 'awaiting_confirmation' (posé par le 1er appel) et n'entre pas ici.
-              // SEUL l'autre camp est prévenu (« l'adversaire a soumis un score, tu as
-              // 24 h ») — mes coéquipiers n'ont rien à confirmer, eux.
+              // On ne notifie que sur la vraie premiere soumission. Regarder si l'autre camp
+              // a repondu ne suffit pas : c'est encore vrai a chaque nouvelle soumission tant
+              // qu'il n'a rien dit, et l'adversaire recevait une notif par clic. Le statut, lu
+              // sous verrou, ne vaut in_progress que la toute premiere fois.
+              // Seul l'autre camp est prevenu, mes coequipiers n'ont rien a confirmer.
               const notifs =
                 currentMatch.status === 'in_progress'
                   ? await notify(

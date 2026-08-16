@@ -124,21 +124,14 @@ export const notificationPayloadSchemas = {
     byUserId: uuidField,
     byPseudo: z.string(),
   }),
-  // BX-LEAVE — « votre créneau est tombé parce que X n'est plus dans l'équipe ».
-  //
-  // ⚠️ `playerId`/`playerPseudo` et NON `byUserId`/`byPseudo` : partout ailleurs `by*` désigne
-  // l'ACTEUR. Ici l'acteur et le joueur concerné peuvent être deux personnes différentes —
-  // sur une exclusion, c'est le capitaine qui agit et le joueur exclu qui casse la lineup.
-  // Réutiliser `by*` aurait fait afficher « annulé par le capitaine » sur une notification
-  // que le capitaine reçoit lui-même. Ces champs nomment donc LE JOUEUR QUI PART.
-  //
-  // ⚠️ `scheduledAt` est NULLABLE, contrairement à `match_accepted` : la colonne l'est en base
-  // (seul Zod la rend obligatoire à la création du slot). On préfère rendre l'absence visible
-  // plutôt que fabriquer une heure — et surtout plutôt que faire échouer la transaction
-  // d'annulation sur un `.parse()` pour un champ purement décoratif.
-  //
-  // `teamName` est un INSTANTANÉ (même raison que `team_disbanded`) : l'équipe peut être
-  // renommée, voire dissoute, avant que le destinataire n'ouvre sa cloche.
+  // "votre creneau est tombe parce que X n'est plus dans l'equipe".
+  // Ici on nomme le joueur qui part et pas l'acteur, contrairement aux autres notifications :
+  // sur une exclusion c'est le capitaine qui agit, et il recevrait sinon une notification qui
+  // lui dit "annule par le capitaine".
+  // L'heure peut etre absente, on prefere l'afficher vide plutot que d'inventer une date ou
+  // de faire echouer l'annulation sur un champ decoratif.
+  // Le nom d'equipe est une photo a l'instant T : elle peut etre renommee ou dissoute avant
+  // que le destinataire n'ouvre sa cloche.
   match_cancelled_member_left: z.strictObject({
     matchId: uuidField,
     ladderId: uuidField,

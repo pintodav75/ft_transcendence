@@ -86,51 +86,27 @@ await server.register(fastifyCors, {
   credentials: true,
 });
 
-// Limite GLOBALE : le filet anti-abus de toutes les routes qui ne déclarent pas leur propre
-// quota. ⚠️ Une route qui déclare `config.rateLimit` N'EST PLUS soumise à celle-ci :
-// @fastify/rate-limit installe SOIT le hook global, SOIT celui de la route (cf. son `onRoute`),
-// jamais les deux. Un quota de route REMPLACE le global, il ne le durcit pas. En revanche les
-// options non redéfinies par la route — dont `keyGenerator` — sont HÉRITÉES d'ici.
+// Quota global, pour toutes les routes qui ne declarent pas le leur. Attention : une route qui
+// declare son propre quota n'est plus soumise a celui-ci, il le remplace au lieu de s'ajouter.
+// Par contre elle herite des options qu'elle ne redefinit pas, dont le keyGenerator.
 //
-// ── Clé du compteur : l'utilisateur si authentifié, l'IP sinon (`rateLimitKey`) ───────────
-// POURQUOI : 100 req/min PAR IP, c'est le quota de l'IP, pas de la personne. Quatre
-// coéquipiers derrière le même NAT — le campus, une box — partagent 100 requêtes par minute
-// à eux quatre, et une simple navigation soutenue dans le SPA les épuise. Indexé sur le
-// `sub` du JWT, chacun a les siennes, et un attaquant authentifié ne s'échappe PAS en
-// changeant d'IP. Bug produit réel, découvert parce que les suites e2e, une fois passées de
-// 15 min à quelques secondes, saturaient ce compteur.
+// On compte par utilisateur et pas par IP. Quatre coequipiers derriere la meme box partagent
+// une seule adresse : a 100 requetes par minute pour tout le monde, une navigation un peu
+// soutenue les epuise a eux quatre. Sur le sub du JWT chacun a les siennes, et changer d'IP
+// ne sert plus a rien pour qui est connecte. Ce qui est anonyme reste compte par IP, donc
+// register et login gardent leurs quotas serres.
 //
-// CE QUI RESTE PAR IP : tout ce qui est ANONYME, puisque rien n'y peuple `request.user` —
-// donc `/auth/register` (3/min) et `/auth/login` (5/min) gardent exactement le comportement
-// qu'on veut d'elles, borner un attaquant non authentifié. Elles ne sont pas assouplies.
-//
-// CONTREPARTIE ASSUMÉE, ET SON COÛT RÉEL : une IP disposant de N comptes valides obtient
-// N×100 req/min. L'ancien modèle plafonnait une IP à 100/min AU TOTAL, quel que soit le
-// nombre de comptes détenus — c'est un vrai changement de posture, pas un détail.
-// ⚠️ Ne PAS se rassurer avec « /auth/register est à 3/min » : ce quota borne la VITESSE de
-// création, pas le STOCK accumulable (aucune vérification d'email), et il ne couvre pas la
-// création via OAuth — `/auth/oauth/google/callback` ne relève que du quota global (100/min),
-// et `/auth/oauth/google/start` d'aucun quota, `@fastify/oauth2` étant enregistré AVANT ce
-// plugin (pré-existant, déjà vrai sur master ; mesuré : aucun en-tête `x-ratelimit-*` sur
-// `/start`, `x-ratelimit-limit: 100` sur `/callback`, contre 3 sur `/auth/register`).
-// On l'accepte parce que l'alternative — 100 req/min partagées par tout un NAT — casse l'app
-// pour des utilisateurs légitimes : un risque certain contre un risque théorique.
-//
-// ⚠️ `rlMax` : tous les quotas de l'API sont multipliés par `RATE_LIMIT_FACTOR` (défaut 1).
-// C'est une variable de CONFORT pour les harnais (audit console, e2e Python), pas un
-// interrupteur — le plugin, les clés et les hooks sont inchangés. Détail dans
-// `utils/rate-limit.ts`. Elle DOIT valoir 1 à la livraison : la bannière ci-dessous le répète
-// à chaque démarrage tant que ce n'est pas le cas.
+// Ce qu'on paie : quelqu'un avec N comptes valides obtient N fois 100 requetes par minute.
+// On l'accepte parce que l'inverse cassait l'app pour des gens legitimes.
+
 await server.register(rateLimit, {
   max: rlMax(100),
   timeWindow: '1 minute',
   keyGenerator: rateLimitKey,
 });
 
-// ⚠️ `console.warn`, PAS `server.log.warn` : ce serveur est instancié sans `logger`, donc
-// `server.log` est le logger muet de Fastify — la bannière ne serait écrite nulle part
-// (vérifié : rien dans `docker compose logs backend`). Or son unique raison d'être est
-// d'être VUE. Même choix que `config/validate-env.ts`.
+// console.warn et pas server.log.warn : le serveur est instancie sans logger, donc server.log
+// n'ecrit nulle part. Or tout l'interet de cet avertissement est qu'on le voie au demarrage.
 if (RATE_LIMIT_FACTOR !== 1) {
   console.warn(
     `⚠️  RATE_LIMIT_FACTOR=${RATE_LIMIT_FACTOR} — tous les quotas sont multipliés par ${RATE_LIMIT_FACTOR} ` +

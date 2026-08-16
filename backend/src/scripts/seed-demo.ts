@@ -1,25 +1,13 @@
-/**
- * Seed de SOUTENANCE — le seul script à lancer devant le correcteur.
- *
- * Objectif : un site VIVANT PARTOUT. Les 9 ladders des 5 jeux ont un classement rempli,
- * des équipes, des matchs joués et des Elo étalés — y compris les deux ladders 1v1, qui
- * se peuplent avec des JOUEURS classés et non des équipes.
- *
- * Différence avec les deux autres seeds :
- *   - `seed:dev`    → fixtures de développement, 2 ladders sur 9, 3 comptes connectables.
- *   - `seed:social` → complément social posé sur `alice`, exige `seed:dev`.
- *   - `seed:demo`   → CE script. Autonome, il ne dépend d'aucun autre et repart d'une
- *                     ardoise propre (voir la purge ci-dessous).
- *
- * 🚨 IL EFFACE TOUT L'ÉTAT DE JEU EXISTANT : matchs, équipes, classements, amitiés,
- * messages, notifications, et les comptes de fixture (`@dev.local`, `@demo.local`) ainsi
- * que les comptes `audit…` laissés par les campagnes de test. C'est voulu : le correcteur
- * doit voir un site cohérent, pas un empilement de trois seeds successifs.
- *
- * ⚠️ Ne JAMAIS le lancer sur une base où quelqu'un a du travail en cours.
- *
- * Usage : docker compose exec backend npm run seed:demo
- */
+// Le seed de soutenance, celui qu'on lance devant le correcteur. Il remplit les 9 ladders
+// des 5 jeux : equipes, joueurs classes, matchs joues et Elo etales, pour que le site soit
+// vivant partout et pas seulement sur deux pages.
+// Contrairement aux deux autres seeds il est autonome et repart d'une ardoise propre.
+//
+// Attention, il efface tout l'etat de jeu existant : matchs, equipes, classements, amities,
+// messages, notifications et les comptes de fixture. Ne pas le lancer sur une base ou
+// quelqu'un a du travail en cours.
+//
+// Usage : docker compose exec backend npm run seed:demo
 import { db } from '../db/index.js';
 import {
   usersTable,
@@ -125,19 +113,12 @@ const SOLO_LADDERS = [
   { gameId: 'rl', format: '1v1', players: 60 },
 ] as const;
 
-/**
- * Qui est capitaine de quoi, dans l'ordre des équipes du ladder. Chacun en tient 3, sur
- * 3 ladders et 3 FORMATS différents — c'est ce qui montre que le cycle n'est pas écrit en
- * dur pour le 5v5.
- *
- * 🚨 `team_members_user_ladder_unique` impose un joueur dans UNE seule équipe par ladder :
- * un même pseudo ne peut donc apparaître qu'une fois par ligne, et ses 3 équipes sont
- * forcément sur 3 ladders distincts.
- *
- * 🚨 Les comptes nommés sont EXCLUS du tirage aléatoire des figurants (voir `playablePseudos`) :
- * sans ça ils étaient repêchés comme capitaines sur d'autres ladders et le récapitulatif
- * affiché en fin de seed devenait faux.
- */
+// Qui est capitaine de quoi. Chacun tient trois equipes, sur trois ladders et trois formats
+// differents, ce qui montre que le cycle n'est pas ecrit en dur pour le 5v5.
+// Un joueur ne peut etre que dans une equipe par ladder, donc un pseudo n'apparait qu'une
+// fois par ligne et ses trois equipes sont forcement sur trois ladders distincts.
+// Les comptes nommes sont exclus du tirage des figurants, sinon ils etaient repeches comme
+// capitaines ailleurs et le recapitulatif affiche en fin de seed devenait faux.
 const FORCED_CAPTAINS: Record<string, string[]> = {
   'cs2:5v5': ['correcteur', 'david'],
   'lol:5v5': ['walid', 'david'],

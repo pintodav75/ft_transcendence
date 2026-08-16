@@ -90,16 +90,12 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
           senderId: row.sender_id,
           receiverId: row.receiver_id,
           content: row.content,
-          // 🚨 `new Date(...)` OBLIGATOIRE ICI, ET NULLE PART AILLEURS DANS CE FICHIER.
-          // Cette route est la seule du domaine social écrite en SQL brut : la valeur remonte
-          // telle quelle du pilote `postgres-js`, soit `2026-07-31 18:35:02.376+00` — un espace au lieu
-          // du `T`, pas de `Z`, donc PAS de l'ISO 8601. Partout ailleurs c'est Drizzle qui
-          // construit une `Date` et Fastify qui la sérialise en ISO. Le contrat annonce
-          // `format: date-time`, et le front valide les dates de messages en ISO strict : sans
-          // cette conversion il rejette la donnée, ou trie la liste des conversations sur une
-          // chaîne dont l'ordre ne tient que par chance.
-          // 🔑 Règle générale : toute route en `db.execute(sql`…`)` perd la conversion de types
-          // de l'ORM — vérifier au `curl` le format de chaque colonne temporelle exposée.
+          // Le new Date est obligatoire ici et nulle part ailleurs dans ce fichier : c'est la
+          // seule route ecrite en SQL brut, donc la date remonte telle quelle du driver, avec
+          // un espace au lieu du T et sans Z. Ce n'est pas de l'ISO, et le front qui valide
+          // strictement rejette la donnee.
+          // Regle generale : des qu'on ecrit du SQL a la main on perd les conversions de
+          // l'ORM, il faut verifier le format de chaque colonne de date qu'on expose.
           createdAt: new Date(row.created_at),
         },
       }));
@@ -156,14 +152,10 @@ export const messagesRoutes: FastifyPluginAsync = async (server) => {
               and(eq(messagesTable.receiverId, userId), eq(messagesTable.senderId, friendId)),
             ),
           )
-          // ⚠️ DÉPARTAGE PAR `id` OBLIGATOIRE, ce n'est pas de la coquetterie. Sans lui,
-          // deux messages de la même milliseconde — deux personnes qui envoient en même
-          // temps, cas NORMAL d'un chat — remontent dans un ordre arbitraire, différent
-          // d'un appel à l'autre. Le front fusionne cet historique avec les événements
-          // temps réel en dédupliquant par `id` et en triant `createdAt` puis `id` : un
-          // serveur qui n'applique pas le même second critère lui fait afficher deux
-          // ordres différents pour la même conversation. Même règle que le tri de
-          // `GET /messages/conversations` et que celui de `GET /matches/me`.
+          // On departage par id, ce n'est pas coquet : deux messages envoyes dans la meme
+          // milliseconde, ce qui arrive tout le temps dans un chat, remontent sinon dans un
+          // ordre different a chaque appel. Le front fusionne cet historique avec le temps
+          // reel en triant par date puis par id, il faut donc le meme second critere ici.
           .orderBy(desc(messagesTable.createdAt), desc(messagesTable.id))
           .limit(100);
         // Les 100 DERNIERS sont pris en décroissant puis remis à l'endroit : trier
