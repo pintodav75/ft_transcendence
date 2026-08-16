@@ -305,7 +305,7 @@ async function main() {
   }
 
   if (charlie) {
-    // ⚠️ `team_member_added` est MORT depuis B-INV — plus personne ne l'émet, mais la valeur
+    // ⚠️ `team_member_added` est MORT — plus personne ne l'émet, mais la valeur
     // reste en base et d'anciennes notifications y font référence. On en sème une EXPRÈS :
     // le rendu doit la gérer, pas l'exclure.
     for (const type of ['team_member_added', 'team_member_removed'] as const) {

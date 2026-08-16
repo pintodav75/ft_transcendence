@@ -50,7 +50,7 @@ import {
 import { ENGAGING_STATUSES, LOCKING_STATUSES } from '../utils/match-status.js';
 
 // ⚠️ `LOCKING_STATUSES` et `ENGAGING_STATUSES` vivent dans `utils/match-status.ts` depuis
-// BX-DEL : `routes/users.ts` doit refuser une suppression de compte sur exactement les mêmes
+// `routes/users.ts` doit refuser une suppression de compte sur exactement les mêmes
 // matchs que ceux qui bloquent un créneau ici.
 
 // Les slots ne peuvent tomber que sur un quart fixe : :00, :15, :30, :45.
@@ -68,7 +68,7 @@ type Game = typeof gamesTable.$inferSelect;
 
 // ===== Règles de temps et de format, en UN seul exemplaire =====
 //
-// 🔑 Ces trois helpers ne sont pas de la cosmétique. Depuis [B-MM], `GET /matches` rend un
+// 🔑 Ces trois helpers ne sont pas de la cosmétique. `GET /matches` rend un
 // verdict `canAccept` qui doit annoncer EXACTEMENT ce que `POST /matches/:id/accept` fera.
 // Deux vérités qui divergent, c'est un bouton offert par l'UI puis refusé par l'API : une
 // ligne rouge dans la console Chrome, donc un motif de rejet du projet. Les règles
@@ -538,7 +538,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           return { raced: 'conflict' } as const;
         if ((await countOpenSlots(tx, ladder, sideTeamId, me)) >= MAX_OPEN_SLOTS)
           return { raced: 'too_many' } as const;
-        // BX-LEAVE — le roster aussi est une lecture périmable : un joueur de la lineup a
+        // Le roster aussi est une lecture périmable : un joueur de la lineup a
         // pu quitter l'équipe depuis `validateSide()`. Voir `lineupOffRoster()`.
         if (sideTeamId) {
           const gone = await lineupOffRoster(tx, sideTeamId, participantIds);
@@ -571,7 +571,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         return reply
           .code(409)
           .send({ error: `you cannot have more than ${MAX_OPEN_SLOTS} open slots on a ladder` });
-      // BX-LEAVE — MÊME 400 et MÊME `unlinkedPlayers`-like que le refus « à froid » de
+      // MÊME 400 et MÊME `unlinkedPlayers`-like que le refus « à froid » de
       // `validateSide` : que le joueur soit parti il y a une heure ou pendant la requête,
       // le capitaine doit lire la même chose et savoir QUI retirer de sa sélection.
       if (created.raced === 'roster')
@@ -727,7 +727,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         // la grille des quarts d'heure, donc les ex æquo sont FRÉQUENTS. Sans second
         // critère l'ordre des égalités n'est garanti par rien — un simple UPDATE de statut
         // déplace le tuple dans le heap et peut permuter deux lignes entre deux appels
-        // (leçon B-SOLO). L'ancienne version ne triait pas du tout.
+        // L'ancienne version ne triait pas du tout.
         .orderBy(asc(matchesTable.scheduledAt), asc(matchesTable.createdAt));
 
       // Rien à montrer : on sort AVANT les 2 requêtes de verdict, qui n'auraient rien à
@@ -999,7 +999,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             // id du side : c'est ce que le front renvoie comme `winnerSideId` à POST /result.
             id: s.id,
             sideIndex: s.sideIndex,
-            // état de soumission (B6) : le front affiche « en attente de l'adversaire… »
+            // état de soumission : le front affiche « en attente de l'adversaire… »
             // et calcule le temps restant (submittedAt + 24 h) côté client.
             submittedAt: s.submittedAt,
             submittedWinnerSideId: s.submittedWinnerSideId,
@@ -1269,7 +1269,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
             .insert(matchParticipantsTable)
             .values(side.participantIds.map((userId) => ({ matchSideId: createdSide.id, userId })));
 
-          // B9 — « ton défi a été accepté » : les joueurs ALIGNÉS du camp créateur (side 0).
+          // « ton défi a été accepté » : les joueurs ALIGNÉS du camp créateur (side 0).
           // L'accepteur (l'acteur) n'y est jamais — la garde anti-auto-accept l'exclut du
           // side 0. Insert DANS la tx (un rollback ne doit pas notifier) ; push après commit.
           const notifs = await notify(
@@ -1285,7 +1285,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
           //
           //    ⚠️ On n'annule QUE ceux qui chevauchent — surtout PAS tous les slots ouverts.
           //    Une team qui a planifié 21h / 23h / 01h et se fait accepter celui de 21h doit
-          //    GARDER ceux de 23h et 01h : ils ne se recouvrent pas. C'est tout l'objet de B5d.
+          //    GARDER ceux de 23h et 01h : ils ne se recouvrent pas. C'est tout l'objet de la règle.
           const overlapsWindow = [
             gt(matchesTable.scheduledAt, windowStart),
             lt(matchesTable.scheduledAt, windowEnd),
@@ -1348,7 +1348,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               ? 'your team already has a match around that time'
               : 'you already have a match around that time',
           });
-        // BX-LEAVE — un joueur de MA composition a quitté l'équipe pendant l'acceptation.
+        // Un joueur de MA composition a quitté l'équipe pendant l'acceptation.
         if (accepted.raced === 'roster')
           return reply
             .code(400)
@@ -1363,7 +1363,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
-  // GET /matches/me — MES matchs, au gabarit de l'historique d'équipe (B-SOLO). 100 % lecture,
+  // GET /matches/me — MES matchs, au gabarit de l'historique d'équipe. 100 % lecture,
   // aucune transaction, aucun verrou. Nombre de requêtes CONSTANT (9 au pire) quel que soit le
   // nombre de matchs : une requête par table puis des `Map` d'index en mémoire — JAMAIS d'await
   // dans une boucle de `map`. Jumeau volontaire de `GET /teams/:id/matches` (`routes/teams.ts`).
@@ -1471,7 +1471,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
         // sont terminés peut être dissoute, et son camp survit avec `team_id = NULL` sur un
         // 5v5 `completed`. C'est le FORMAT DU LADDER qui tranche, jamais la nullité — lire
         // le NULL comme « solo » renommerait le camp d'après un joueur et effacerait la
-        // composition (bug introduit puis corrigé côté front pendant FT-4A).
+        // composition (bug introduit puis corrigé côté front).
         const oppSideByMatch = new Map<string, (typeof allSides)[number] | undefined>();
         const opponentTeamIds = new Set<string>();
         const soloOppSideIds: string[] = [];
@@ -1589,7 +1589,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
       }
     },
   );
-  // ===== B6 — Soumission de résultat & confirmation =====
+  // ===== Soumission de résultat & confirmation =====
   server.post<{ Params: { id: string } }>(
     '/:id/result',
     { onRequest: [server.authenticate] },
@@ -1715,7 +1715,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
               .where(and(eq(matchSidesTable.matchId, id), ne(matchSidesTable.id, mySide.id)));
             if (!otherSide) return { ok: false, code: 500, error: 'Internal error' };
 
-            // B9 — destinataires : les joueurs alignés, JAMAIS l'acteur (`me`). En équipe,
+            // Destinataires : les joueurs alignés, JAMAIS l'acteur (`me`). En équipe,
             // les coéquipiers de l'acteur restent notifiés (seul l'auteur du clic est exclu).
             // Une seule requête pour les deux sides — le filtrage se fait en mémoire.
             const participants = await tx
@@ -1765,7 +1765,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                 otherSide.submittedScoreOpponent === scoreSelf;
               if (agree) {
                 // Match clos + ELO, dans la MÊME transaction. Helper partagé avec le job
-                // d'auto-confirmation (B6) et l'arbitrage admin (B7) — la logique de clôture
+                // d'auto-confirmation et l'arbitrage admin — la logique de clôture
                 // + ELO vit à un seul endroit.
                 await completeMatchWithElo(tx, id, match.ladderId, winnerSideId, winnerScore, loserScore);
                 const notifs = await notify(tx, bothSidesButMe, 'result_confirmed', {
@@ -1776,7 +1776,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                 return { ok: true, status: 'completed', notifs };
               } else {
                 // DÉSACCORD : vainqueur différent OU même vainqueur mais score différent
-                // (2-0 vs 2-1) -> le match part en litige, on ouvre une dispute et B7
+                // (2-0 vs 2-1) -> le match part en litige, on ouvre une dispute et l'arbitrage
                 // (arbitrage admin / timeout 24 h) prend le relais. Aucun ELO ici.
                 await tx
                   .update(matchesTable)
@@ -1788,7 +1788,7 @@ export const matchesRoutes: FastifyPluginAsync = async (server) => {
                   .returning({ id: disputesTable.id });
                 if (!dispute) return { ok: false, code: 500, error: 'Internal error' };
                 // Deux fan-outs : les joueurs (« litige ouvert ») + TOUS les admins (« un
-                // litige attend ton arbitrage » — c'est ce qui rend B7 push, pas pull).
+                // litige attend ton arbitrage » — c'est ce qui rend l'arbitrage push, pas pull).
                 // Un admin qui serait aussi l'acteur n'est pas notifié (règle : jamais l'acteur).
                 const admins = (await getAdminIds(tx)).filter((u) => u !== me);
                 const notifs = [

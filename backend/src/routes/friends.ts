@@ -53,7 +53,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
           ),
         );
       if (!existing) {
-        // B9 — la notif est INSÉRÉE DANS la transaction métier (atomique avec la
+        // La notif est INSÉRÉE DANS la transaction métier (atomique avec la
         // demande d'ami) ; le push WS se fait APRÈS le commit. Un rollback ne doit
         // jamais notifier un événement qui n'a pas eu lieu.
         const { created, notifs } = await db.transaction(async (tx) => {
@@ -76,7 +76,7 @@ export const friendsRoutes: FastifyPluginAsync = async (server) => {
       else if (existing.status === 'pending' && existing.requesterId === addresseeId) {
         // AUTO-ACCEPT : l'autre m'avait déjà envoyé une demande, la mienne en retour
         // vaut acceptation. C'est donc LUI (le demandeur d'origine) qu'on prévient —
-        // jamais l'acteur, c'est-à-dire moi (règle B9).
+        // jamais l'acteur, c'est-à-dire moi (c'est la règle).
         const { updated, notifs } = await db.transaction(async (tx) => {
           const [updated] = await tx
             .update(friendshipsTable)

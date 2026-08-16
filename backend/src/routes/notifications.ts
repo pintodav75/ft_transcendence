@@ -5,7 +5,7 @@ import { notificationsTable } from '../db/schema.js';
 import { eq, and, lt, or, isNull, desc, sql } from 'drizzle-orm';
 
 /**
- * B9 — lecture/gestion de MES notifications. Trois routes, AUCUNE route de création :
+ * Lecture/gestion de MES notifications. Trois routes, AUCUNE route de création :
  * les notifications sont écrites exclusivement par le système (helper notify() appelé
  * depuis matches/disputes/jobs) → zéro vecteur de spam côté client.
  */

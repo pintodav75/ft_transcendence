@@ -45,7 +45,7 @@ const memberParamsSchema = z.object({ id: z.uuid(), userId: z.uuid() });
 const invitationParamsSchema = z.object({ id: z.uuid(), invitationId: z.uuid() });
 const invitationIdParamSchema = z.object({ invitationId: z.uuid() });
 
-/** Membres + invitations en attente : le roster « réservé » d'une équipe (B-INV). */
+/** Membres + invitations en attente : le roster « réservé » d'une équipe. */
 const MAX_ROSTER = 10;
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -170,7 +170,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
       if (ladder.format === '1v1')
         return reply.code(400).send({ error: 'cannot create a team on a 1v1 ladder' });
       const team = await db.transaction(async (tx) => {
-        // 🔒 B-INV — cette route écrit désormais `team_invitations` (annulation en cascade
+        // 🔒 Cette route écrit désormais `team_invitations` (annulation en cascade
         // plus bas), donc elle rejoint le régime de `lockRoster`. La clé JOUEUR suffit :
         // l'équipe est créée ICI, personne d'autre ne connaît encore son id, il n'y a rien
         // à sérialiser de ce côté. Sans ce verrou, on rouvrirait exactement le cycle de la
@@ -192,7 +192,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
           userId,
           ladderId: created.ladderId,
         });
-        // B-INV — MÊME RÈGLE QU'À L'ACCEPTATION, et pour la même raison : le créateur a
+        // MÊME RÈGLE QU'À L'ACCEPTATION, et pour la même raison : le créateur a
         // désormais une équipe sur ce ladder, les invitations qu'il avait reçues ne
         // pourront plus JAMAIS aboutir (`409 already_in_team`). Les laisser `pending`
         // n'est pas cosmétique : elles restent affichées dans `GET /teams/invitations/me`
@@ -879,7 +879,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
             .returning();
           if (!invitation) throw new Error('invitation insert returned no row');
 
-          // B9 — notif DANS la transaction (atomique avec l'invitation), push APRÈS le
+          // Notif DANS la transaction (atomique avec l'invitation), push APRÈS le
           // commit. Destinataire : le joueur sollicité, jamais le capitaine qui agit.
           const notifs = await notify(tx, [target.id], 'team_invitation_received', {
             invitationId: invitation.id,
@@ -1286,7 +1286,7 @@ export const teamsRoutes: FastifyPluginAsync = async (server) => {
 
         // Cette route sert À LA FOIS le kick (capitaine) et le départ volontaire.
         // On ne notifie `team_member_removed` QUE sur le kick : si le joueur part de
-        // lui-même il est l'acteur, et la règle B9 est « jamais l'acteur ».
+        // lui-même il est l'acteur, et la règle est « jamais l'acteur ».
         const isKick = me !== targetId;
 
         // Deux pseudos, deux rôles, et sur un kick ce n'est PAS la même personne :

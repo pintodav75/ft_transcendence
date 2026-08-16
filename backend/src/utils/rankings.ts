@@ -53,7 +53,7 @@ export async function applyMatchElo(
     return created;
   }
   // ⚠️ Verrous des DEUX compétiteurs, pris dans un ORDRE DÉTERMINISTE (tri des clés) AVANT
-  // toute lecture de `rankings`. Deux matchs distincts d'un même compétiteur (B5d autorise
+  // toute lecture de `rankings`. Deux matchs distincts d'un même compétiteur (la règle autorise
   // les créneaux dos à dos) peuvent se compléter simultanément : sans ces verrous on aurait
   // un double INSERT (violation d'unique → 500), un lost-update sur l'ELO, ou un
   // interblocage. Le tri écarte le deadlock ; le verrou du match (pris par l'appelant) est
@@ -96,7 +96,7 @@ export async function completeMatchWithElo(
   // Score final (manches gagnées, Bo3 : 0/1/2) de chaque camp. **Obligatoires** (pas de
   // défaut) : un futur appelant qui oublie les scores doit avoir une erreur de compilation,
   // pas un `null` silencieux en base. Passer explicitement `null` pour l'arbitrage admin
-  // (B7) : l'admin tranche un vainqueur, pas un score — `match_sides.score` reste alors
+  // l'admin tranche un vainqueur, pas un score — `match_sides.score` reste alors
   // `null` tandis que l'Elo, lui, est bien appliqué.
   winnerScore: number | null,
   loserScore: number | null,

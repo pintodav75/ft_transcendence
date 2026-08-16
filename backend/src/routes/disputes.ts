@@ -628,7 +628,7 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
               .set({ status: 'cancelled' })
               .where(eq(matchesTable.id, dispute.matchId));
           } else {
-            // L'admin désigne un vainqueur -> completed + ELO via le helper partagé (comme B6).
+            // L'admin désigne un vainqueur -> completed + ELO via le helper partagé.
             const wantedIndex = resolution === 'side_0_wins' ? 0 : 1;
             const [winnerSide] = await tx
               .select({ id: matchSidesTable.id })
@@ -641,7 +641,7 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
               );
             if (!winnerSide) return { ok: false, code: 500, error: 'Internal error' };
             // L'admin tranche un vainqueur, PAS un score : `null` littéral et explicite ici,
-            // pas une valeur par défaut cachée dans le helper (B14).
+            // pas une valeur par défaut cachée dans le helper.
             await completeMatchWithElo(tx, dispute.matchId, m.ladderId, winnerSide.id, null, null);
           }
 
@@ -656,7 +656,7 @@ export const disputesRoutes: FastifyPluginAsync = async (server) => {
             })
             .where(eq(disputesTable.id, id));
 
-          // B9 — « la dispute a été tranchée » : les joueurs alignés des DEUX camps.
+          // « la dispute a été tranchée » : les joueurs alignés des DEUX camps.
           // L'acteur (l'admin) est exclu — cas limite : un admin qui arbitrerait son
           // propre match ne se notifie pas lui-même. Insert dans la tx, push après commit.
           const recipients = (await getMatchParticipantIds(tx, dispute.matchId)).filter(

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { notificationsTable } from '../db/schema.js';
 
 /**
- * Schémas de payload par type de notification (B9) — extraits dans un fichier À PART,
+ * Schémas de payload par type de notification — extraits dans un fichier À PART,
  * sans import de `db/index.js` (qui exige `DATABASE_URL` au chargement du module), pour
  * rester un helper PUR testable sans DB ni transaction (comme elo.ts/leaderboard.ts).
  */
@@ -71,7 +71,7 @@ export const notificationPayloadSchemas = {
     byUserId: uuidField,
     byPseudo: z.string(),
   }),
-  // Équipe (B11) — même forme pour les trois : de qui vient l'action (`by*`) et sur quelle
+  // Équipe — même forme pour les trois : de qui vient l'action (`by*`) et sur quelle
   // équipe. `teamName` est un INSTANTANÉ, indispensable pour `team_disbanded` : l'équipe
   // n'existe plus au moment où le destinataire lit sa notif, on ne pourra plus la relire.
   // `ladderId` survit à la dissolution et permet au front de renvoyer vers le ladder.
@@ -96,7 +96,7 @@ export const notificationPayloadSchemas = {
     byUserId: uuidField,
     byPseudo: z.string(),
   }),
-  // Invitations (B-INV) — même forme que les notifs d'équipe, + `invitationId` : le front
+  // Invitations — même forme que les notifs d'équipe, + `invitationId` : le front
   // peut accepter/refuser DEPUIS la notification, sans relister les invitations (exactement
   // le rôle de `friendshipId` sur `friend_request_received`). `by*` = l'AUTRE partie :
   // le capitaine qui invite pour `received`, le joueur qui répond pour les deux réponses.

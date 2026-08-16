@@ -202,7 +202,7 @@ export const teamMembersTable = pgTable(
 
 // ⚠️ `export` obligatoire (piège #8) : un enum non exporté n'est pas vu par drizzle-kit.
 // `cancelled` couvre DEUX cas distincts et c'est volontaire : l'annulation par le capitaine
-// ET l'annulation automatique quand le joueur accepte ailleurs sur le même ladder (B-INV).
+// ET l'annulation automatique quand le joueur accepte ailleurs sur le même ladder.
 // Sans elle, le capitaine lirait « refusée » là où le joueur n'a jamais rien refusé.
 export const teamInvitationStatusEnum = pgEnum('team_invitation_status', [
   'pending',
@@ -211,7 +211,7 @@ export const teamInvitationStatusEnum = pgEnum('team_invitation_status', [
   'cancelled',
 ]);
 
-// B-INV — l'invitation est une table DÉDIÉE, surtout pas une colonne de statut sur
+// L'invitation est une table DÉDIÉE, surtout pas une colonne de statut sur
 // `team_members` : `team_members` est lu à ~40 endroits (matches, disputes, teams) et chacun
 // signifie « X est membre de Y ». Un statut sur cette table rendrait ces 40 lectures fausses
 // par défaut, et en oublier une ne se verrait pas (un joueur jamais accepté deviendrait
@@ -406,7 +406,7 @@ export const rankingsTable = pgTable(
 );
 
 // ⚠️ `export` obligatoire (piège #8) : un enum non exporté n'est pas vu par drizzle-kit
-// → migration cassée. 13 valeurs : les 8 déclencheurs de B9, +2 social (#53), +3 équipe (B11).
+// → migration cassée. 13 valeurs : 8 déclencheurs de match, +2 social, +3 équipe.
 export const notificationTypeEnum = pgEnum('notification_type', [
   'match_accepted',
   'result_submitted',
@@ -420,23 +420,23 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // notifs pour TOUTES les actions, pas seulement le cœur match/dispute).
   'friend_request_received',
   'friend_request_accepted',
-  // Équipe (B11) — `teams.ts` était le seul fichier métier à ne jamais notifier.
+  // Équipe — `teams.ts` était le seul fichier métier à ne jamais notifier.
   // ⚠️ Pas de `team_created` : personne d'autre que le créateur n'est concerné, et la
-  // règle B9 est « jamais l'acteur ». Pas de notif d'édition non plus (trop cosmétique).
-  // ⚠️ `team_member_added` est MORT depuis B-INV (l'ajout forcé n'existe plus, on invite) :
+  // règle est « jamais l'acteur ». Pas de notif d'édition non plus (trop cosmétique).
+  // ⚠️ `team_member_added` est MORT (l'ajout forcé n'existe plus, on invite) :
   // plus personne ne l'émet. La valeur RESTE dans l'enum — retirer une valeur d'enum
   // Postgres est pénible, et des notifications historiques y font encore référence.
   'team_member_added',
   'team_member_removed',
   'team_disbanded',
-  // Invitations (B-INV) : le capitaine sollicite, le joueur répond. On notifie le camp
+  // Invitations : le capitaine sollicite, le joueur répond. On notifie le camp
   // concerné, jamais l'acteur → l'invité pour `received`, le capitaine pour les 2 réponses.
   // Pas de notif à l'annulation par le capitaine (il est l'acteur) ni à l'annulation
   // automatique d'une invitation concurrente (décision produit de la carte).
   'team_invitation_received',
   'team_invitation_accepted',
   'team_invitation_declined',
-  // BX-LEAVE — un joueur quitte (ou est exclu de) l'équipe alors qu'il est ALIGNÉ dans un
+  // Un joueur quitte (ou est exclu de) l'équipe alors qu'il est ALIGNÉ dans un
   // créneau `pending` : le créneau tombe en `cancelled`, et le reste de la lineup + le
   // capitaine doivent l'apprendre autrement que par un 404. ⚠️ Aucune valeur existante ne
   // convenait : `match_ghost_cancelled` raconte l'abandon détecté par le job des 24 h, et

@@ -74,7 +74,7 @@ const teamRosters: Record<string, string[]> = {
   'Team Charlie': ['carol'],
 };
 
-// Les deux équipes qui s'affrontent dans les matchs de démo (B16).
+// Les deux équipes qui s'affrontent dans les matchs de démo.
 const DEMO_HOME = 'Team Alpha'; // side 0 — le camp qui OUVRE les créneaux
 const DEMO_AWAY = 'Team Bravo'; // side 1 — le camp qui ACCEPTE
 
@@ -416,7 +416,7 @@ async function main() {
       });
 
       // (d) EN ATTENTE DE CONFIRMATION — c'est le match qui démontre le bouton
-      //     « Confirmer » de FT-4. C'est le camp AWAY qui a soumis : le camp HOME (alice,
+      //     « Confirmer ». C'est le camp AWAY qui a soumis : le camp HOME (alice,
       //     capitaine de Team Alpha) est donc celui qui a quelque chose à confirmer, et
       //     confirmer = renvoyer le MIROIR de cette soumission (winnerSideId identique,
       //     scoreSelf/scoreOpponent croisés). Un score différent partirait en litige.
