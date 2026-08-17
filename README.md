@@ -493,9 +493,22 @@ open one pass a boolean rather than the condition.
 
 _What I built:_
 
+I was responsible for the social and real-time layer: the social rail, friends, requests,
+blocks, presence, chat and notifications. These features share a single native WebSocket per
+frontend session.
+
 _What blocked me:_
 
+The main difficulty was keeping HTTP and WebSocket data consistent, especially across
+reconnections. I also had to keep one socket alive across navigation and avoid recreating it
+whenever the access token was renewed.
+
 _How I got past it:_
+
+I centralized the connection in a real-time client mounted by the authenticated layout.
+Incoming events are validated with Zod and distributed to subscribed features. PostgreSQL
+remains the source of truth: after a disconnection, the frontend reloads data over HTTP and
+merges it with live events, deduplicating entries by their server-generated IDs.
 
 ### William — `wiwu` — Developer
 
