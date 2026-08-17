@@ -104,9 +104,8 @@ a diff — it writes no code. The human review is the one that decides; the AI p
 what a tired pair of eyes misses at the end of a long day.
 
 **Communication.** The team worked in the same room whenever possible, with Discord covering
-everything else. Decisions that outlived a conversation were written down in the repository
-(`CLAUDE.md` and `docs/`), so that a decision taken in week two could still be explained in week
-eight.
+everything else. Decisions that outlived a conversation were written down, so that a decision
+taken in week two could still be explained in week eight.
 
 ---
 
@@ -608,10 +607,6 @@ Stated plainly, because they are deliberate rather than accidental:
 - RFC 6238, TOTP — https://datatracker.ietf.org/doc/html/rfc6238
 - OAuth 2.0 — https://oauth.net/2/
 - Conventional Commits — https://www.conventionalcommits.org/
-
-**Internal documentation.** Design decisions, per-domain details and the traps encountered along
-the way are kept in `docs/` (`schema.md`, `backend.md`, `frontend.md`, `infra.md`, `modules.md`,
-`stack.md`, `pieges.md`, `journal.md`).
 
 ### Use of AI
 
