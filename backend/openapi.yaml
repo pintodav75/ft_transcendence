@@ -16,10 +16,10 @@ servers:
   # Les chemins ci-dessous sont relatifs à cette base — /auth/login s'appelle donc
   # https://localhost:5173/api/auth/login côté navigateur.
   - url: https://localhost:5173/api
-    description: App proxifiée (origine unique navigateur, I4)
-  # Backend en direct : diagnostic, tests e2e Python et curl uniquement (hors navigateur app).
+    description: App proxifiée (origine unique navigateur)
+  # Backend en direct : diagnostic et curl uniquement (hors navigateur app).
   - url: https://localhost:3000
-    description: Backend direct (diagnostic / tests, HTTPS certificat auto-signé)
+    description: Backend direct (diagnostic, HTTPS certificat auto-signé)
 
 tags:
   - name: Auth
